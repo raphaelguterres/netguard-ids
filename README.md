@@ -14,7 +14,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://python.org)
 [![Architecture](https://img.shields.io/badge/Architecture-Event--Driven-green)]()
 [![MITRE ATT&CK](https://img.shields.io/badge/MITRE-ATT%26CK%20Aligned-red)](https://attack.mitre.org)
-[![Tests](https://img.shields.io/badge/Tests-102%20passing-brightgreen)]()
+[![Tests](https://github.com/raphaelguterres/netguard-ids/actions/workflows/tests.yml/badge.svg)](https://github.com/raphaelguterres/netguard-ids/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey)]()
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](DOCKER.md)
 
