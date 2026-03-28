@@ -30,10 +30,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copia requirements primeiro (cache layer)
-COPY requirements.txt .
+COPY requirements.txt requirements.docker.txt ./
 
-# Instala dependências Python
-RUN pip install --no-cache-dir -r requirements.txt
+# Instala dependências Python (versão Docker — sem pywebview/pyinstaller)
+RUN pip install --no-cache-dir -r requirements.docker.txt
 
 # Copia todo o projeto
 COPY . .

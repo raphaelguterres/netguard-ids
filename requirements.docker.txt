@@ -1,0 +1,6 @@
+# NetGuard IDS — dependências para Docker (Linux, sem display)
+flask>=3.0.0
+flask-cors>=4.0.0
+psutil>=5.9.0
+scapy>=2.5.0
+pyyaml>=6.0
