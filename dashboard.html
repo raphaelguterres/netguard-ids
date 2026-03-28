@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NetGuard IDS v3</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet">
 <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
@@ -66,7 +67,7 @@ html,body{
 
 
 /* ── APP SHELL ──────────────────────────────────────────────────── */
-#app{display:grid;grid-template-rows:52px 62px 1fr;height:100vh;overflow:hidden}
+#app{display:grid;grid-template-rows:52px 62px 1fr;height:100vh;overflow:hidden;position:relative}
 
 /* ── HEADER ─────────────────────────────────────────────────────── */
 #hdr{
@@ -149,7 +150,7 @@ html,body{
 
 /* ── BODY ────────────────────────────────────────────────────────── */
 #body{display:flex;overflow:hidden;position:relative}
-.page{display:none;flex:1;overflow:hidden;visibility:hidden;pointer-events:none}
+.page{display:none;flex:1;overflow:hidden;visibility:hidden;pointer-events:none;-webkit-overflow-scrolling:touch}
 .page.on{display:flex;visibility:visible;pointer-events:auto}
 
 /* ── PANEL PRIMITIVES ───────────────────────────────────────────── */
@@ -836,6 +837,11 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 .block-score-ring{width:38px;height:38px;border-radius:50%;border:2px solid var(--red);display:flex;align-items:center;justify-content:center;font-family:var(--head);font-size:10px;font-weight:900;color:var(--red);flex-shrink:0}
 .block-history-row{display:flex;gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid #0a1428;font-family:var(--mono);font-size:9px}
 
+/* ── TOUCH & SCROLL ─────────────────────────────────────────────── */
+.page.on{-webkit-overflow-scrolling:touch}
+button,a,[onclick]{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+input,select,textarea{font-size:16px!important} /* Prevent iOS zoom on focus */
+
 /* ── SCROLLBARS ──────────────────────────────────────────────────── */
 ::-webkit-scrollbar{width:2px;height:2px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -886,10 +892,12 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 
 /* ── Mobile (< 768px) ─────────────────────── */
 @media (max-width:768px){
-  /* App layout: header + content only (tabs become drawer) */
+  /* App layout: header + content (tab bar becomes mobile drawer) */
   #app{
     grid-template-rows:52px 1fr;
   }
+  /* Tab bar row is now 0px — drawer overlays */
+  .tabs-row-spacer{display:none}
 
   /* Header */
   #hdr{padding:0 12px}
@@ -899,16 +907,18 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 
   /* Tab drawer — hidden by default, slides in from top */
   .tabs{
-    display:none;
+    display:flex;
     position:fixed;top:52px;left:0;right:0;
     background:#060e20;
     border-bottom:2px solid var(--acc);
     flex-direction:column;
     z-index:1000;
-    max-height:60vh;overflow-y:auto;
+    max-height:0;
+    overflow:hidden;
     box-shadow:0 8px 24px rgba(0,0,0,.6);
+    transition:max-height .25s ease;
   }
-  .tabs.mobile-open{display:flex}
+  .tabs.mobile-open{max-height:70vh;overflow-y:auto}
   .tab{
     height:40px;padding:0 16px;
     border-bottom:1px solid #0a1428;
@@ -935,8 +945,9 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
   .payload-grid{grid-template-columns:1fr!important}
 
   /* Connection table */
-  .crow{grid-template-columns:1fr auto;gap:6px;padding:5px 10px 5px 10px}
+  .crow{grid-template-columns:1fr auto;gap:6px;padding:5px 10px}
   .crow-port,.crow-pid{display:none}
+  #conn-list{overflow-x:auto;-webkit-overflow-scrolling:touch}
 
   /* Panels padding */
   .page > *{padding-left:10px!important;padding-right:10px!important}
@@ -1805,6 +1816,13 @@ const PRIV=["192.168.","10.","172.16.","172.17.","172.18.","127.","0.0.0.0","::1
 
 // ── Nav ───────────────────────────────────────────────────────────
 function goPage(name,el){
+  // Mobile menu close
+  var _mt=document.getElementById('main-tabs');
+  var _mb=document.getElementById('mobile-menu-btn');
+  if(_mt&&_mt.classList.contains('mobile-open')){
+    _mt.classList.remove('mobile-open');
+    if(_mb)_mb.textContent='☰';
+  }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
   const pg=document.getElementById('p-'+name);
@@ -2111,7 +2129,7 @@ function analyzeDeviceIp(ip){
   // Switch to analyze tab and fill IP
   const inp = document.getElementById('az-ip');
   if(inp){ inp.value = ip; }
-  goPage('analisar', document.querySelector('.tab[onclick*="analisar"]'));
+  goPage('analyze', document.querySelector('.tab[onclick*="analyze"]'));
   toast('IP ' + ip + ' carregado na análise', 'ok');
 }
 
@@ -3150,56 +3168,13 @@ async function loadSoc(){
   await Promise.all([loadSocStats(), loadSocEvents()]);
 }
 
-// ── Mobile Menu ──────────────────────────────────────────────────
+// ── Mobile Menu ────────────────────────────────────────────────
 function toggleMobileMenu(){
-  const tabs = document.getElementById('main-tabs');
-  const btn  = document.getElementById('mobile-menu-btn');
+  var tabs=document.getElementById('main-tabs');
+  var btn=document.getElementById('mobile-menu-btn');
   if(!tabs) return;
   tabs.classList.toggle('mobile-open');
-  btn.textContent = tabs.classList.contains('mobile-open') ? '✕' : '☰';
-}
-
-// Close mobile menu when a tab is selected
-const _origGoPage = window.goPage;
-function goPage(name, el){
-  const tabs = document.getElementById('main-tabs');
-  const btn  = document.getElementById('mobile-menu-btn');
-  if(tabs && tabs.classList.contains('mobile-open')){
-    tabs.classList.remove('mobile-open');
-    if(btn) btn.textContent = '☰';
-  }
-  // Call original goPage
-  document.querySelectorAll('.page').forEach(p=>{
-    p.classList.remove('on');
-    p.style.display='none';
-    p.style.visibility='hidden';
-    p.style.pointerEvents='none';
-  });
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
-  const page = document.getElementById('p-'+name);
-  if(page){
-    page.classList.add('on');
-    page.style.display='flex';
-    page.style.visibility='visible';
-    page.style.pointerEvents='auto';
-  }
-  if(el) el.classList.add('on');
-  _currentPage = name;
-  if(name==='overview')      loadOverview();
-  if(name==='connections')   loadConnections();
-  if(name==='live')          loadLive();
-  if(name==='geomap')        loadGeoMap();
-  if(name==='system')        loadSystem();
-  if(name==='owasp')         loadOWASP();
-  if(name==='analyze')       {}
-  if(name==='stats')         loadStats();
-  if(name==='killchain')     loadKillChain();
-  if(name==='fail2ban')      loadFail2Ban();
-  if(name==='soc')           loadSOC();
-  if(name==='corr')          loadCorrelation();
-  if(name==='risk')          loadRisk();
-  if(name==='ml')            loadML();
-  if(name==='block')         loadAutoBlock();
+  if(btn) btn.textContent=tabs.classList.contains('mobile-open')?'✕':'☰';
 }
 
 // ── Auto Block ───────────────────────────────────────────────────
