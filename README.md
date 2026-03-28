@@ -16,8 +16,24 @@
 [![MITRE ATT&CK](https://img.shields.io/badge/MITRE-ATT%26CK%20Aligned-red)](https://attack.mitre.org)
 [![Tests](https://img.shields.io/badge/Tests-102%20passing-brightgreen)]()
 [![License](https://img.shields.io/badge/License-MIT-lightgrey)]()
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](DOCKER.md)
 
 </div>
+
+---
+
+## Quick Start (Docker)
+
+```bash
+git clone https://github.com/raphaelguterres/netguard-ids.git
+cd netguard-ids
+docker build -t netguard-ids .
+docker run -d --name netguard --network host \
+  --cap-add NET_ADMIN --cap-add NET_RAW \
+  -v netguard_data:/data -p 5000:5000 netguard-ids
+```
+
+Dashboard: **http://localhost:5000** · [Full Docker Guide](DOCKER.md)
 
 ---
 

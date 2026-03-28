@@ -1287,8 +1287,10 @@ if SOC_IMPORT_OK:
             logger.warning("SOC ENGINE | rule=%s | sev=%s | %s",
                            event.rule_id, event.severity, event.rule_name)
 
+        _db_path = os.environ.get("IDS_DB_PATH",
+                      str(pathlib.Path(__file__).parent / "netguard_soc.db"))
         detection_engine = SOCEngine(
-            db_path        = str(pathlib.Path(__file__).parent / "netguard_soc.db"),
+            db_path        = _db_path,
             alert_callback = _soc_alert_live,
             host_id        = REAL_HOSTNAME,
         )
@@ -1757,6 +1759,7 @@ def iniciar_monitoramento():
 iniciar_monitoramento()
 
 if __name__=="__main__":
+    host  = os.environ.get("IDS_HOST","127.0.0.1")
     port  = int(os.environ.get("IDS_PORT",5000))
     debug = os.environ.get("IDS_DEBUG","false").lower()=="true"
-    app.run(host="0.0.0.0",port=port,debug=debug,use_reloader=False)
+    app.run(host=host,port=port,debug=debug,use_reloader=False)

@@ -1,0 +1,50 @@
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Database (vai em volume separado)
+*.db
+*.db-journal
+*.sqlite
+
+# Logs
+*.log
+
+# Build artifacts
+build/
+dist/
+*.spec
+*.exe
+
+# Browser profile (pywebview — não usado no Docker)
+.netguard_browser_profile/
+
+# Tests (opcional — remova se quiser rodar testes no container)
+# tests/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Docs extras
+ANALISE_ATAQUES.md
+GUIA_INSTALACAO.md
+INDEX.md
+MANUAL_TECNICO.md
