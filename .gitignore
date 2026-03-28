@@ -1,0 +1,33 @@
+﻿# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+*.egg-info/
+
+# Database
+*.db
+*.db-journal
+*.sqlite
+
+# Logs
+*.log
+.pytest_cache/
+.coverage
+
+# Build / distribuição
+build/
+dist/
+*.spec
+*.exe
+
+# Browser profile (pywebview)
+.netguard_browser_profile/
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
