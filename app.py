@@ -775,25 +775,27 @@ def loop_monitor(intervalo=30):
                     )
                     if events:
                         logger.info("SOC | %d eventos gerados no ciclo", len(events))
-                        # Feed ML baseline
-                        if ML_AVAILABLE and _ml_baseline:
-                            try:
-                                ml_alert = _ml_baseline.add_sample({
-                                    "processes":   procs_snapshot,
-                                    "connections": conns_snapshot,
-                                    "ports":       ports_snapshot,
-                                })
-                                if ml_alert:
-                                    log_ao_vivo({
-                                        "type":   "ml_anomaly",
-                                        "sev":    ml_alert["severity"].lower(),
-                                        "threat": ml_alert["rule_name"],
-                                        "ip":     ml_alert["host_id"],
-                                        "msg":    ml_alert["description"][:80],
-                                    })
-                                    logger.warning("ML ANOMALY | %s", ml_alert["description"][:80])
-                            except Exception: pass
 
+                    # Feed ML baseline EVERY cycle (not just when events fire)
+                    if ML_AVAILABLE and _ml_baseline:
+                        try:
+                            ml_alert = _ml_baseline.add_sample({
+                                "processes":   procs_snapshot,
+                                "connections": conns_snapshot,
+                                "ports":       ports_snapshot,
+                            })
+                            if ml_alert:
+                                log_ao_vivo({
+                                    "type":   "ml_anomaly",
+                                    "sev":    ml_alert["severity"].lower(),
+                                    "threat": ml_alert["rule_name"],
+                                    "ip":     ml_alert["host_id"],
+                                    "msg":    ml_alert["description"][:80],
+                                })
+                                logger.warning("ML ANOMALY | %s", ml_alert["description"][:80])
+                        except Exception: pass
+
+                    if events:
                         # Feed correlation engine
                         if CORR_AVAILABLE and _corr_engine:
                             try:
