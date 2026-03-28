@@ -30,6 +30,19 @@ except Exception as _se:
 detection_engine = None
 DE_AVAILABLE = False
 
+# Auth + HTTPS
+try:
+    from auth import auth, AUTH_ENABLED, get_ssl_context, print_startup_info, HTTPS_PORT
+    AUTH_MODULE_OK = True
+except Exception as _auth_err:
+    # Fallback: auth decorator que não faz nada
+    def auth(f): return f
+    AUTH_ENABLED   = False
+    AUTH_MODULE_OK = False
+    def get_ssl_context(): return None
+    def print_startup_info(): pass
+    print(f"[WARN] Auth module: {_auth_err}")
+
 # Correlation Engine
 try:
     from engine.correlation_engine import get_correlation_engine
@@ -55,6 +68,17 @@ except Exception as _ce:
     CORR_AVAILABLE = False
     print(f"[WARN] Correlation Engine: {_ce}")
 
+# ML Baseline
+try:
+    from engine.ml_baseline import MLBaseline
+    _ml_baseline = None
+    ML_AVAILABLE = True
+except Exception as _ml_err:
+    MLBaseline   = None
+    _ml_baseline = None
+    ML_AVAILABLE = False
+    print(f"[WARN] ML Baseline: {_ml_err}")
+
 # Risk Engine
 try:
     from engine.risk_engine import risk_engine
@@ -63,6 +87,17 @@ except Exception as _re:
     risk_engine = None
     RISK_AVAILABLE = False
     print(f"[WARN] Risk Engine: {_re}")
+
+# VirusTotal
+try:
+    from engine.virustotal import VirusTotalClient
+    _vt_client = VirusTotalClient()
+    VT_AVAILABLE = True
+except Exception as _vt_err:
+    VirusTotalClient = None
+    _vt_client       = None
+    VT_AVAILABLE     = False
+    print(f"[WARN] VirusTotal: {_vt_err}")
 
 # Fail2Ban Engine
 try:
@@ -740,6 +775,25 @@ def loop_monitor(intervalo=30):
                     )
                     if events:
                         logger.info("SOC | %d eventos gerados no ciclo", len(events))
+                        # Feed ML baseline
+                        if ML_AVAILABLE and _ml_baseline:
+                            try:
+                                ml_alert = _ml_baseline.add_sample({
+                                    "processes":   procs_snapshot,
+                                    "connections": conns_snapshot,
+                                    "ports":       ports_snapshot,
+                                })
+                                if ml_alert:
+                                    log_ao_vivo({
+                                        "type":   "ml_anomaly",
+                                        "sev":    ml_alert["severity"].lower(),
+                                        "threat": ml_alert["rule_name"],
+                                        "ip":     ml_alert["host_id"],
+                                        "msg":    ml_alert["description"][:80],
+                                    })
+                                    logger.warning("ML ANOMALY | %s", ml_alert["description"][:80])
+                            except Exception: pass
+
                         # Feed correlation engine
                         if CORR_AVAILABLE and _corr_engine:
                             try:
@@ -1301,6 +1355,18 @@ if SOC_IMPORT_OK:
         except Exception: pass
         DE_AVAILABLE = True
         logger.info("SOC Engine OK | 12 regras ativas")
+        # Init ML baseline
+        if ML_AVAILABLE:
+            try:
+                _ml_baseline = MLBaseline(
+                    host_id     = detection_engine.host_id,
+                    min_samples = 30,
+                    contamination = 0.05,
+                )
+                logger.info("ML Baseline iniciado | min_samples=30")
+            except Exception as _ml_init_err:
+                logger.warning("ML Baseline init: %s", _ml_init_err)
+
         # Init correlation engine
         if CORR_AVAILABLE:
             try:
@@ -1372,6 +1438,42 @@ def sigma_analyze():
 # ── Fail2Ban API ──────────────────────────────────────────────────
 
 # ── Detection Engine API ──────────────────────────────────────────
+
+# ── ML Baseline API ───────────────────────────────────────────────
+
+@app.route("/api/ml/stats")
+@auth
+def ml_stats():
+    if not ML_AVAILABLE or not _ml_baseline:
+        return jsonify({"available": False, "reason": "scikit-learn não instalado"}), 200
+    return jsonify(_ml_baseline.stats())
+
+@app.route("/api/ml/reset", methods=["POST"])
+@auth
+def ml_reset():
+    if not ML_AVAILABLE or not _ml_baseline:
+        return jsonify({"error": "indisponível"}), 503
+    _ml_baseline.reset()
+    return jsonify({"status": "reset", "message": "Baseline ML reiniciado"})
+
+# ── VirusTotal API ─────────────────────────────────────────────────
+
+@app.route("/api/vt/lookup/<file_hash>")
+@auth
+def vt_lookup(file_hash):
+    if not VT_AVAILABLE or not _vt_client:
+        return jsonify({"error": "indisponível"}), 503
+    result = _vt_client.lookup_hash(file_hash)
+    if not result:
+        return jsonify({"error": "lookup falhou"}), 503
+    return jsonify(result)
+
+@app.route("/api/vt/stats")
+@auth
+def vt_stats():
+    if not VT_AVAILABLE or not _vt_client:
+        return jsonify({"available": False}), 200
+    return jsonify(_vt_client.stats())
 
 # ── Correlation Engine API ────────────────────────────────────────
 
@@ -1759,7 +1861,13 @@ def iniciar_monitoramento():
 iniciar_monitoramento()
 
 if __name__=="__main__":
-    host  = os.environ.get("IDS_HOST","127.0.0.1")
-    port  = int(os.environ.get("IDS_PORT",5000))
-    debug = os.environ.get("IDS_DEBUG","false").lower()=="true"
-    app.run(host=host,port=port,debug=debug,use_reloader=False)
+    host     = os.environ.get("IDS_HOST","127.0.0.1")
+    port     = int(os.environ.get("IDS_PORT",5000))
+    debug    = os.environ.get("IDS_DEBUG","false").lower()=="true"
+    ssl_ctx  = get_ssl_context()
+    print_startup_info()
+    if ssl_ctx:
+        app.run(host=host, port=HTTPS_PORT, debug=debug,
+                use_reloader=False, ssl_context=ssl_ctx)
+    else:
+        app.run(host=host, port=port, debug=debug, use_reloader=False)

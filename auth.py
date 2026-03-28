@@ -1,0 +1,220 @@
+"""
+NetGuard — Autenticação e HTTPS
+Token-based auth + certificado self-signed para HTTPS local.
+
+Uso:
+  - Token: gerado automaticamente no primeiro run, salvo em .netguard_token
+  - HTTPS: certificado self-signed gerado automaticamente em netguard.pem
+
+Acesso após ativar:
+  https://127.0.0.1:5443  (HTTPS)
+  http://127.0.0.1:5000   (HTTP — redireciona para HTTPS se ativado)
+"""
+
+import os
+import secrets
+import hashlib
+import logging
+import pathlib
+from functools import wraps
+from datetime import datetime, timezone
+from flask import request, jsonify, redirect
+
+logger = logging.getLogger("netguard.auth")
+
+# ── Configuração ──────────────────────────────────────────────────
+TOKEN_FILE    = pathlib.Path(__file__).parent / ".netguard_token"
+CERT_FILE     = pathlib.Path(__file__).parent / "netguard.pem"
+KEY_FILE      = pathlib.Path(__file__).parent / "netguard.key"
+AUTH_ENABLED  = os.environ.get("IDS_AUTH", "false").lower() == "true"
+HTTPS_ENABLED = os.environ.get("IDS_HTTPS", "false").lower() == "true"
+HTTPS_PORT    = int(os.environ.get("IDS_HTTPS_PORT", 5443))
+
+
+# ── Token management ──────────────────────────────────────────────
+
+def get_or_create_token() -> str:
+    """Retorna token existente ou gera um novo."""
+    if TOKEN_FILE.exists():
+        token = TOKEN_FILE.read_text().strip()
+        if len(token) >= 32:
+            return token
+
+    token = secrets.token_urlsafe(32)
+    TOKEN_FILE.write_text(token)
+    TOKEN_FILE.chmod(0o600)  # Somente o dono pode ler
+    logger.info("Token gerado e salvo em %s", TOKEN_FILE)
+    return token
+
+
+def verify_token(token: str) -> bool:
+    """Verifica se o token é válido usando comparação segura."""
+    expected = get_or_create_token()
+    return secrets.compare_digest(token.encode(), expected.encode())
+
+
+# ── Decorador de autenticação ─────────────────────────────────────
+
+_valid_token = None  # cache em memória
+
+def auth(f):
+    """
+    Decorador que protege uma rota Flask com token.
+
+    Aceita token em:
+      - Header:      Authorization: Bearer <token>
+      - Query param: ?token=<token>
+      - Cookie:      netguard_token=<token>
+
+    Se AUTH_ENABLED=false, passa direto (default).
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not AUTH_ENABLED:
+            return f(*args, **kwargs)
+
+        global _valid_token
+        if _valid_token is None:
+            _valid_token = get_or_create_token()
+
+        # Extrai token de diferentes fontes
+        token = None
+
+        # 1. Authorization header
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+
+        # 2. Query param
+        if not token:
+            token = request.args.get("token", "")
+
+        # 3. Cookie
+        if not token:
+            token = request.cookies.get("netguard_token", "")
+
+        if not token or not secrets.compare_digest(
+            token.encode(), _valid_token.encode()
+        ):
+            logger.warning("Auth falhou | ip=%s | path=%s",
+                           request.remote_addr, request.path)
+            return jsonify({
+                "error": "Unauthorized",
+                "message": "Token inválido ou ausente. "
+                           "Consulte .netguard_token para o token de acesso.",
+            }), 401
+
+        return f(*args, **kwargs)
+    return decorated
+
+
+# ── HTTPS / certificado self-signed ──────────────────────────────
+
+def generate_self_signed_cert() -> tuple:
+    """
+    Gera certificado self-signed para HTTPS local.
+    Retorna (cert_path, key_path) ou (None, None) se cryptography não instalado.
+    """
+    if CERT_FILE.exists() and KEY_FILE.exists():
+        logger.debug("Certificado HTTPS existente encontrado")
+        return str(CERT_FILE), str(KEY_FILE)
+
+    try:
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        import datetime as dt
+        import ipaddress
+
+        logger.info("Gerando certificado self-signed para HTTPS...")
+
+        # Gera chave privada RSA 2048
+        key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+
+        # Cria certificado
+        subject = issuer = x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, "NetGuard IDS"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "NetGuard"),
+        ])
+
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(dt.datetime.now(dt.timezone.utc))
+            .not_valid_after(dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=365))
+            .add_extension(
+                x509.SubjectAlternativeName([
+                    x509.DNSName("localhost"),
+                    x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                ]),
+                critical=False,
+            )
+            .sign(key, hashes.SHA256())
+        )
+
+        # Salva arquivos
+        CERT_FILE.write_bytes(
+            cert.public_bytes(serialization.Encoding.PEM)
+        )
+        KEY_FILE.write_bytes(
+            key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.TraditionalOpenSSL,
+                serialization.NoEncryption(),
+            )
+        )
+        KEY_FILE.chmod(0o600)
+
+        logger.info("Certificado HTTPS gerado: %s", CERT_FILE)
+        return str(CERT_FILE), str(KEY_FILE)
+
+    except ImportError:
+        logger.warning("HTTPS: instale 'cryptography' para habilitar: "
+                       "pip install cryptography")
+        return None, None
+    except Exception as e:
+        logger.error("Erro ao gerar certificado: %s", e)
+        return None, None
+
+
+def get_ssl_context():
+    """Retorna ssl_context para Flask se HTTPS habilitado."""
+    if not HTTPS_ENABLED:
+        return None
+
+    cert, key = generate_self_signed_cert()
+    if cert and key:
+        import ssl
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(cert, key)
+        logger.info("HTTPS ativado na porta %d", HTTPS_PORT)
+        return ctx
+
+    return None
+
+
+def print_startup_info():
+    """Imprime informações de acesso no startup."""
+    token = get_or_create_token() if AUTH_ENABLED else None
+    https = HTTPS_ENABLED and CERT_FILE.exists()
+
+    print("\n" + "─" * 50)
+    if https:
+        print(f"  🔒 Dashboard: https://127.0.0.1:{HTTPS_PORT}")
+    else:
+        print(f"  🌐 Dashboard: http://127.0.0.1:5000")
+
+    if AUTH_ENABLED and token:
+        print(f"  🔑 Token: {token}")
+        print(f"  📋 Salvo em: {TOKEN_FILE}")
+    else:
+        print(f"  ⚠️  Auth desativada — qualquer pessoa na rede pode acessar")
+        print(f"     Para ativar: $env:IDS_AUTH='true'")
+    print("─" * 50 + "\n")

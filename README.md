@@ -334,12 +334,16 @@ engine.registry.register(rule_detect_mimikatz, tags=["process", "credential"])
 
 ## Roadmap
 
+- [x] Docker support
+- [x] GitHub Actions CI
+- [x] Token authentication (`IDS_AUTH=true`)
+- [x] HTTPS self-signed (`IDS_HTTPS=true`)
+- [x] ML anomaly detection (Isolation Forest)
+- [x] VirusTotal process hash lookup
 - [ ] Telegram alerts for HIGH/CRITICAL events
 - [ ] Daily PDF report (automated at midnight)
-- [ ] Docker support (`docker-compose up`)
 - [ ] Distributed agents (multi-machine monitoring)
 - [ ] Automatic IP blocking by risk score threshold
-- [ ] VirusTotal API integration
 
 ---
 
