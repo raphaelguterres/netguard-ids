@@ -840,6 +840,146 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 ::-webkit-scrollbar{width:2px;height:2px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--b2);border-radius:1px}
+
+/* ══════════════════════════════════════════════════════════════
+   RESPONSIVE — Mobile & Tablet Support
+   Breakpoints:
+     < 768px  → mobile  (single column, hamburger menu)
+     768-1024 → tablet  (condensed tabs, smaller fonts)
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Mobile menu button (hidden on desktop) ── */
+#mobile-menu-btn{
+  display:none;
+  background:none;border:none;cursor:pointer;
+  padding:6px;color:var(--acc);font-size:18px;
+  flex-shrink:0;
+}
+
+/* ── Tablet (768px – 1024px) ───────────────── */
+@media (max-width:1024px){
+  /* Tab bar scrolls horizontally */
+  .tabs{
+    overflow-x:auto;overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{padding:0 10px;font-size:7px}
+
+  /* Header condensed */
+  .logo-ver{display:none}
+  #hdr-stats{gap:12px}
+  .hdr-stat-n{font-size:13px}
+
+  /* Grids: 2 cols max on tablet */
+  #krow{grid-template-columns:repeat(4,1fr)!important}
+  #f2b-stats{grid-template-columns:repeat(3,1fr)!important}
+  #soc-stats-row{grid-template-columns:repeat(3,1fr)!important}
+  .ml-stat-grid{grid-template-columns:repeat(2,1fr)!important}
+  .block-stat-row{grid-template-columns:repeat(2,1fr)!important}
+  .ml-stat-grid{grid-template-columns:repeat(2,1fr)!important}
+
+  /* System page */
+  .sys-grid{grid-template-columns:1fr!important}
+}
+
+/* ── Mobile (< 768px) ─────────────────────── */
+@media (max-width:768px){
+  /* App layout: header + content only (tabs become drawer) */
+  #app{
+    grid-template-rows:52px 1fr;
+  }
+
+  /* Header */
+  #hdr{padding:0 12px}
+  .logo-ver{display:none}
+  #hdr-stats{display:none}
+  #mobile-menu-btn{display:flex;align-items:center}
+
+  /* Tab drawer — hidden by default, slides in from top */
+  .tabs{
+    display:none;
+    position:fixed;top:52px;left:0;right:0;
+    background:#060e20;
+    border-bottom:2px solid var(--acc);
+    flex-direction:column;
+    z-index:1000;
+    max-height:60vh;overflow-y:auto;
+    box-shadow:0 8px 24px rgba(0,0,0,.6);
+  }
+  .tabs.mobile-open{display:flex}
+  .tab{
+    height:40px;padding:0 16px;
+    border-bottom:1px solid #0a1428;
+    border-left:none;
+    font-size:9px;letter-spacing:.08em;
+  }
+  .tab.on{
+    border-left:3px solid var(--acc);
+    border-bottom:1px solid #0a1428;
+  }
+
+  /* Pages fill full height */
+  .page{height:calc(100vh - 52px)}
+
+  /* All grids → 1 column */
+  #krow{grid-template-columns:repeat(2,1fr)!important}
+  #f2b-stats{grid-template-columns:repeat(2,1fr)!important}
+  #soc-stats-row{grid-template-columns:repeat(2,1fr)!important}
+  #risk-summary-row{grid-template-columns:1fr!important}
+  .ml-stat-grid{grid-template-columns:repeat(2,1fr)!important}
+  .block-stat-row{grid-template-columns:repeat(2,1fr)!important}
+  .sys-grid{grid-template-columns:1fr!important}
+  .owasp-stat-grid{grid-template-columns:repeat(2,1fr)!important}
+  .payload-grid{grid-template-columns:1fr!important}
+
+  /* Connection table */
+  .crow{grid-template-columns:1fr auto;gap:6px;padding:5px 10px 5px 10px}
+  .crow-port,.crow-pid{display:none}
+
+  /* Panels padding */
+  .page > *{padding-left:10px!important;padding-right:10px!important}
+
+  /* Live graph page */
+  #p-live{flex-direction:column}
+
+  /* Text adjustments */
+  .pghdr{font-size:9px!important}
+  .panel-title{font-size:9px!important}
+
+  /* Overview page top stats */
+  #p-overview > .pn-row:first-child{flex-direction:column}
+
+  /* ML and AutoBlock header rows */
+  .ml-status-card{flex-wrap:wrap}
+  .block-header-row{flex-wrap:wrap;gap:8px}
+  .block-threshold-wrap{font-size:8px}
+
+  /* Tables overflow scroll */
+  table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+  /* Geo map */
+  #geo-map-container{height:220px!important}
+
+  /* Kill chain */
+  .kc-inc-card{padding:8px 10px}
+
+  /* Risk score */
+  #risk-host-list{font-size:9px}
+
+  /* Scrollbar visible on mobile for content areas */
+  .page.on{overflow-y:auto}
+}
+
+/* ── Small mobile (< 480px) ─────────────────── */
+@media (max-width:480px){
+  #krow{grid-template-columns:1fr 1fr!important}
+  .logo-name{font-size:11px}
+  .tab{font-size:8px}
+  .hdr-badge{display:none}
+}
+
 </style>
 </head>
 <body>
@@ -868,7 +1008,11 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
     </div>
   </div>
 
-  <div class="tabs">
+  <button id="mobile-menu-btn" onclick="toggleMobileMenu()" aria-label="Menu">
+    ☰
+  </button>
+
+  <div class="tabs" id="main-tabs">
     <div class="tab on" onclick="goPage('overview',this)"><div class="tab-dot"></div>Visão Geral</div>
     <div class="tab" onclick="goPage('connections',this)"><div class="tab-dot"></div>Conexões</div>
     <div class="tab" onclick="goPage('live',this)"><div class="tab-dot"></div>⬡ Ao Vivo</div>
@@ -3004,6 +3148,58 @@ function showSocDetail(idx){
 
 async function loadSoc(){
   await Promise.all([loadSocStats(), loadSocEvents()]);
+}
+
+// ── Mobile Menu ──────────────────────────────────────────────────
+function toggleMobileMenu(){
+  const tabs = document.getElementById('main-tabs');
+  const btn  = document.getElementById('mobile-menu-btn');
+  if(!tabs) return;
+  tabs.classList.toggle('mobile-open');
+  btn.textContent = tabs.classList.contains('mobile-open') ? '✕' : '☰';
+}
+
+// Close mobile menu when a tab is selected
+const _origGoPage = window.goPage;
+function goPage(name, el){
+  const tabs = document.getElementById('main-tabs');
+  const btn  = document.getElementById('mobile-menu-btn');
+  if(tabs && tabs.classList.contains('mobile-open')){
+    tabs.classList.remove('mobile-open');
+    if(btn) btn.textContent = '☰';
+  }
+  // Call original goPage
+  document.querySelectorAll('.page').forEach(p=>{
+    p.classList.remove('on');
+    p.style.display='none';
+    p.style.visibility='hidden';
+    p.style.pointerEvents='none';
+  });
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  const page = document.getElementById('p-'+name);
+  if(page){
+    page.classList.add('on');
+    page.style.display='flex';
+    page.style.visibility='visible';
+    page.style.pointerEvents='auto';
+  }
+  if(el) el.classList.add('on');
+  _currentPage = name;
+  if(name==='overview')      loadOverview();
+  if(name==='connections')   loadConnections();
+  if(name==='live')          loadLive();
+  if(name==='geomap')        loadGeoMap();
+  if(name==='system')        loadSystem();
+  if(name==='owasp')         loadOWASP();
+  if(name==='analyze')       {}
+  if(name==='stats')         loadStats();
+  if(name==='killchain')     loadKillChain();
+  if(name==='fail2ban')      loadFail2Ban();
+  if(name==='soc')           loadSOC();
+  if(name==='corr')          loadCorrelation();
+  if(name==='risk')          loadRisk();
+  if(name==='ml')            loadML();
+  if(name==='block')         loadAutoBlock();
 }
 
 // ── Auto Block ───────────────────────────────────────────────────
