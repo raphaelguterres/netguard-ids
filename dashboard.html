@@ -818,6 +818,24 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 .ml-feature-fill{height:100%;border-radius:2px;background:var(--ora);transition:width .3s}
 #ml-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px;color:var(--txt3);font-family:var(--mono);font-size:10px;text-align:center}
 
+/* ── AUTO BLOCK PAGE ────────────────────────────────────────────── */
+#p-block{flex-direction:column;padding:20px;gap:14px;overflow-y:auto}
+.block-header-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.block-toggle{display:flex;align-items:center;gap:8px;padding:6px 14px;border-radius:3px;cursor:pointer;border:1px solid;font-family:var(--mono);font-size:9px;font-weight:700;transition:all .2s}
+.block-toggle.off{background:rgba(255,255,255,.04);border-color:#102840;color:var(--txt3)}
+.block-toggle.on{background:rgba(255,50,80,.1);border-color:rgba(255,50,80,.4);color:var(--red)}
+.block-threshold-wrap{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9px;color:var(--txt2)}
+.block-threshold-input{width:50px;background:#06101e;border:1px solid #102840;border-radius:2px;color:var(--acc);font-family:var(--head);font-size:13px;font-weight:700;text-align:center;padding:3px}
+.block-stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.block-stat{background:#060e1a;border:1px solid #102840;border-radius:3px;padding:8px 14px;text-align:center}
+.block-stat-n{font-family:var(--head);font-size:18px;font-weight:900}
+.block-stat-l{font-family:var(--mono);font-size:7px;letter-spacing:.08em;text-transform:uppercase;color:var(--txt3);margin-top:2px}
+.block-card{background:#06101e;border:1px solid rgba(255,50,80,.25);border-radius:4px;padding:12px 16px;display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.block-ip{font-family:var(--head);font-size:14px;font-weight:900;color:var(--red)}
+.block-meta{font-family:var(--mono);font-size:8px;color:var(--txt3)}
+.block-score-ring{width:38px;height:38px;border-radius:50%;border:2px solid var(--red);display:flex;align-items:center;justify-content:center;font-family:var(--head);font-size:10px;font-weight:900;color:var(--red);flex-shrink:0}
+.block-history-row{display:flex;gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid #0a1428;font-family:var(--mono);font-size:9px}
+
 /* ── SCROLLBARS ──────────────────────────────────────────────────── */
 ::-webkit-scrollbar{width:2px;height:2px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -865,6 +883,7 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
     <div class="tab" onclick="goPage('risk',this)"><div class="tab-dot"></div>🎯 Risk Score</div>
     <div class="tab" onclick="goPage('corr',this)"><div class="tab-dot"></div>🔗 Correlation</div>
     <div class="tab" onclick="goPage('ml',this)"><div class="tab-dot"></div>🧠 ML Baseline</div>
+    <div class="tab" onclick="goPage('block',this)"><div class="tab-dot"></div>🛡️ Auto Block</div>
   </div>
 
   <div class="hdr-r">
@@ -1544,6 +1563,75 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
   </div>
 </div>
 
+<!-- ── AUTO BLOCK ──────────────────────────────────────────────────── -->
+<div class="page" id="p-block">
+  <!-- Header controls -->
+  <div class="block-header-row">
+    <div style="font-family:var(--head);font-size:14px;font-weight:900;color:var(--acc);letter-spacing:.08em">AUTO BLOCK ENGINE</div>
+    <div id="block-toggle-btn" class="block-toggle off" onclick="toggleAutoBlock()">
+      ⬤ DESATIVADO
+    </div>
+    <div class="block-threshold-wrap">
+      Score ≥
+      <input class="block-threshold-input" id="block-threshold" type="number"
+             min="1" max="100" value="75"
+             onchange="updateThreshold(this.value)">
+      → bloqueia automaticamente
+    </div>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <button class="fbtn" onclick="loadAutoBlock()" style="font-size:8px">↻</button>
+    </div>
+  </div>
+
+  <!-- Warning -->
+  <div style="background:rgba(255,180,0,.06);border:1px solid rgba(255,180,0,.2);border-radius:3px;padding:10px 14px;font-family:var(--mono);font-size:9px;color:var(--yel)">
+    ⚠ O bloqueio requer privilégios de administrador para aplicar regras no Windows Firewall.
+    Execute o NetGuard como administrador para que o bloqueio funcione no firewall.
+    Mesmo sem privilégios, os IPs são registrados e o dashboard mostra o status.
+  </div>
+
+  <!-- Stats -->
+  <div class="block-stat-row">
+    <div class="block-stat"><div class="block-stat-n" id="ab-active" style="color:var(--red)">0</div><div class="block-stat-l">Bloqueios Ativos</div></div>
+    <div class="block-stat"><div class="block-stat-n" id="ab-total">0</div><div class="block-stat-l">Total Bloqueados</div></div>
+    <div class="block-stat"><div class="block-stat-n" id="ab-unblocked" style="color:var(--grn)">0</div><div class="block-stat-l">Revertidos</div></div>
+    <div class="block-stat"><div class="block-stat-n" id="ab-threshold" style="color:var(--yel)">75</div><div class="block-stat-l">Threshold</div></div>
+  </div>
+
+  <!-- Active blocks -->
+  <div>
+    <div style="font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:8px;border-bottom:1px solid #102840;padding-bottom:4px">
+      IPs Bloqueados Ativos
+    </div>
+    <div id="block-list">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--txt3);padding:16px;text-align:center">
+        Nenhum IP bloqueado no momento
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual block -->
+  <div style="background:#06101e;border:1px solid #102840;border-radius:4px;padding:14px 16px">
+    <div style="font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:10px">Bloqueio Manual</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="manual-block-ip" placeholder="IP para bloquear (ex: 185.220.101.45)"
+        style="flex:1;background:#030a10;border:1px solid #102840;border-radius:2px;color:var(--txt);font-family:var(--mono);font-size:10px;padding:7px 10px">
+      <button class="fbtn" onclick="manualBlock()"
+        style="color:var(--red);border-color:rgba(255,50,80,.3);font-size:9px">
+        🔒 Bloquear
+      </button>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div>
+    <div style="font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:8px;border-bottom:1px solid #102840;padding-bottom:4px">
+      Histórico
+    </div>
+    <div id="block-history"></div>
+  </div>
+</div>
+
 <!-- ── STATS ───────────────────────────────────────────────────────── -->
 <div class="page" id="p-stats">
   <div class="sp"><div class="ph"><span class="ph-t">Top Ameaças</span></div><div class="sp-body" id="st-thr"><div class="empty"><span>Sem dados</span></div></div></div>
@@ -1588,6 +1676,7 @@ function goPage(name,el){
   if(name==='risk')        loadRisk();
   if(name==='corr')        loadCorrelation();
   if(name==='ml')          loadML();
+  if(name==='block')       loadAutoBlock();
   if(name==='geomap'){
     loadGeo();
     if(liveInterval)clearInterval(liveInterval);
@@ -2915,6 +3004,108 @@ function showSocDetail(idx){
 
 async function loadSoc(){
   await Promise.all([loadSocStats(), loadSocEvents()]);
+}
+
+// ── Auto Block ───────────────────────────────────────────────────
+let _abEnabled = false;
+
+async function loadAutoBlock(){
+  const data = await api('/autoblock/status');
+  if(!data) return;
+
+  _abEnabled = data.enabled || false;
+  const btn  = document.getElementById('block-toggle-btn');
+  if(btn){
+    btn.className = 'block-toggle ' + (_abEnabled ? 'on' : 'off');
+    btn.textContent = _abEnabled ? '⬤ ATIVADO' : '⬤ DESATIVADO';
+  }
+
+  $('ab-active',    data.active_blocks   || 0);
+  $('ab-total',     data.total_blocked   || 0);
+  $('ab-unblocked', data.total_unblocked || 0);
+  $('ab-threshold', data.threshold       || 75);
+
+  const thInput = document.getElementById('block-threshold');
+  if(thInput) thInput.value = data.threshold || 75;
+
+  // Render active blocks
+  const blocks  = data.blocks || [];
+  const listEl  = document.getElementById('block-list');
+  if(listEl){
+    if(!blocks.length){
+      listEl.innerHTML = `<div style="font-family:var(--mono);font-size:9px;color:var(--txt3);padding:16px;text-align:center">Nenhum IP bloqueado no momento</div>`;
+    } else {
+      listEl.innerHTML = blocks.map(b => `
+        <div class="block-card">
+          <div class="block-score-ring">${b.score}</div>
+          <div style="flex:1">
+            <div class="block-ip">${b.ip}</div>
+            <div class="block-meta">${b.reason||'risk_threshold'} · ${b.blocked_at?.slice(11,19)||''}</div>
+            <div class="block-meta" style="margin-top:2px">host: ${b.host_id||'—'}</div>
+          </div>
+          <button class="fbtn" onclick="unblockIP('${b.ip}')"
+            style="color:var(--grn);border-color:rgba(0,255,150,.3);font-size:9px">
+            🔓 Reverter
+          </button>
+        </div>`).join('');
+    }
+  }
+
+  // History
+  const histData = await api('/autoblock/blocks');
+  if(histData){
+    const histEl = document.getElementById('block-history');
+    if(histEl){
+      const hist = histData.history || [];
+      histEl.innerHTML = hist.length ? hist.map(h => `
+        <div class="block-history-row">
+          <span style="color:${h.action==='BLOCK'?'var(--red)':'var(--grn)'}">
+            ${h.action==='BLOCK'?'🔒':'🔓'} ${h.action}
+          </span>
+          <span style="color:var(--txt)">${h.ip}</span>
+          ${h.score?`<span style="color:var(--yel)">score: ${h.score}</span>`:''}
+          <span style="color:var(--txt3);margin-left:auto">${h.timestamp?.slice(11,19)||''}</span>
+        </div>`).join('') :
+        `<div style="font-family:var(--mono);font-size:9px;color:var(--txt3);padding:8px">Sem histórico ainda</div>`;
+    }
+  }
+}
+
+async function toggleAutoBlock(){
+  const r = await fetch('/api/autoblock/config',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({enabled: !_abEnabled})
+  });
+  if(r.ok){ await loadAutoBlock(); toast(_abEnabled?'Auto Block desativado':'Auto Block ativado','ok'); }
+}
+
+async function updateThreshold(val){
+  const t = parseInt(val);
+  if(t < 1 || t > 100) return;
+  await fetch('/api/autoblock/config',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({threshold: t})
+  });
+  $('ab-threshold', t);
+  toast(`Threshold atualizado: ${t}`, 'ok');
+}
+
+async function unblockIP(ip){
+  const r = await fetch(`/api/autoblock/unblock/${ip}`,{method:'POST'});
+  if(r.ok){ toast(`${ip} desbloqueado`,'ok'); await loadAutoBlock(); }
+}
+
+async function manualBlock(){
+  const ip = document.getElementById('manual-block-ip')?.value?.trim();
+  if(!ip){ toast('Digite um IP','err'); return; }
+  const r = await fetch('/api/autoblock/block',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ip, score:100, reason:'Manual block'})
+  });
+  if(r.ok){ toast(`${ip} bloqueado`,'ok'); await loadAutoBlock(); }
 }
 
 // ── ML Baseline ──────────────────────────────────────────────────

@@ -30,6 +30,15 @@ except Exception as _se:
 detection_engine = None
 DE_AVAILABLE = False
 
+# Auto Block Engine
+try:
+    from engine.auto_block import auto_block, AutoBlockEngine, BLOCK_WHITELIST
+    AUTOBLOCK_AVAILABLE = True
+except Exception as _ab_err:
+    auto_block = None
+    AUTOBLOCK_AVAILABLE = False
+    print(f"[WARN] AutoBlock: {_ab_err}")
+
 # Auth + HTTPS
 try:
     from auth import auth, AUTH_ENABLED, get_ssl_context, print_startup_info, HTTPS_PORT
@@ -810,7 +819,7 @@ def loop_monitor(intervalo=30):
                                 if corr_alerts:
                                     logger.warning("CORR | %d padrões detectados", len(corr_alerts))
                             except Exception as _ca: pass
-                        # Feed risk engine
+                        # Feed risk engine + auto block
                         if RISK_AVAILABLE and risk_engine:
                             try:
                                 for ev in events:
@@ -1440,6 +1449,107 @@ def sigma_analyze():
 # ── Fail2Ban API ──────────────────────────────────────────────────
 
 # ── Detection Engine API ──────────────────────────────────────────
+
+# ── Agent Push API ────────────────────────────────────────────────
+
+@app.route("/api/agent/push", methods=["POST"])
+@auth
+def agent_push():
+    """Recebe snapshot de um agente distribuído."""
+    try:
+        data    = request.get_json(force=True)
+        host_id = data.get("host_id","unknown")
+        procs   = data.get("processes",[])
+        conns   = data.get("connections",[])
+        ports   = data.get("ports",[])
+
+        # Feed SOC engine com dados do agente
+        if DE_AVAILABLE and detection_engine:
+            try:
+                events = detection_engine.analyze(
+                    processes=procs, ports=ports, connections=conns
+                )
+                if events and RISK_AVAILABLE and risk_engine:
+                    for ev in events:
+                        ed = ev.to_dict() if hasattr(ev,"to_dict") else dict(ev)
+                        ed["host_id"] = host_id
+                        risk_engine.ingest_event(ed)
+            except Exception: pass
+
+        # Feed ML baseline
+        if ML_AVAILABLE and _ml_baseline:
+            try:
+                _ml_baseline.add_sample({"processes":procs,"connections":conns,"ports":ports})
+            except Exception: pass
+
+        logger.info("Agent push | host=%s | procs=%d conns=%d ports=%d",
+                    host_id, len(procs), len(conns), len(ports))
+        return jsonify({"status":"ok","host_id":host_id,"received":{
+            "processes": len(procs), "connections": len(conns), "ports": len(ports)
+        }})
+    except Exception as e:
+        logger.error("Agent push error: %s", e)
+        return jsonify({"error":str(e)}), 400
+
+@app.route("/api/agent/status")
+@auth
+def agent_status():
+    """Lista agentes que fizeram push recentemente."""
+    if not RISK_AVAILABLE or not risk_engine:
+        return jsonify({"agents":[]})
+    hosts = risk_engine.get_all_hosts()
+    return jsonify({"agents": hosts, "total": len(hosts)})
+
+# ── Auto Block API ─────────────────────────────────────────────────
+
+@app.route("/api/autoblock/status")
+@auth
+def autoblock_status():
+    if not AUTOBLOCK_AVAILABLE:
+        return jsonify({"available":False}), 200
+    return jsonify({**auto_block.stats(), "blocks": auto_block.get_blocks()})
+
+@app.route("/api/autoblock/blocks")
+@auth
+def autoblock_blocks():
+    if not AUTOBLOCK_AVAILABLE:
+        return jsonify({"blocks":[]}), 200
+    return jsonify({"blocks": auto_block.get_blocks(),
+                    "history": auto_block.get_history(20)})
+
+@app.route("/api/autoblock/block", methods=["POST"])
+@auth
+def autoblock_manual_block():
+    if not AUTOBLOCK_AVAILABLE:
+        return jsonify({"error":"indisponível"}), 503
+    data  = request.get_json(force=True) or {}
+    ip    = data.get("ip","")
+    score = int(data.get("score",100))
+    reason= data.get("reason","Manual block")
+    if not ip:
+        return jsonify({"error":"ip obrigatório"}), 400
+    rec = auto_block.block(ip, score, reason)
+    return jsonify({"status":"blocked","record": rec.to_dict() if rec else None})
+
+@app.route("/api/autoblock/unblock/<ip>", methods=["POST"])
+@auth
+def autoblock_unblock(ip):
+    if not AUTOBLOCK_AVAILABLE:
+        return jsonify({"error":"indisponível"}), 503
+    ok = auto_block.unblock(ip)
+    return jsonify({"status":"unblocked" if ok else "error","ip":ip})
+
+@app.route("/api/autoblock/config", methods=["POST"])
+@auth
+def autoblock_config():
+    if not AUTOBLOCK_AVAILABLE:
+        return jsonify({"error":"indisponível"}), 503
+    data = request.get_json(force=True) or {}
+    if "threshold" in data:
+        auto_block.set_threshold(int(data["threshold"]))
+    if "enabled" in data:
+        auto_block.set_enabled(bool(data["enabled"]))
+    return jsonify(auto_block.stats())
 
 # ── ML Baseline API ───────────────────────────────────────────────
 
