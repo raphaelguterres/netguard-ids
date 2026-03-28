@@ -75,7 +75,9 @@ class PacketCapture:
         self.rodando       = False
         self._thread       = None
         # IP da interface local — pacotes originados aqui não geram alertas
-        self._interface_ip = self._get_local_ip()
+        self._interface_ip      = self._get_local_ip()
+        self._pacotes_capturados = 0
+        self._alertas_gerados    = 0
 
     def _get_local_ip(self) -> str:
         try:
@@ -117,7 +119,9 @@ class PacketCapture:
         return {
             "rodando":    self.rodando,
             "interface":  self.interface,
-            "iniciado_em": getattr(self,"_started_at",""),
+            "iniciado_em":        getattr(self,"_started_at",""),
+            "pacotes_capturados": self._pacotes_capturados,
+            "alertas_gerados":    self._alertas_gerados,
             "local_ip":   self._interface_ip,
             "syn_tracked":   len(self._conn_times._data) if hasattr(self._syn_counter, '_data') else 0,
             "port_tracked":  len(self._portas_por_ip),
@@ -158,7 +162,7 @@ class PacketCapture:
 
     def _analisar_pacote(self, pkt):
         """Analisa cada pacote capturado."""
-        self.stats["pacotes_capturados"] += 1
+        self._pacotes_capturados += 1
 
         try:
             from scapy.all import IP, TCP, UDP, ARP, DNS, Raw, ICMP
@@ -402,7 +406,7 @@ class PacketCapture:
 
     def _alertar(self, log: str, ip: str, field: str, origem: str = ""):
         """Envia alerta para o callback (IDSEngine)."""
-        self.stats["alertas_gerados"] += 1
+        self._alertas_gerados += 1
         logger.warning("PACKET | %s | ip=%s | %s", origem, ip, log[:80])
         try:
             self.callback(log, ip, field)
