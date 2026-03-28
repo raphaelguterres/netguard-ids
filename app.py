@@ -30,6 +30,39 @@ except Exception as _se:
 detection_engine = None
 DE_AVAILABLE = False
 
+# Threat Hunter
+try:
+    from engine.threat_hunter import ThreatHunter
+    _threat_hunter = None
+    HUNTER_AVAILABLE = True
+except Exception as _th_err:
+    ThreatHunter     = None
+    _threat_hunter   = None
+    HUNTER_AVAILABLE = False
+    print(f"[WARN] ThreatHunter: {_th_err}")
+
+# Lateral Movement Detector
+try:
+    from engine.lateral_movement import LateralMovementDetector
+    _lateral_detector = LateralMovementDetector()
+    LATERAL_AVAILABLE = True
+except Exception as _lm_err:
+    LateralMovementDetector = None
+    _lateral_detector       = None
+    LATERAL_AVAILABLE       = False
+    print(f"[WARN] LateralMovement: {_lm_err}")
+
+# YARA Engine
+try:
+    from engine.yara_engine import YaraEngine
+    _yara_engine = YaraEngine()
+    YARA_AVAILABLE = True
+except Exception as _yr_err:
+    YaraEngine   = None
+    _yara_engine = None
+    YARA_AVAILABLE = False
+    print(f"[WARN] YaraEngine: {_yr_err}")
+
 # Auto Block Engine
 try:
     from engine.auto_block import auto_block, AutoBlockEngine, BLOCK_WHITELIST
@@ -784,6 +817,22 @@ def loop_monitor(intervalo=30):
                     )
                     if events:
                         logger.info("SOC | %d eventos gerados no ciclo", len(events))
+                        # Feed lateral movement detector
+                        if LATERAL_AVAILABLE and _lateral_detector:
+                            try:
+                                h_id = detection_engine.host_id
+                                for ev in events:
+                                    ed = ev.to_dict() if hasattr(ev,'to_dict') else dict(ev)
+                                    lm_alerts = _lateral_detector.ingest(ed, host_id=h_id)
+                                    for la in lm_alerts:
+                                        log_ao_vivo({
+                                            "type":   "lateral_movement",
+                                            "sev":    la.severity.lower(),
+                                            "threat": la.rule_name,
+                                            "ip":     la.source_ip,
+                                            "msg":    la.description[:80],
+                                        })
+                            except Exception: pass
 
                     # Feed ML baseline EVERY cycle (not just when events fire)
                     if ML_AVAILABLE and _ml_baseline:
@@ -1366,6 +1415,16 @@ if SOC_IMPORT_OK:
         except Exception: pass
         DE_AVAILABLE = True
         logger.info("SOC Engine OK | 12 regras ativas")
+        # Init Threat Hunter
+        if HUNTER_AVAILABLE:
+            try:
+                _db = os.environ.get("IDS_DB_PATH",
+                      str(pathlib.Path(__file__).parent / "netguard_soc.db"))
+                _threat_hunter = ThreatHunter(db_path=_db)
+                logger.info("ThreatHunter iniciado | db=%s", _db)
+            except Exception as _th_init:
+                logger.warning("ThreatHunter init: %s", _th_init)
+
         # Init ML baseline
         if ML_AVAILABLE:
             try:
@@ -1449,6 +1508,106 @@ def sigma_analyze():
 # ── Fail2Ban API ──────────────────────────────────────────────────
 
 # ── Detection Engine API ──────────────────────────────────────────
+
+# ── Threat Hunting API ────────────────────────────────────────────
+
+@app.route("/api/hunt", methods=["POST"])
+@auth
+def hunt():
+    if not HUNTER_AVAILABLE or not _threat_hunter:
+        return jsonify({"error":"indisponível"}), 503
+    data    = request.get_json(force=True) or {}
+    query   = data.get("query","")
+    limit   = min(int(data.get("limit",200)), 500)
+    hours   = min(int(data.get("hours",24)), 168)
+    host_id = data.get("host_id","")
+    result  = _threat_hunter.hunt(query, limit=limit, hours=hours, host_id=host_id)
+    return jsonify(result)
+
+@app.route("/api/hunt/validate", methods=["POST"])
+@auth
+def hunt_validate():
+    if not HUNTER_AVAILABLE or not _threat_hunter:
+        return jsonify({"error":"indisponível"}), 503
+    data  = request.get_json(force=True) or {}
+    query = data.get("query","")
+    return jsonify(_threat_hunter.validate(query))
+
+@app.route("/api/hunt/suggestions")
+@auth
+def hunt_suggestions():
+    if not HUNTER_AVAILABLE or not _threat_hunter:
+        return jsonify({"suggestions":[]})
+    return jsonify({"suggestions": _threat_hunter.suggest_queries()})
+
+# ── Lateral Movement API ───────────────────────────────────────────
+
+@app.route("/api/lateral/alerts")
+@auth
+def lateral_alerts():
+    if not LATERAL_AVAILABLE or not _lateral_detector:
+        return jsonify({"available":False,"alerts":[]})
+    limit = int(request.args.get("limit",100))
+    return jsonify({
+        "available": True,
+        "alerts":    _lateral_detector.get_alerts(limit),
+        "stats":     _lateral_detector.stats(),
+    })
+
+@app.route("/api/lateral/demo", methods=["POST"])
+@auth
+def lateral_demo():
+    if not LATERAL_AVAILABLE or not _lateral_detector:
+        return jsonify({"error":"indisponível"}), 503
+    alerts = _lateral_detector.inject_demo()
+    return jsonify({"injected": len(alerts),
+                    "alerts": [a.to_dict() for a in alerts]})
+
+@app.route("/api/lateral/stats")
+@auth
+def lateral_stats():
+    if not LATERAL_AVAILABLE or not _lateral_detector:
+        return jsonify({"available":False})
+    return jsonify(_lateral_detector.stats())
+
+# ── YARA API ───────────────────────────────────────────────────────
+
+@app.route("/api/yara/scan", methods=["POST"])
+@auth
+def yara_scan():
+    if not YARA_AVAILABLE or not _yara_engine:
+        return jsonify({"error":"indisponível"}), 503
+    data    = request.get_json(force=True) or {}
+    content = data.get("content","")
+    context = data.get("context","api")
+    if not content:
+        return jsonify({"error":"content obrigatório"}), 400
+    matches = _yara_engine.scan_string(content, context)
+    return jsonify({
+        "matches":     [m.to_dict() for m in matches],
+        "match_count": len(matches),
+        "scanned":     len(content),
+    })
+
+@app.route("/api/yara/scan-process", methods=["POST"])
+@auth
+def yara_scan_process():
+    if not YARA_AVAILABLE or not _yara_engine:
+        return jsonify({"error":"indisponível"}), 503
+    proc = request.get_json(force=True) or {}
+    matches = _yara_engine.scan_process(proc)
+    return jsonify({
+        "matches":     [m.to_dict() for m in matches],
+        "match_count": len(matches),
+        "process":     proc.get("name",""),
+    })
+
+@app.route("/api/yara/stats")
+@auth
+def yara_stats():
+    if not YARA_AVAILABLE or not _yara_engine:
+        return jsonify({"available":False})
+    return jsonify(_yara_engine.stats())
 
 # ── Agent Push API ────────────────────────────────────────────────
 

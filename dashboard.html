@@ -819,6 +819,67 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 .ml-feature-fill{height:100%;border-radius:2px;background:var(--ora);transition:width .3s}
 #ml-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px;color:var(--txt3);font-family:var(--mono);font-size:10px;text-align:center}
 
+/* ── THREAT HUNT PAGE ──────────────────────────────────────────── */
+#p-hunt{flex-direction:column;padding:20px;gap:14px;overflow-y:auto}
+.hunt-input-row{display:flex;gap:8px;align-items:stretch}
+#hunt-query{flex:1;background:#030a10;border:1px solid #102840;border-radius:3px;
+  color:var(--txt);font-family:var(--mono);font-size:11px;padding:10px 12px;
+  outline:none;transition:border .2s}
+#hunt-query:focus{border-color:var(--acc)}
+#hunt-query.valid{border-color:var(--grn)}
+#hunt-query.invalid{border-color:var(--red)}
+.hunt-controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.hunt-badge{font-family:var(--mono);font-size:8px;padding:2px 8px;border-radius:2px;
+  background:rgba(0,200,255,.08);border:1px solid rgba(0,200,255,.15);color:var(--txt2)}
+.hunt-result-row{display:grid;grid-template-columns:130px 80px 160px 1fr;
+  gap:6px;padding:6px 10px;border-bottom:1px solid #0a1428;font-family:var(--mono);
+  font-size:9px;align-items:center;cursor:pointer;transition:background .15s}
+.hunt-result-row:hover{background:rgba(0,200,255,.04)}
+.hunt-result-hdr{background:#060e1a;border-bottom:1px solid #102840;font-weight:700;
+  color:var(--txt3);font-size:8px;letter-spacing:.08em}
+.hunt-chip{padding:1px 6px;border-radius:2px;font-size:7px;font-weight:700;text-transform:uppercase}
+.hunt-suggestions{display:flex;flex-wrap:wrap;gap:6px}
+.hunt-sug{background:#06101e;border:1px solid #102840;border-radius:3px;
+  padding:5px 10px;cursor:pointer;font-family:var(--mono);font-size:8px;
+  color:var(--txt2);transition:all .2s}
+.hunt-sug:hover{border-color:var(--acc);color:var(--acc)}
+#hunt-detail{background:#06101e;border:1px solid #102840;border-radius:3px;
+  padding:12px;font-family:var(--mono);font-size:9px;white-space:pre-wrap;
+  max-height:200px;overflow-y:auto;display:none}
+
+/* ── LATERAL MOVEMENT PAGE ─────────────────────────────────────── */
+#p-lateral{flex-direction:column;padding:20px;gap:14px;overflow-y:auto}
+.lateral-alert{background:#06101e;border-left:3px solid var(--ora);
+  border-radius:0 4px 4px 0;padding:12px 16px;margin-bottom:8px}
+.lateral-hosts{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.lateral-host-chip{background:rgba(0,200,255,.08);border:1px solid rgba(0,200,255,.2);
+  border-radius:2px;padding:1px 8px;font-family:var(--mono);font-size:8px;color:var(--acc)}
+.lateral-stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.lateral-stat{background:#060e1a;border:1px solid #102840;border-radius:3px;
+  padding:8px 14px;text-align:center}
+.lateral-stat-n{font-family:var(--head);font-size:18px;font-weight:900}
+.lateral-stat-l{font-family:var(--mono);font-size:7px;text-transform:uppercase;
+  color:var(--txt3);margin-top:2px}
+
+/* ── YARA PAGE ──────────────────────────────────────────────────── */
+#p-yara{flex-direction:column;padding:20px;gap:14px;overflow-y:auto}
+.yara-input{width:100%;background:#030a10;border:1px solid #102840;border-radius:3px;
+  color:var(--txt);font-family:var(--mono);font-size:10px;padding:10px 12px;
+  outline:none;resize:vertical;min-height:80px}
+.yara-input:focus{border-color:var(--acc)}
+.yara-match{background:#06101e;border-left:3px solid var(--red);
+  border-radius:0 4px 4px 0;padding:10px 14px;margin-bottom:8px}
+.yara-match-title{font-family:var(--head);font-size:12px;font-weight:700;color:var(--red)}
+.yara-strings{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.yara-string-chip{background:rgba(255,50,80,.08);border:1px solid rgba(255,50,80,.2);
+  border-radius:2px;padding:1px 8px;font-family:var(--mono);font-size:8px;color:var(--red)}
+.yara-rule-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.yara-rule-card{background:#060e1a;border:1px solid #102840;border-radius:3px;
+  padding:8px 12px;cursor:pointer;transition:border .2s}
+.yara-rule-card:hover{border-color:var(--acc)}
+.yara-rule-name{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--acc)}
+.yara-rule-desc{font-family:var(--body);font-size:9px;color:var(--txt3);margin-top:2px}
+
 /* ── AUTO BLOCK PAGE ────────────────────────────────────────────── */
 #p-block{flex-direction:column;padding:20px;gap:14px;overflow-y:auto}
 .block-header-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
@@ -1039,6 +1100,9 @@ input,select,textarea{font-size:16px!important} /* Prevent iOS zoom on focus */
     <div class="tab" onclick="goPage('corr',this)"><div class="tab-dot"></div>🔗 Correlation</div>
     <div class="tab" onclick="goPage('ml',this)"><div class="tab-dot"></div>🧠 ML Baseline</div>
     <div class="tab" onclick="goPage('block',this)"><div class="tab-dot"></div>🛡️ Auto Block</div>
+    <div class="tab" onclick="goPage('hunt',this)"><div class="tab-dot"></div>🔍 Threat Hunt</div>
+    <div class="tab" onclick="goPage('lateral',this)"><div class="tab-dot"></div>🌐 Lateral Move</div>
+    <div class="tab" onclick="goPage('yara',this)"><div class="tab-dot"></div>🦠 YARA</div>
   </div>
 
   <div class="hdr-r">
@@ -1718,6 +1782,118 @@ input,select,textarea{font-size:16px!important} /* Prevent iOS zoom on focus */
   </div>
 </div>
 
+<!-- ── THREAT HUNT ────────────────────────────────────────────────── -->
+<div class="page" id="p-hunt">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div>
+      <div style="font-family:var(--head);font-size:14px;font-weight:900;color:var(--acc)">🔍 THREAT HUNTING</div>
+      <div style="font-family:var(--mono);font-size:8px;color:var(--txt3);margin-top:2px">
+        Query language: field=value AND/OR/NOT · Campos: process, ip, severity, rule, host, type, port, cpu
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <select id="hunt-hours" style="background:#06101e;border:1px solid #102840;color:var(--txt2);
+        font-family:var(--mono);font-size:8px;padding:4px 8px;border-radius:2px">
+        <option value="1">1 hora</option>
+        <option value="6">6 horas</option>
+        <option value="24" selected>24 horas</option>
+        <option value="72">3 dias</option>
+        <option value="168">7 dias</option>
+      </select>
+      <button class="fbtn" onclick="loadHuntSuggestions()" style="font-size:8px">💡 Exemplos</button>
+    </div>
+  </div>
+
+  <div class="hunt-input-row">
+    <input id="hunt-query" placeholder='Ex: process~"powershell" AND severity="HIGH"'
+           oninput="onHuntInput(this)" onkeydown="if(event.key==='Enter')runHunt()">
+    <button class="fbtn" onclick="runHunt()"
+      style="padding:0 18px;font-size:9px;color:var(--acc);border-color:rgba(0,200,255,.3)">
+      ▶ HUNT
+    </button>
+  </div>
+
+  <div id="hunt-suggestions" class="hunt-suggestions"></div>
+
+  <div id="hunt-status" style="font-family:var(--mono);font-size:9px;color:var(--txt3)">
+    Aguardando query...
+  </div>
+
+  <div style="flex:1;overflow-y:auto;min-height:0">
+    <div id="hunt-results"></div>
+    <div id="hunt-detail"></div>
+  </div>
+</div>
+
+<!-- ── LATERAL MOVEMENT ─────────────────────────────────────────── -->
+<div class="page" id="p-lateral">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div style="font-family:var(--head);font-size:14px;font-weight:900;color:var(--acc)">🌐 LATERAL MOVEMENT DETECTION</div>
+    <button class="fbtn" onclick="lateralDemo()" style="font-size:8px;color:var(--yel);border-color:rgba(255,220,0,.3)">⚡ Demo</button>
+    <button class="fbtn" onclick="loadLateral()" style="font-size:8px;margin-left:auto">↻</button>
+  </div>
+
+  <div class="lateral-stat-row">
+    <div class="lateral-stat"><div class="lateral-stat-n" id="lat-ingested" style="color:var(--acc)">0</div><div class="lateral-stat-l">Eventos Analisados</div></div>
+    <div class="lateral-stat"><div class="lateral-stat-n" id="lat-alerts" style="color:var(--red)">0</div><div class="lateral-stat-l">Alertas Gerados</div></div>
+    <div class="lateral-stat"><div class="lateral-stat-n" id="lat-tracked" style="color:var(--yel)">0</div><div class="lateral-stat-l">IPs Rastreados</div></div>
+    <div class="lateral-stat"><div class="lateral-stat-n" id="lat-rules" style="color:var(--pur)">5</div><div class="lateral-stat-l">Padrões Ativos</div></div>
+  </div>
+
+  <div style="background:rgba(0,140,255,.05);border:1px solid rgba(0,200,255,.1);border-radius:3px;padding:10px 14px;font-family:var(--body);font-size:10px;color:var(--txt2)">
+    Detecta LM-1 (IP em múltiplos hosts) · LM-2 (Credential Spray) · LM-3 (C2 Cross-Host) · LM-4 (Comprometimento sequencial) · LM-5 (Internal Port Scan)
+  </div>
+
+  <div>
+    <div style="font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:8px;border-bottom:1px solid #102840;padding-bottom:4px">Alertas de Lateral Movement</div>
+    <div id="lateral-alerts-list">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--txt3);padding:20px;text-align:center">
+        Nenhum alerta ainda — o detector aprende à medida que os hosts reportam eventos
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── YARA ──────────────────────────────────────────────────────── -->
+<div class="page" id="p-yara">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div>
+      <div style="font-family:var(--head);font-size:14px;font-weight:900;color:var(--acc)">🦠 YARA SCANNER</div>
+      <div style="font-family:var(--mono);font-size:8px;color:var(--txt3);margin-top:2px">
+        <span id="yara-backend">Carregando...</span>
+      </div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <div style="font-family:var(--mono);font-size:8px;color:var(--txt2)">
+        Scans: <span id="yara-scans" style="color:var(--acc)">0</span> |
+        Hits: <span id="yara-hits" style="color:var(--red)">0</span>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div style="font-family:var(--mono);font-size:8px;color:var(--txt3);margin-bottom:6px">Cole conteúdo suspeito para analisar:</div>
+    <textarea class="yara-input" id="yara-content"
+      placeholder="Cole aqui: script PowerShell, conteúdo de arquivo, linha de comando suspeita..."></textarea>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="fbtn" onclick="runYaraScan()"
+        style="color:var(--red);border-color:rgba(255,50,80,.3);font-size:9px">
+        🦠 Escanear
+      </button>
+      <button class="fbtn" onclick="clearYara()" style="font-size:8px">✕ Limpar</button>
+    </div>
+  </div>
+
+  <div id="yara-results"></div>
+
+  <div>
+    <div style="font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:8px;border-bottom:1px solid #102840;padding-bottom:4px">
+      Regras ativas (8 built-in)
+    </div>
+    <div class="yara-rule-grid" id="yara-rules-list"></div>
+  </div>
+</div>
+
 <!-- ── AUTO BLOCK ──────────────────────────────────────────────────── -->
 <div class="page" id="p-block">
   <!-- Header controls -->
@@ -1839,6 +2015,9 @@ function goPage(name,el){
   if(name==='corr')        loadCorrelation();
   if(name==='ml')          loadML();
   if(name==='block')       loadAutoBlock();
+  if(name==='hunt')        loadHuntSuggestions();
+  if(name==='lateral')     loadLateral();
+  if(name==='yara')        loadYara();
   if(name==='geomap'){
     loadGeo();
     if(liveInterval)clearInterval(liveInterval);
@@ -3175,6 +3354,225 @@ function toggleMobileMenu(){
   if(!tabs) return;
   tabs.classList.toggle('mobile-open');
   if(btn) btn.textContent=tabs.classList.contains('mobile-open')?'✕':'☰';
+}
+
+// ── Threat Hunting ───────────────────────────────────────────────
+let _huntDebounce = null;
+
+async function onHuntInput(el){
+  clearTimeout(_huntDebounce);
+  el.className = '';
+  _huntDebounce = setTimeout(async () => {
+    if(!el.value.trim()) return;
+    const r = await fetch('/api/hunt/validate',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({query: el.value})
+    });
+    if(r.ok){
+      const d = await r.json();
+      el.className = d.valid ? 'valid' : 'invalid';
+    }
+  }, 400);
+}
+
+async function runHunt(){
+  const q    = document.getElementById('hunt-query')?.value?.trim();
+  const hrs  = parseInt(document.getElementById('hunt-hours')?.value || '24');
+  if(!q){ toast('Digite uma query','err'); return; }
+
+  document.getElementById('hunt-status').textContent = '⏳ Executando...';
+  document.getElementById('hunt-results').innerHTML = '';
+  document.getElementById('hunt-detail').style.display = 'none';
+
+  const r = await fetch('/api/hunt',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({query:q, hours:hrs, limit:200})
+  });
+  if(!r.ok){ toast('Erro ao executar hunt','err'); return; }
+  const d = await r.json();
+
+  if(d.error){
+    document.getElementById('hunt-status').innerHTML =
+      '<span style="color:var(--red)">❌ ' + d.error + '</span>';
+    return;
+  }
+
+  document.getElementById('hunt-status').innerHTML =
+    `<span style="color:var(--grn)">${d.count} resultado${d.count!==1?'s':''}</span>
+     <span style="color:var(--txt3)"> em ${d.elapsed_ms}ms | últimas ${hrs}h</span>`;
+
+  const res = document.getElementById('hunt-results');
+  if(!d.count){
+    res.innerHTML = '<div style="font-family:var(--mono);font-size:9px;color:var(--txt3);padding:20px;text-align:center">Nenhum resultado para esta query</div>';
+    return;
+  }
+
+  const SEV_C = {CRITICAL:'var(--red)',HIGH:'var(--ora)',MEDIUM:'var(--yel)',LOW:'var(--grn)'};
+  res.innerHTML = `
+    <div class="hunt-result-row hunt-result-hdr">
+      <span>TIMESTAMP</span><span>SEVERITY</span><span>RULE</span><span>DETAILS</span>
+    </div>
+    ${d.results.map((e,i) => `
+      <div class="hunt-result-row" onclick="showHuntDetail(${i})">
+        <span style="color:var(--txt3)">${e.timestamp?.slice(11,19)||''}</span>
+        <span><span class="hunt-chip" style="background:rgba(0,0,0,.3);color:${SEV_C[e.severity]||'var(--txt)'}">${e.severity||''}</span></span>
+        <span style="color:var(--acc);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.rule_name||e.event_type||''}</span>
+        <span style="color:var(--txt2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${e.details?.process||e.details?.ip||e.details?.port||e.host_id||''}
+        </span>
+      </div>`).join('')}`;
+
+  window._huntResults = d.results;
+}
+
+function showHuntDetail(idx){
+  const e  = window._huntResults?.[idx];
+  if(!e) return;
+  const el = document.getElementById('hunt-detail');
+  el.style.display = 'block';
+  el.textContent   = JSON.stringify(e, null, 2);
+}
+
+async function loadHuntSuggestions(){
+  const r = await api('/hunt/suggestions');
+  if(!r?.suggestions) return;
+  const el = document.getElementById('hunt-suggestions');
+  el.innerHTML = r.suggestions.map(s =>
+    `<div class="hunt-sug" onclick="document.getElementById('hunt-query').value='${s.query}';onHuntInput(document.getElementById('hunt-query'))" title="${s.desc}">
+      ${s.name}
+    </div>`
+  ).join('');
+}
+
+// ── Lateral Movement ──────────────────────────────────────────────
+async function loadLateral(){
+  const d = await api('/lateral/alerts');
+  if(!d) return;
+
+  const stats = d.stats || {};
+  $('lat-ingested', stats.total_ingested || 0);
+  $('lat-alerts',   stats.total_alerts   || 0);
+  $('lat-tracked',  stats.tracked_ips    || 0);
+  $('lat-rules',    stats.rules_active   || 5);
+
+  const list = document.getElementById('lateral-alerts-list');
+  const alerts = d.alerts || [];
+  if(!alerts.length){
+    list.innerHTML = '<div style="font-family:var(--mono);font-size:9px;color:var(--txt3);padding:20px;text-align:center">Nenhum alerta ainda</div>';
+    return;
+  }
+
+  const SEV_C = {CRITICAL:'var(--red)',HIGH:'var(--ora)',MEDIUM:'var(--yel)'};
+  list.innerHTML = alerts.map(a => `
+    <div class="lateral-alert">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span style="font-family:var(--mono);font-size:8px;padding:1px 6px;border-radius:2px;
+          background:rgba(255,100,0,.1);color:var(--ora);border:1px solid rgba(255,100,0,.3)">
+          ${a.rule_id}
+        </span>
+        <span style="font-family:var(--head);font-size:11px;font-weight:700;color:${SEV_C[a.severity]||'var(--txt)'}">
+          ${a.rule_name}
+        </span>
+        <span style="font-family:var(--mono);font-size:8px;color:var(--txt3);margin-left:auto">
+          conf: ${a.confidence}% · ${a.timestamp?.slice(11,19)||''}
+        </span>
+      </div>
+      <div style="font-family:var(--body);font-size:10px;color:var(--txt2)">${a.description}</div>
+      <div class="lateral-hosts">
+        ${(a.hosts_involved||[]).map(h => `<span class="lateral-host-chip">${h}</span>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+async function lateralDemo(){
+  const r = await fetch('/api/lateral/demo',{method:'POST'});
+  if(r.ok){
+    const d = await r.json();
+    toast(`Demo: ${d.injected} alertas injetados`,'ok');
+    await loadLateral();
+  }
+}
+
+// ── YARA ──────────────────────────────────────────────────────────
+const YARA_RULES = [
+  {name:'Mimikatz',          desc:'Credential dump',      sev:'CRITICAL'},
+  {name:'PowerShell Obf.',   desc:'Encoded/obfuscated PS', sev:'HIGH'},
+  {name:'Reverse Shell',     desc:'/dev/tcp, nc -e, bash', sev:'CRITICAL'},
+  {name:'Cobalt Strike',     desc:'Beacon patterns',       sev:'CRITICAL'},
+  {name:'Dropper/Downloader',desc:'Download + exec',       sev:'HIGH'},
+  {name:'WebShell PHP',      desc:'PHP eval + base64',     sev:'CRITICAL'},
+  {name:'Metasploit',        desc:'Meterpreter patterns',  sev:'CRITICAL'},
+  {name:'Cred. Harvester',   desc:'/etc/shadow, SAM',      sev:'HIGH'},
+];
+
+async function loadYara(){
+  const d = await api('/yara/stats');
+  if(!d) return;
+  $('yara-backend', d.native ? '✓ yara-python nativo' : '⚡ regex fallback (instale yara-python)');
+  $('yara-scans',   d.total_scans || 0);
+  $('yara-hits',    d.total_hits  || 0);
+
+  const SEV_C = {CRITICAL:'var(--red)',HIGH:'var(--ora)',MEDIUM:'var(--yel)'};
+  const rulesEl = document.getElementById('yara-rules-list');
+  if(rulesEl){
+    rulesEl.innerHTML = YARA_RULES.map(r => `
+      <div class="yara-rule-card">
+        <div class="yara-rule-name" style="color:${SEV_C[r.sev]||'var(--acc)'}">${r.name}</div>
+        <div class="yara-rule-desc">${r.desc}</div>
+        <div style="font-family:var(--mono);font-size:7px;color:var(--txt3);margin-top:3px">${r.sev}</div>
+      </div>`).join('');
+  }
+}
+
+async function runYaraScan(){
+  const content = document.getElementById('yara-content')?.value?.trim();
+  if(!content){ toast('Cole conteúdo para analisar','err'); return; }
+
+  const r = await fetch('/api/yara/scan',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({content, context:'manual'})
+  });
+  if(!r.ok){ toast('Erro ao escanear','err'); return; }
+  const d = await r.json();
+
+  // Update stats
+  const s = await api('/yara/stats');
+  if(s){ $('yara-scans',s.total_scans||0); $('yara-hits',s.total_hits||0); }
+
+  const res = document.getElementById('yara-results');
+  if(!d.match_count){
+    res.innerHTML = '<div style="font-family:var(--mono);font-size:9px;color:var(--grn);padding:12px;background:rgba(0,255,150,.05);border:1px solid rgba(0,255,150,.15);border-radius:3px">✓ Nenhuma ameaça detectada nas regras YARA</div>';
+    return;
+  }
+
+  const SEV_C = {CRITICAL:'var(--red)',HIGH:'var(--ora)',MEDIUM:'var(--yel)'};
+  res.innerHTML = d.matches.map(m => `
+    <div class="yara-match">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="yara-match-title" style="color:${SEV_C[m.severity]||'var(--red)'}">
+          ⚠ ${m.rule}
+        </div>
+        <span style="font-family:var(--mono);font-size:7px;padding:1px 5px;border-radius:2px;
+          background:rgba(255,50,80,.1);color:${SEV_C[m.severity]||'var(--red)'}">
+          ${m.severity}
+        </span>
+        ${m.mitre_technique ? `<span style="font-family:var(--mono);font-size:7px;color:var(--txt3)">${m.mitre_technique}</span>` : ''}
+      </div>
+      <div style="font-family:var(--body);font-size:10px;color:var(--txt2);margin:4px 0">${m.description}</div>
+      <div class="yara-strings">
+        ${m.matched_strings.map(s => `<span class="yara-string-chip">${s}</span>`).join('')}
+      </div>
+    </div>`).join('');
+
+  toast(`${d.match_count} regra${d.match_count>1?'s':''} YARA disparou!`, 'err');
+}
+
+function clearYara(){
+  document.getElementById('yara-content').value = '';
+  document.getElementById('yara-results').innerHTML = '';
 }
 
 // ── Auto Block ───────────────────────────────────────────────────
