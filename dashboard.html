@@ -802,6 +802,22 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 .corr-pattern-icon{font-size:18px;flex-shrink:0}
 #corr-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;gap:8px;color:var(--txt3);font-family:var(--mono);font-size:10px}
 
+/* ── ML BASELINE PAGE ────────────────────────────────────────────── */
+#p-ml{flex-direction:column;padding:20px;gap:16px;overflow-y:auto}
+.ml-status-card{background:#060e1a;border:1px solid #102840;border-radius:4px;padding:16px 20px;display:flex;align-items:center;gap:16px}
+.ml-progress-wrap{flex:1}
+.ml-progress-bar-bg{height:10px;background:#0a1428;border-radius:5px;overflow:hidden;margin:6px 0}
+.ml-progress-bar{height:100%;border-radius:5px;transition:width .5s ease;background:linear-gradient(90deg,var(--pur),var(--acc))}
+.ml-stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.ml-stat{background:#060e1a;border:1px solid #102840;border-radius:3px;padding:10px 14px;display:flex;flex-direction:column;align-items:center}
+.ml-stat-n{font-family:var(--head);font-size:20px;font-weight:900;line-height:1}
+.ml-stat-l{font-family:var(--mono);font-size:7px;letter-spacing:.08em;text-transform:uppercase;color:var(--txt3);margin-top:3px}
+.ml-anomaly-card{background:#06101e;border:1px solid rgba(255,50,80,.25);border-radius:4px;padding:12px 16px;margin-bottom:8px}
+.ml-feature-row{display:flex;align-items:center;gap:8px;padding:4px 0;font-family:var(--mono);font-size:9px}
+.ml-feature-bar{flex:1;height:4px;background:#0a1428;border-radius:2px;overflow:hidden}
+.ml-feature-fill{height:100%;border-radius:2px;background:var(--ora);transition:width .3s}
+#ml-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px;color:var(--txt3);font-family:var(--mono);font-size:10px;text-align:center}
+
 /* ── SCROLLBARS ──────────────────────────────────────────────────── */
 ::-webkit-scrollbar{width:2px;height:2px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -848,6 +864,7 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
     <div class="tab" onclick="goPage('soc',this)"><div class="tab-dot"></div>🔎 SOC Events</div>
     <div class="tab" onclick="goPage('risk',this)"><div class="tab-dot"></div>🎯 Risk Score</div>
     <div class="tab" onclick="goPage('corr',this)"><div class="tab-dot"></div>🔗 Correlation</div>
+    <div class="tab" onclick="goPage('ml',this)"><div class="tab-dot"></div>🧠 ML Baseline</div>
   </div>
 
   <div class="hdr-r">
@@ -1472,6 +1489,61 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
   </div>
 </div>
 
+<!-- ── ML BASELINE ─────────────────────────────────────────────────── -->
+<div class="page" id="p-ml">
+  <!-- Status card -->
+  <div class="ml-status-card">
+    <div style="font-size:28px">🧠</div>
+    <div class="ml-progress-wrap">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div style="font-family:var(--head);font-size:13px;font-weight:700;color:var(--acc)">ML BASELINE — Isolation Forest</div>
+        <div id="ml-status-badge" style="font-family:var(--mono);font-size:8px;padding:2px 8px;border-radius:2px;background:rgba(255,220,0,.1);color:var(--yel);border:1px solid rgba(255,220,0,.3)">TREINANDO</div>
+      </div>
+      <div class="ml-progress-bar-bg">
+        <div class="ml-progress-bar" id="ml-progress-bar" style="width:0%"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between">
+        <div id="ml-progress-label" style="font-family:var(--mono);font-size:8px;color:var(--txt3)">0/30 amostras coletadas</div>
+        <div id="ml-progress-pct" style="font-family:var(--head);font-size:10px;color:var(--acc)">0%</div>
+      </div>
+    </div>
+    <button class="fbtn" onclick="loadML()" style="font-size:8px">↻</button>
+  </div>
+
+  <!-- Stats grid -->
+  <div class="ml-stat-grid">
+    <div class="ml-stat"><div class="ml-stat-n" id="ml-samples" style="color:var(--acc)">0</div><div class="ml-stat-l">Amostras</div></div>
+    <div class="ml-stat"><div class="ml-stat-n" id="ml-anomalies" style="color:var(--red)">0</div><div class="ml-stat-l">Anomalias</div></div>
+    <div class="ml-stat"><div class="ml-stat-n" id="ml-contamination" style="color:var(--yel)">5%</div><div class="ml-stat-l">Contaminação</div></div>
+    <div class="ml-stat"><div class="ml-stat-n" id="ml-min-samples" style="color:var(--pur)">30</div><div class="ml-stat-l">Min Amostras</div></div>
+  </div>
+
+  <!-- Info box -->
+  <div style="background:rgba(0,140,255,.06);border:1px solid rgba(0,200,255,.1);border-radius:3px;padding:12px 16px">
+    <div style="font-family:var(--head);font-size:10px;font-weight:700;color:var(--acc);margin-bottom:6px">Como funciona</div>
+    <div style="font-family:var(--body);font-size:10px;color:var(--txt2);line-height:1.6">
+      O Isolation Forest aprende o padrão normal do seu sistema durante as primeiras <b>30 amostras</b> (~15 minutos).
+      Depois detecta automaticamente comportamentos anômalos — picos de conexões, processos incomuns, variações de CPU — sem precisar de regras fixas.
+      É o mesmo conceito usado pelo <b>Darktrace</b> e pelo <b>Elastic ML Jobs</b>.
+    </div>
+    <div style="font-family:var(--mono);font-size:8px;color:var(--txt3);margin-top:8px">
+      Features monitoradas: process_count · conn_count · ext_conn_count · unique_ext_ips · cpu_mean · cpu_max · port_count · new_proc_rate
+    </div>
+  </div>
+
+  <!-- Anomalies -->
+  <div>
+    <div style="font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:8px;border-bottom:1px solid #102840;padding-bottom:4px">Anomalias Detectadas</div>
+    <div id="ml-anomalies-list">
+      <div id="ml-empty">
+        <span style="font-size:28px;opacity:.15">🧠</span>
+        <span>Coletando amostras para treinar o modelo</span>
+        <span style="font-size:9px;max-width:300px">Aguardando <span id="ml-remaining">30</span> ciclos de 30s para iniciar detecção automática</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── STATS ───────────────────────────────────────────────────────── -->
 <div class="page" id="p-stats">
   <div class="sp"><div class="ph"><span class="ph-t">Top Ameaças</span></div><div class="sp-body" id="st-thr"><div class="empty"><span>Sem dados</span></div></div></div>
@@ -1515,6 +1587,7 @@ function goPage(name,el){
   if(name==='soc')         loadSoc();
   if(name==='risk')        loadRisk();
   if(name==='corr')        loadCorrelation();
+  if(name==='ml')          loadML();
   if(name==='geomap'){
     loadGeo();
     if(liveInterval)clearInterval(liveInterval);
@@ -2842,6 +2915,87 @@ function showSocDetail(idx){
 
 async function loadSoc(){
   await Promise.all([loadSocStats(), loadSocEvents()]);
+}
+
+// ── ML Baseline ──────────────────────────────────────────────────
+let _mlAlerts = [];
+
+async function loadML(){
+  const data = await api('/ml/stats');
+  if(!data) return;
+
+  // Progress
+  const pct     = data.progress_pct || 0;
+  const trained = data.trained || false;
+  const samples = data.sample_count || 0;
+  const minS    = data.min_samples  || 30;
+  const anomC   = data.anomaly_count || 0;
+
+  document.getElementById('ml-progress-bar').style.width = pct + '%';
+  document.getElementById('ml-progress-pct').textContent  = pct + '%';
+  document.getElementById('ml-progress-label').textContent =
+    `${samples}/${minS} amostras coletadas`;
+  document.getElementById('ml-remaining').textContent =
+    Math.max(0, minS - samples);
+  document.getElementById('ml-samples').textContent     = samples;
+  document.getElementById('ml-anomalies').textContent   = anomC;
+  document.getElementById('ml-contamination').textContent =
+    ((data.contamination||0.05)*100).toFixed(0) + '%';
+  document.getElementById('ml-min-samples').textContent = minS;
+
+  // Status badge
+  const badge = document.getElementById('ml-status-badge');
+  if(trained){
+    badge.textContent = '✓ TREINADO';
+    badge.style.background = 'rgba(0,255,150,.1)';
+    badge.style.color       = 'var(--grn)';
+    badge.style.border      = '1px solid rgba(0,255,150,.3)';
+    document.getElementById('ml-progress-bar').style.background =
+      'linear-gradient(90deg,var(--grn),var(--acc))';
+  } else {
+    badge.textContent = 'TREINANDO';
+    badge.style.background = 'rgba(255,220,0,.1)';
+    badge.style.color       = 'var(--yel)';
+    badge.style.border      = '1px solid rgba(255,220,0,.3)';
+  }
+
+  // Anomalies list — check live-log for ml_anomaly events
+  if(anomC > 0 && _mlAlerts.length > 0){
+    const listEl = document.getElementById('ml-anomalies-list');
+    document.getElementById('ml-empty').style.display = 'none';
+    listEl.innerHTML = _mlAlerts.slice(-10).reverse().map(a => `
+      <div class="ml-anomaly-card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-family:var(--head);font-size:11px;font-weight:700;color:var(--red)">
+            ⚠ ${a.rule_name||'ML Anomalia'}
+          </span>
+          <span style="font-family:var(--mono);font-size:7px;padding:1px 6px;border-radius:2px;
+            background:rgba(255,50,80,.1);color:var(--red);border:1px solid rgba(255,50,80,.3)">
+            ${a.severity||'HIGH'}
+          </span>
+          <span style="font-family:var(--mono);font-size:8px;color:var(--txt3);margin-left:auto">
+            ${a.timestamp?.slice(11,19)||''}
+          </span>
+        </div>
+        <div style="font-family:var(--body);font-size:10px;color:var(--txt2)">
+          ${a.description||''}
+        </div>
+      </div>`).join('');
+  }
+}
+
+// Capture ML anomaly events from live-log
+const _origProcessLog = window._processLogEntry;
+function _mlCaptureLiveLog(entry){
+  if(entry && entry.type === 'ml_anomaly'){
+    _mlAlerts.push({
+      rule_name:   entry.threat,
+      severity:    entry.sev?.toUpperCase(),
+      description: entry.msg,
+      timestamp:   new Date().toISOString(),
+    });
+    if(_mlAlerts.length > 50) _mlAlerts.shift();
+  }
 }
 
 // ── Correlation Engine ───────────────────────────────────────────
