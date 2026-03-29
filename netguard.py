@@ -5,6 +5,17 @@ Janela nativa via pywebview.
 
 import sys, os, threading, time, subprocess, pathlib, argparse
 
+# Fix Windows DPI scaling so pywebview renders at correct size
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-monitor DPI aware
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
 BASE = pathlib.Path(__file__).parent.resolve()
 sys.path.insert(0, str(BASE))
 
@@ -54,23 +65,12 @@ def abrir_janela(port):
             url              = f"http://127.0.0.1:{port}",
             width            = 1440,
             height           = 900,
-            min_size         = (1024, 640),
+            min_size         = (1280, 720),
             resizable        = True,
             on_top           = False,
             background_color = "#060e1a",
             text_select      = True,
         )
-
-        def on_loaded():
-            # Injeta fix de cliques via JS após carregar
-            window.evaluate_js("""
-                document.addEventListener('click', function(e) {
-                    e.stopPropagation && e.stopPropagation();
-                }, false);
-                console.log('NetGuard click handler installed');
-            """)
-
-        window.events.loaded += on_loaded
 
         webview.start(
             debug            = False,
