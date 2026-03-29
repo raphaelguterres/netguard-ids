@@ -52,6 +52,24 @@ except Exception as _lm_err:
     LATERAL_AVAILABLE       = False
     print(f"[WARN] LateralMovement: {_lm_err}")
 
+# DNS Monitor
+try:
+    from engine.dns_monitor import DNSMonitor
+    _dns_monitor = DNSMonitor()
+    DNS_AVAILABLE = True
+except Exception as _dns_err:
+    DNSMonitor = None; _dns_monitor = None; DNS_AVAILABLE = False
+    print(f"[WARN] DNSMonitor: {_dns_err}")
+
+# IP Enrichment (Shodan + WHOIS)
+try:
+    from engine.enrichment import IPEnrichment
+    _enrichment = IPEnrichment()
+    ENRICH_AVAILABLE = True
+except Exception as _en_err:
+    IPEnrichment = None; _enrichment = None; ENRICH_AVAILABLE = False
+    print(f"[WARN] IPEnrichment: {_en_err}")
+
 # YARA Engine
 try:
     from engine.yara_engine import YaraEngine
@@ -1508,6 +1526,80 @@ def sigma_analyze():
 # ── Fail2Ban API ──────────────────────────────────────────────────
 
 # ── Detection Engine API ──────────────────────────────────────────
+
+# ── DNS Monitor API ───────────────────────────────────────────────
+
+@app.route("/api/dns/alerts")
+@auth
+def dns_alerts():
+    if not DNS_AVAILABLE or not _dns_monitor:
+        return jsonify({"available": False, "alerts": []})
+    limit = int(request.args.get("limit", 100))
+    return jsonify({
+        "available": True,
+        "alerts": _dns_monitor.get_alerts(limit),
+        "stats": _dns_monitor.stats(),
+    })
+
+@app.route("/api/dns/analyze", methods=["POST"])
+@auth
+def dns_analyze():
+    if not DNS_AVAILABLE or not _dns_monitor:
+        return jsonify({"error": "indisponível"}), 503
+    data = request.get_json(force=True) or {}
+    domain = data.get("domain", "").strip()
+    qtype = data.get("type", "A")
+    if not domain:
+        return jsonify({"error": "domain obrigatório"}), 400
+    result = _dns_monitor.analyze_domain(domain, qtype)
+    return jsonify(result)
+
+@app.route("/api/dns/demo", methods=["POST"])
+@auth
+def dns_demo():
+    if not DNS_AVAILABLE or not _dns_monitor:
+        return jsonify({"error": "indisponível"}), 503
+    alerts = _dns_monitor.inject_demo()
+    return jsonify({"injected": len(alerts), "alerts": alerts})
+
+@app.route("/api/dns/stats")
+@auth
+def dns_stats():
+    if not DNS_AVAILABLE or not _dns_monitor:
+        return jsonify({"available": False})
+    return jsonify(_dns_monitor.stats())
+
+# ── IP Enrichment API (Shodan + WHOIS) ────────────────────────────
+
+@app.route("/api/enrich/<ip>")
+@auth
+def enrich_ip(ip):
+    # Use new enrichment engine if available, fallback to old
+    if ENRICH_AVAILABLE and _enrichment:
+        try:
+            data = _enrichment.enrich(ip)
+            return jsonify(data)
+        except Exception as e:
+            pass
+    # Fallback to original enrichment
+    return jsonify({"ip": ip, "error": "enrichment unavailable"})
+
+@app.route("/api/enrich/bulk", methods=["POST"])
+@auth
+def enrich_bulk():
+    if not ENRICH_AVAILABLE or not _enrichment:
+        return jsonify({"error": "indisponível"}), 503
+    data = request.get_json(force=True) or {}
+    ips = data.get("ips", [])[:20]
+    results = _enrichment.bulk_enrich(ips)
+    return jsonify({"results": results, "count": len(results)})
+
+@app.route("/api/enrichment/stats")
+@auth
+def enrichment_stats():
+    if not ENRICH_AVAILABLE or not _enrichment:
+        return jsonify({"available": False})
+    return jsonify(_enrichment.stats())
 
 # ── Threat Hunting API ────────────────────────────────────────────
 

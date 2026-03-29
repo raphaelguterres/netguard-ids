@@ -47,13 +47,8 @@
   --blur:blur(12px);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-*::before,*::after{pointer-events:none!important}
-a,button,input,select,textarea,
-.tab,.fbtn,.azbtn,.lf-btn,.pghdr,.crow,
-.kc-inc-card,.payload-card,.f2b-jail-item,
-.f2b-tab,.f2b-ban-btn,.f2b-wl-btn,.f2b-unban-btn,
-.f2b-toggle,.toggle-switch,
-tbody tr,[onclick]{pointer-events:auto!important}
+*::before,*::after{pointer-events:none}
+a,button,input,select,textarea,[onclick]{cursor:pointer}
 html,body{
   height:100%;overflow:hidden;
   background:
@@ -63,11 +58,9 @@ html,body{
   color:var(--txt);font-size:13px;
 }
 
-/* ── SCANLINE OVERLAY ───────────────────────────────────────────── */
-
 
 /* ── APP SHELL ──────────────────────────────────────────────────── */
-#app{display:grid;grid-template-rows:52px 62px 1fr;height:100vh;overflow:hidden;position:relative}
+/* #app defined below */
 
 /* ── HEADER ─────────────────────────────────────────────────────── */
 #hdr{
@@ -88,26 +81,23 @@ html,body{
 .logo-ver{font-family:var(--mono);font-size:7px;color:var(--txt3);letter-spacing:.2em}
 
 /* TABS */
-.tabs{display:flex;height:100%;gap:0}
-.tab{
-  height:100%;padding:0 14px;display:flex;align-items:center;
-  font-family:var(--mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;
-  color:var(--txt2);cursor:pointer;border-bottom:2px solid transparent;
-  transition:all .2s;position:relative;top:1px;white-space:nowrap;gap:5px;
-}
-.tab:hover{color:var(--txt);background:rgba(0,229,255,.04)}
-.tab.on{color:var(--acc);border-bottom-color:var(--acc);background:rgba(0,229,255,.03)}
-.tab-dot{width:4px;height:4px;border-radius:50%;background:currentColor;opacity:.6}
+
+.tabs:hover{width:200px}
+.tabs.sidebar-expanded{width:200px}
+
+.tab:hover{color:var(--txt);background:rgba(255,255,255,.04)}
+.tab.on{color:var(--acc);border-bottom-color:var(--acc)}
+
 
 /* STATUS BAR */
 .hdr-r{margin-left:auto;display:flex;align-items:center;gap:16px}
 .stat-pill{display:flex;align-items:center;gap:5px;padding:3px 9px;
   border:1px solid var(--b2);border-radius:20px;background:var(--s2)}
 .stat-pill-dot{width:5px;height:5px;border-radius:50%}
-.stat-pill-dot.on{background:var(--grn);box-shadow:0 0 6px var(--grn);animation:pulse-dot 2s infinite}
-.stat-pill-dot.warn{background:var(--ora);box-shadow:0 0 6px var(--ora);animation:pulse-dot 1s infinite}
+.stat-pill-dot.on{background:var(--grn);box-shadow:0 0 6px var(--grn);animation:pulse-dot 4s infinite}
+.stat-pill-dot.warn{background:var(--ora);box-shadow:0 0 6px var(--ora);animation:pulse-dot 3s infinite}
 .stat-pill-dot.off{background:var(--txt3)}
-@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.6}}
 .stat-pill-txt{font-family:var(--mono);font-size:9px;color:var(--txt2)}
 #utc{font-family:var(--mono);font-size:10px;color:var(--txt3);letter-spacing:.05em;
   border-left:1px solid var(--b1);padding-left:14px;margin-left:2px}
@@ -116,7 +106,7 @@ html,body{
 #krow{
   display:grid;grid-template-columns:repeat(7,1fr);
   background:var(--s1);border-bottom:1px solid var(--b2);
-  overflow:hidden;position:relative;
+  overflow:hidden;position:relative;flex-shrink:0;
 }
 #krow::after{
   content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
@@ -135,23 +125,23 @@ html,body{
 .kpi::before{
   content:'';position:absolute;top:0;left:0;right:0;height:2px;
   background:var(--kc,transparent);
-  box-shadow:0 0 8px var(--kc,transparent),0 0 16px var(--kc,transparent);
-  opacity:.9;
+  opacity:.4;
   pointer-events:none!important;
   z-index:0;
 }
 .kpi-l{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--txt3);text-transform:uppercase;margin-bottom:2px}
-.kpi-n{font-family:var(--head);font-size:30px;font-weight:900;line-height:1;color:var(--kc,var(--txt));transition:all .4s}
+.kpi-n{font-family:var(--head);font-size:20px;font-weight:900;line-height:1;color:var(--txt)}
 .kpi-s{font-family:var(--mono);font-size:7px;color:var(--txt3);margin-top:2px;letter-spacing:.06em}
 .kpi.cr{--kc:var(--red)}.kpi.hi{--kc:var(--ora)}.kpi.me{--kc:var(--yel)}
 .kpi.lo{--kc:var(--grn)}.kpi.to{--kc:var(--acc)}.kpi.co{--kc:var(--pur)}.kpi.sy{--kc:var(--blu)}
-.kpi-n.flash{animation:kflash .4s ease}
-@keyframes kflash{0%,100%{opacity:1}50%{opacity:.3;transform:scale(1.05)}}
+
+50%{opacity:.6;transform:scale(1.02)}}
 
 /* ── BODY ────────────────────────────────────────────────────────── */
-#body{display:flex;overflow:hidden;position:relative}
+#body{display:flex;flex-direction:column;overflow:hidden;height:100%;min-height:0}
 .page{display:none;flex:1;overflow:hidden;visibility:hidden;pointer-events:none;-webkit-overflow-scrolling:touch}
-.page.on{display:flex;visibility:visible;pointer-events:auto}
+.page.on{display:flex;flex:1;min-height:0;visibility:visible;pointer-events:auto;overflow-y:auto;-webkit-overflow-scrolling:touch}
+
 
 /* ── PANEL PRIMITIVES ───────────────────────────────────────────── */
 .pnl{display:flex;flex-direction:column;overflow:hidden;background:#060e1c;border-right:1px solid #102840}
@@ -898,160 +888,756 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 .block-score-ring{width:38px;height:38px;border-radius:50%;border:2px solid var(--red);display:flex;align-items:center;justify-content:center;font-family:var(--head);font-size:10px;font-weight:900;color:var(--red);flex-shrink:0}
 .block-history-row{display:flex;gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid #0a1428;font-family:var(--mono);font-size:9px}
 
-/* ── TOUCH & SCROLL ─────────────────────────────────────────────── */
-.page.on{-webkit-overflow-scrolling:touch}
-button,a,[onclick]{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-input,select,textarea{font-size:16px!important} /* Prevent iOS zoom on focus */
+/* ═══════════════════════════════════════════════════════════════
+   LAYOUT — fixed 1280×960, clean, no conflicts
+   ═══════════════════════════════════════════════════════════════ */
 
-/* ── SCROLLBARS ──────────────────────────────────────────────────── */
-::-webkit-scrollbar{width:2px;height:2px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--b2);border-radius:1px}
-
-/* ══════════════════════════════════════════════════════════════
-   RESPONSIVE — Mobile & Tablet Support
-   Breakpoints:
-     < 768px  → mobile  (single column, hamburger menu)
-     768-1024 → tablet  (condensed tabs, smaller fonts)
-   ══════════════════════════════════════════════════════════════ */
-
-/* ── Mobile menu button (hidden on desktop) ── */
-#mobile-menu-btn{
-  display:none;
-  background:none;border:none;cursor:pointer;
-  padding:6px;color:var(--acc);font-size:18px;
-  flex-shrink:0;
+/* ── App shell: 3 rows ─────────────────────────────────────── */
+#app {
+  display: grid;
+  grid-template-rows: 48px 40px 1fr;
+  height: 100vh;
+  overflow: hidden;
 }
 
-/* ── Tablet (768px – 1024px) ───────────────── */
-@media (max-width:1024px){
-  /* Tab bar scrolls horizontally */
-  .tabs{
-    overflow-x:auto;overflow-y:hidden;
-    -webkit-overflow-scrolling:touch;
-    scrollbar-width:none;
-  }
-  .tabs::-webkit-scrollbar{display:none}
-  .tab{padding:0 10px;font-size:7px}
+/* ── Header row (48px) ─────────────────────────────────────── */
+#hdr {
+  background: #040c18;
+  border-bottom: 1px solid rgba(0,200,255,.1);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 0;
+}
+.logo { display: flex; align-items: center; gap: 8px; margin-right: 24px; }
+.logo-icon { width: 26px; height: 26px; }
+.logo-icon svg { width: 100%; height: 100%; }
+.logo-name {
+  font-family: var(--head);
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  background: linear-gradient(135deg, var(--acc) 0%, var(--pur) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.logo-ver { font-family: var(--mono); font-size: 7px; color: var(--txt3); letter-spacing: .15em; }
+.hdr-r { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.stat-pill {
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid rgba(0,200,255,.1);
+  border-radius: 20px;
+  background: transparent;
+}
+.stat-pill-dot { width: 5px; height: 5px; border-radius: 50%; }
+.stat-pill-dot.on { background: var(--grn); animation: pulse-dot 4s infinite; }
+.stat-pill-dot.warn { background: var(--ora); animation: pulse-dot 3s infinite; }
+.stat-pill-dot.off { background: var(--txt3); }
+.stat-pill-txt { font-family: var(--mono); font-size: 8px; color: var(--txt3); }
+#utc { font-family: var(--mono); font-size: 8px; color: var(--txt3); padding-left: 12px; border-left: 1px solid rgba(0,200,255,.08); }
+#mobile-menu-btn { display: none; background: none; border: none; cursor: pointer; padding: 4px; color: var(--acc); font-size: 18px; }
 
-  /* Header condensed */
-  .logo-ver{display:none}
-  #hdr-stats{gap:12px}
-  .hdr-stat-n{font-size:13px}
+/* ── Tab bar wrapper + scroll arrows (40px row) ─────────────── */
+.tabs-wrapper {
+  display: flex;
+  align-items: stretch;
+  background: #040c18;
+  border-bottom: 1px solid rgba(0,200,255,.08);
+  overflow: hidden;
+}
+.tab-scroll-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  min-width: 26px;
+  background: transparent;
+  border: none;
+  color: rgba(0,200,255,.3);
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color .15s;
+  padding: 0;
+  line-height: 1;
+}
+.tab-scroll-btn:hover { color: var(--acc); background: rgba(0,200,255,.05); }
+#tab-scroll-left {
+  border-right: 1px solid rgba(0,200,255,.06);
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  min-width: 0;
+}
+.tabs-wrapper.scrolled #tab-scroll-left { opacity: 1; pointer-events: auto; width: 26px; min-width: 26px; }
+#tab-scroll-right { border-left: 1px solid rgba(0,200,255,.06); opacity: .4; }
+#tab-scroll-right:hover { opacity: 1; }
 
-  /* Grids: 2 cols max on tablet */
-  #krow{grid-template-columns:repeat(4,1fr)!important}
-  #f2b-stats{grid-template-columns:repeat(3,1fr)!important}
-  #soc-stats-row{grid-template-columns:repeat(3,1fr)!important}
-  .ml-stat-grid{grid-template-columns:repeat(2,1fr)!important}
-  .block-stat-row{grid-template-columns:repeat(2,1fr)!important}
-  .ml-stat-grid{grid-template-columns:repeat(2,1fr)!important}
+/* ── Tab bar ─────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  height: 100%;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
 
-  /* System page */
-  .sys-grid{grid-template-columns:1fr!important}
+/* ── Individual tab ──────────────────────────────────────────── */
+.tab {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 11px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: rgba(100,160,200,.6);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color .12s, border-color .12s, background .12s;
+  user-select: none;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+}
+.tab:hover { color: rgba(100,160,200,.9); background: rgba(0,200,255,.03); }
+.tab.on {
+  color: var(--acc);
+  border-bottom-color: var(--acc);
+  background: rgba(0,200,255,.05);
+  font-weight: 600;
 }
 
-/* ── Mobile (< 768px) ─────────────────────── */
-@media (max-width:768px){
-  /* App layout: header + content (tab bar becomes mobile drawer) */
-  #app{
-    grid-template-rows:52px 1fr;
-  }
-  /* Tab bar row is now 0px — drawer overlays */
-  .tabs-row-spacer{display:none}
+/* KPI in original CSS */
 
-  /* Header */
-  #hdr{padding:0 12px}
-  .logo-ver{display:none}
-  #hdr-stats{display:none}
-  #mobile-menu-btn{display:flex;align-items:center}
 
-  /* Tab drawer — hidden by default, slides in from top */
-  .tabs{
-    display:flex;
-    position:fixed;top:52px;left:0;right:0;
-    background:#060e20;
-    border-bottom:2px solid var(--acc);
-    flex-direction:column;
-    z-index:1000;
-    max-height:0;
-    overflow:hidden;
-    box-shadow:0 8px 24px rgba(0,0,0,.6);
-    transition:max-height .25s ease;
-  }
-  .tabs.mobile-open{max-height:70vh;overflow-y:auto}
-  .tab{
-    height:40px;padding:0 16px;
-    border-bottom:1px solid #0a1428;
-    border-left:none;
-    font-size:9px;letter-spacing:.08em;
-  }
-  .tab.on{
-    border-left:3px solid var(--acc);
-    border-bottom:1px solid #0a1428;
-  }
 
-  /* Pages fill full height */
-  .page{height:calc(100vh - 52px)}
 
-  /* All grids → 1 column */
-  #krow{grid-template-columns:repeat(2,1fr)!important}
-  #f2b-stats{grid-template-columns:repeat(2,1fr)!important}
-  #soc-stats-row{grid-template-columns:repeat(2,1fr)!important}
-  #risk-summary-row{grid-template-columns:1fr!important}
-  .ml-stat-grid{grid-template-columns:repeat(2,1fr)!important}
-  .block-stat-row{grid-template-columns:repeat(2,1fr)!important}
-  .sys-grid{grid-template-columns:1fr!important}
-  .owasp-stat-grid{grid-template-columns:repeat(2,1fr)!important}
-  .payload-grid{grid-template-columns:1fr!important}
+.kpi.cr 
+.kpi.hi 
 
-  /* Connection table */
-  .crow{grid-template-columns:1fr auto;gap:6px;padding:5px 10px}
-  .crow-port,.crow-pid{display:none}
-  #conn-list{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.kpi.cr { --kc: var(--red); }
+.kpi.hi { --kc: var(--ora); }
+.kpi.me { --kc: var(--yel); }
+.kpi.lo { --kc: var(--grn); }
+.kpi.to { --kc: var(--acc); }
+.kpi.co { --kc: var(--pur); }
+.kpi.sy { --kc: var(--blu); }
 
-  /* Panels padding */
-  .page > *{padding-left:10px!important;padding-right:10px!important}
 
-  /* Live graph page */
-  #p-live{flex-direction:column}
 
-  /* Text adjustments */
-  .pghdr{font-size:9px!important}
-  .panel-title{font-size:9px!important}
-
-  /* Overview page top stats */
-  #p-overview > .pn-row:first-child{flex-direction:column}
-
-  /* ML and AutoBlock header rows */
-  .ml-status-card{flex-wrap:wrap}
-  .block-header-row{flex-wrap:wrap;gap:8px}
-  .block-threshold-wrap{font-size:8px}
-
-  /* Tables overflow scroll */
-  table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
-
-  /* Geo map */
-  #geo-map-container{height:220px!important}
-
-  /* Kill chain */
-  .kc-inc-card{padding:8px 10px}
-
-  /* Risk score */
-  #risk-host-list{font-size:9px}
-
-  /* Scrollbar visible on mobile for content areas */
-  .page.on{overflow-y:auto}
+/* ── Mobile: drawer ──────────────────────────────────────────── */
+@media (max-width: 600px) {
+  #app { grid-template-rows: 48px 0 1fr; }
+  #mobile-menu-btn { display: flex; align-items: center; }
+  .tabs-wrapper { position: fixed; top: 48px; left: 0; right: 0; z-index: 500; max-height: 0; overflow: hidden; transition: max-height .25s ease; border-bottom: 2px solid var(--acc); }
+  .tabs-wrapper.mobile-open { max-height: 75vh; overflow-y: auto; }
+  .tabs { flex-direction: column; height: auto; }
+  .tab { height: 44px; width: 100%; border-bottom: 1px solid rgba(0,200,255,.06); border-left: 2px solid transparent; font-size: 10px; }
+  .tab.on { border-left-color: var(--acc); border-bottom-color: rgba(0,200,255,.06); }
+  .tab-scroll-btn { display: none; }
+  #krow { grid-template-columns: repeat(4, 1fr) !important; }
 }
 
-/* ── Small mobile (< 480px) ─────────────────── */
-@media (max-width:480px){
-  #krow{grid-template-columns:1fr 1fr!important}
-  .logo-name{font-size:11px}
-  .tab{font-size:8px}
-  .hdr-badge{display:none}
+/* ── Responsive tablet ───────────────────────────────────────── */
+@media (max-width: 960px) and (min-width: 601px) {
+  .tab { padding: 0 8px; font-size: 8.5px; }
+  #krow { grid-template-columns: repeat(5, 1fr); }
+  .kpi:nth-child(6), .kpi:nth-child(7) { display: none; }
+}
+/* ── TARGETED FIXES from screenshot review ─────────────────── */
+
+/* KPI row: proper height, no colored squares artifact */
+#krow {
+  min-height: 52px;
+  max-height: 64px;
+}
+.kpi { padding: 0 16px; min-height: 52px; }
+.kpi-n { font-size: 22px !important; color: var(--txt) !important; }
+.kpi.cr .kpi-n { color: var(--red) !important; }
+.kpi.hi .kpi-n { color: var(--ora) !important; }
+
+/* Remove colored background from kpi numbers - just text color */
+.kpi::before { height: 2px; opacity: .35; background: var(--kc, transparent); }
+/* No glow, no box-shadow, no background on kpi */
+.kpi-n.flash { animation: none !important; }
+
+/* Left panel: no visible scrollbar in middle */
+#ov-left { 
+  display: flex; 
+  flex-direction: column;
+  overflow: hidden;
+}
+#dev-card-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+/* Hide the duplicate dev-card-list */
+#dev-card-list + #dev-card-list,
+#dev-detail-drawer + #dev-detail-drawer { display: none; }
+
+/* Detail drawer: fixed at bottom, not floating */
+#detail {
+  flex-shrink: 0;
+  max-height: 130px;
+  background: #040c18;
+  border-top: 1px solid rgba(0,200,255,.1);
 }
 
+/* Right panel: better use of space */
+#ov-right {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#mini-graph { flex: 0 0 160px; }
+#mini-log { flex: 1; min-height: 0; overflow: hidden; }
+#mini-log-scroll { flex: 1; overflow-y: auto; }
+
+/* Ticker: subtle */
+#ticker { 
+  height: 22px; 
+  background: #030810;
+  border-top: 1px solid rgba(0,200,255,.06);
+}
+.tk-lbl { font-size: 5px; letter-spacing: .15em; }
+#tk-inner { font-size: 8px; }
+
+/* Tab icons: ensure emoji render correctly */
+.tab { font-size: 9px; gap: 4px; }
+
+/* Panel header consistency */
+.ph { height: 30px; background: rgba(3,8,16,.9); }
+.ph-t { font-size: 8px; letter-spacing: .08em; color: var(--txt2); }
+
+/* Scrollbar: only in content areas */
+.pscroll::-webkit-scrollbar,
+#conn-scroll::-webkit-scrollbar,
+#log-scroll::-webkit-scrollbar,
+#mini-log-scroll::-webkit-scrollbar { width: 2px; }
+.pscroll::-webkit-scrollbar-thumb,
+#conn-scroll::-webkit-scrollbar-thumb,
+#log-scroll::-webkit-scrollbar-thumb,
+#mini-log-scroll::-webkit-scrollbar-thumb { background: rgba(0,200,255,.12); }
+
+/* Remove the vertical scrollbar appearing in left panel */
+#ov-left::-webkit-scrollbar { width: 0; }
+
+/* Overview center: table area fills properly */
+#ov-center {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+#ftbl { flex: 1; overflow-y: auto; }
+
+/* Fctrl bar */
+#fctrl { background: rgba(4,9,15,.9); height: 34px; flex-shrink: 0; }
+
+/* Fix: empty state center alignment */
+.empty { 
+  height: 100%;
+  color: var(--txt3);
+}
+
+
+/* ══ HEIGHT FIX — pages fill full screen ══════════════════════ */
+
+/* Grid child: body must fill the 1fr row */
+#body {
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+/* All pages: fill body height */  
+.page.on {
+  height: 100% !important;
+  min-height: 0 !important;
+  flex: 1 1 0 !important;
+}
+
+/* Overview 3-col layout */
+#p-overview { flex-direction: row !important; }
+#ov-left  { height: 100%; min-height: 0; overflow: hidden; }
+#ov-center{ height: 100%; min-height: 0; overflow: hidden; flex: 1; }
+#ov-right { height: 100%; min-height: 0; overflow: hidden; }
+
+/* Connections */
+#p-connections { flex-direction: row !important; }
+#p-connections > div { height: 100%; min-height: 0; }
+
+/* Live */
+#p-live { flex-direction: row !important; }
+#graph-panel, #log-panel { height: 100%; min-height: 0; }
+
+/* All other pages: column flex */
+#p-geomap, #p-system, #p-owasp, #p-analyze,
+#p-stats, #p-killchain, #p-fail2ban, #p-soc,
+#p-risk, #p-corr, #p-ml, #p-block,
+#p-hunt, #p-lateral, #p-yara {
+  flex-direction: column !important;
+  height: 100% !important;
+  overflow: auto !important;
+}
+
+/* Kill chain 2-col */
+#p-killchain { flex-direction: row !important; overflow: hidden !important; }
+#kc-left, #kc-right { height: 100%; min-height: 0; overflow: hidden; }
+
+/* Fail2ban 2-col */
+#p-fail2ban { flex-direction: row !important; overflow: hidden !important; }
+#f2b-sidebar, #f2b-main { height: 100%; min-height: 0; overflow: hidden; }
+
+/* Risk 2-col */  
+#p-risk { flex-direction: row !important; overflow: hidden !important; }
+#risk-hosts-panel, #risk-detail { height: 100%; min-height: 0; overflow: hidden; }
+
+/* SOC column */
+#p-soc { flex-direction: column !important; overflow: hidden !important; }
+#soc-table-wrap { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* Analyze 2-col */
+#p-analyze { flex-direction: row !important; overflow: hidden !important; }
+.az-l, .az-r { height: 100%; min-height: 0; overflow: hidden; }
+
+/* Geomap column */
+#p-geomap { flex-direction: column !important; overflow: hidden !important; }
+#geo-wrap { flex: 1; min-height: 0; overflow: hidden; }
+
+/* System 2-col */
+#p-system { flex-direction: row !important; overflow: hidden !important; }
+#sys-left, #sys-right { height: 100%; min-height: 0; overflow: hidden; }
+
+
+/* ════════════════════════════════════════════════════════════════
+   INTERNAL PAGES POLISH — consistent design system
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── Design tokens ──────────────────────────────────────────── */
+:root {
+  --card-bg: #050d1a;
+  --card-border: rgba(0,200,255,.1);
+  --card-hover: rgba(0,200,255,.04);
+  --section-header-bg: rgba(4,9,20,.95);
+  --stat-n-size: 24px;
+}
+
+/* ── Global card style ──────────────────────────────────────── */
+.corr-stat, .ml-stat, .block-stat, .lateral-stat,
+.f2b-stat, .soc-stat, .risk-sum-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  transition: border-color .2s;
+}
+.corr-stat:hover, .ml-stat:hover, .block-stat:hover {
+  border-color: rgba(0,200,255,.2);
+}
+
+/* ── Stat numbers: consistent size ─────────────────────────── */
+.corr-stat-n, .ml-stat-n, .block-stat-n, .lateral-stat-n,
+.f2b-stat-value, .soc-stat-value, .risk-sum-n {
+  font-size: var(--stat-n-size) !important;
+  font-weight: 900;
+  line-height: 1;
+  font-family: var(--head);
+}
+
+/* ── Section headers: consistent ────────────────────────────── */
+.kc-section-title, .f2b-stat-label, .soc-stat-label,
+.corr-stat-l, .ml-stat-l, .block-stat-l, .lateral-stat-l {
+  font-family: var(--mono);
+  font-size: 7px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--txt3);
+  margin-top: 3px;
+}
+
+/* ── Panel headers: unified ─────────────────────────────────── */
+.ph, #soc-topbar, #corr-header, #f2b-topbar,
+#risk-hosts-header, #f2b-sidebar-header {
+  background: var(--section-header-bg) !important;
+  border-bottom-color: var(--card-border) !important;
+}
+
+/* ── Tables: cleaner ────────────────────────────────────────── */
+.soc-table thead tr, .f2b-table thead tr,
+.f2b-table th, .soc-table th {
+  background: rgba(4,9,20,.98);
+  font-size: 7.5px;
+  letter-spacing: .1em;
+  color: var(--txt3);
+  border-bottom-color: var(--card-border);
+}
+.soc-table tbody tr:hover, .f2b-table tbody tr:hover {
+  background: var(--card-hover);
+}
+.soc-table td, .f2b-table td {
+  font-size: 10px;
+  padding: 8px 12px;
+  border-bottom-color: rgba(0,200,255,.04);
+}
+
+/* ── Empty states: centered, subtle ─────────────────────────── */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--txt3);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-align: center;
+  padding: 40px 20px;
+  opacity: .7;
+}
+.empty span:first-child { font-size: 28px; opacity: .2; }
+
+/* ── Cards: consistent padding/radius ───────────────────────── */
+.corr-card, .ml-anomaly-card, .block-card,
+.lateral-alert, .yara-match, .kc-rec {
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+.corr-card {
+  border-color: var(--card-border);
+  background: var(--card-bg);
+}
+.corr-card:hover { border-color: rgba(0,200,255,.22); }
+
+/* ── SOC Events page ────────────────────────────────────────── */
+#soc-stats-row {
+  background: var(--section-header-bg);
+  border-bottom: 1px solid var(--card-border);
+}
+.soc-stat {
+  padding: 10px 16px;
+  border-right-color: var(--card-border);
+}
+#soc-filters {
+  background: rgba(3,8,16,.95);
+  border-bottom-color: var(--card-border);
+  height: 36px;
+}
+.soc-rule-id {
+  font-size: 8px;
+  padding: 2px 6px;
+}
+
+/* ── Kill Chain page ─────────────────────────────────────────── */
+.kc-inc-card {
+  border-bottom-color: var(--card-border);
+  padding: 10px 14px;
+}
+.kc-inc-card:hover { background: var(--card-hover); }
+.kc-inc-ip { font-size: 13px; margin-bottom: 3px; }
+.kc-inc-meta { font-size: 8.5px; }
+.kc-tactic-pill { font-size: 7px; padding: 1px 6px; }
+/* MITRE heatmap cells */
+.mitre-cell { padding: 6px 4px; border-radius: 3px; }
+.mitre-cell-label { font-size: 6px; }
+.mitre-cell-count { font-size: 14px; }
+
+/* ── Fail2Ban page ───────────────────────────────────────────── */
+.f2b-jail-item {
+  padding: 9px 14px;
+  border-bottom-color: var(--card-border);
+}
+.f2b-jail-item:hover { background: var(--card-hover); }
+.f2b-jail-item.active { background: rgba(0,200,255,.05); }
+.f2b-jail-name { font-size: 10px; }
+.f2b-jail-meta { font-size: 7px; }
+
+/* ── Risk Score page ─────────────────────────────────────────── */
+.risk-host-card {
+  padding: 10px 14px;
+  border-bottom-color: var(--card-border);
+}
+.risk-host-card:hover { background: var(--card-hover); }
+.risk-host-name { font-size: 12px; }
+.risk-host-meta { font-size: 8px; }
+.risk-factor-row {
+  background: var(--card-bg);
+  border-color: var(--card-border);
+  border-radius: 3px;
+  margin-bottom: 4px;
+  padding: 7px 10px;
+}
+
+/* ── Correlation page ────────────────────────────────────────── */
+#corr-stats-row {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--card-border);
+  background: var(--section-header-bg);
+}
+.corr-stat { padding: 6px 14px; min-width: 70px; }
+.corr-card-header { padding: 10px 14px; }
+.corr-conf-ring { width: 34px; height: 34px; font-size: 9px; }
+.corr-evidence-item {
+  background: rgba(4,9,20,.9);
+  border-radius: 3px;
+  padding: 4px 8px;
+  margin-bottom: 3px;
+  font-size: 9px;
+}
+
+/* ── ML Baseline page ────────────────────────────────────────── */
+.ml-status-card {
+  background: var(--card-bg);
+  border-color: var(--card-border);
+  border-radius: 4px;
+  padding: 14px 18px;
+}
+.ml-progress-bar-bg { height: 6px; border-radius: 3px; }
+.ml-progress-bar { border-radius: 3px; }
+.ml-stat { padding: 10px 14px; }
+.ml-anomaly-card {
+  background: rgba(255,50,80,.04);
+  border-left-width: 3px;
+  padding: 10px 14px;
+}
+
+/* ── Auto Block page ─────────────────────────────────────────── */
+.block-stat { padding: 8px 14px; }
+.block-card {
+  background: var(--card-bg);
+  border-color: rgba(255,50,80,.18);
+  border-radius: 4px;
+  padding: 10px 14px;
+  gap: 10px;
+}
+.block-ip { font-size: 13px; }
+.block-meta { font-size: 8px; margin-top: 2px; }
+
+/* ── Threat Hunt page ────────────────────────────────────────── */
+.hunt-sug {
+  background: var(--card-bg);
+  border-color: var(--card-border);
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 8px;
+  transition: border-color .15s, color .15s;
+}
+.hunt-sug:hover { border-color: var(--acc); color: var(--acc); }
+.hunt-result-row {
+  border-bottom-color: rgba(0,200,255,.05);
+  font-size: 9px;
+}
+.hunt-result-hdr {
+  background: var(--section-header-bg);
+  font-size: 7.5px;
+  letter-spacing: .08em;
+}
+#hunt-detail {
+  background: var(--card-bg);
+  border-color: var(--card-border);
+  border-radius: 3px;
+  font-size: 9px;
+}
+
+/* ── YARA page ───────────────────────────────────────────────── */
+.yara-rule-card {
+  background: var(--card-bg);
+  border-color: var(--card-border);
+  border-radius: 3px;
+  padding: 8px 12px;
+  transition: border-color .15s;
+}
+.yara-rule-card:hover { border-color: rgba(0,200,255,.2); }
+.yara-rule-name { font-size: 9px; }
+.yara-rule-desc { font-size: 8px; color: var(--txt3); }
+.yara-match {
+  border-left-width: 3px;
+  border-radius: 0 4px 4px 0;
+  padding: 10px 14px;
+}
+.yara-string-chip { font-size: 8px; padding: 1px 7px; }
+.yara-input {
+  border-color: var(--card-border);
+  background: rgba(3,8,16,.8);
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.yara-input:focus { border-color: var(--acc); outline: none; }
+
+/* ── Lateral Move page ───────────────────────────────────────── */
+.lateral-alert {
+  background: var(--card-bg);
+  border-left-width: 3px;
+  border-radius: 0 4px 4px 0;
+  padding: 10px 14px;
+}
+.lateral-host-chip {
+  font-size: 8px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: rgba(0,200,255,.06);
+  border-color: rgba(0,200,255,.18);
+}
+.lateral-stat { padding: 8px 14px; }
+
+/* ── Stats page ──────────────────────────────────────────────── */
+.sp {
+  border-color: var(--card-border);
+}
+.sp-body { padding: 12px 14px; }
+.br { margin-bottom: 6px; align-items: center; }
+.br-l { font-size: 9px; color: var(--txt); }
+.br-t { height: 3px; background: rgba(0,200,255,.08); }
+.br-f { background: var(--acc); }
+.br-c { font-size: 9px; color: var(--txt2); min-width: 24px; }
+.hbar { opacity: .65; border-radius: 2px 2px 0 0; }
+.hlbl { font-size: 6px; color: var(--txt3); }
+
+/* ── Connections page ────────────────────────────────────────── */
+.pghdr { padding: 7px 14px; }
+.pg-name { font-size: 11px; }
+.pg-badge { font-size: 7px; padding: 1px 5px; border-radius: 2px; }
+.crow { padding: 4px 14px 4px 30px; }
+.cr-ip { font-size: 9px; }
+.cr-port { font-size: 9px; }
+
+/* ── System page ─────────────────────────────────────────────── */
+.sys-card {
+  background: var(--card-bg);
+  border-color: var(--card-border);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+.sys-card-t { font-size: 7px; letter-spacing: .12em; color: var(--txt3); margin-bottom: 4px; }
+.sys-big { font-size: 24px; font-weight: 700; }
+.proc-row { padding: 4px 0; border-bottom-color: rgba(0,200,255,.05); }
+.pr-name { font-size: 10px; }
+.pr-cpu, .pr-mem { font-size: 9px; }
+.port-row { padding: 4px 0; border-bottom-color: rgba(0,200,255,.05); }
+.po-port { font-size: 10px; }
+.po-proc { font-size: 10px; }
+
+/* ── Analyze page ────────────────────────────────────────────── */
+.rcard {
+  background: var(--card-bg);
+  border-color: var(--card-border);
+  border-radius: 4px;
+  padding: 10px 14px;
+  margin-bottom: 6px;
+}
+.rcard-name { font-size: 12px; }
+.rcard-desc { font-size: 9px; line-height: 1.5; }
+.rcard-meta { font-size: 8px; gap: 10px; }
+.rclean { border-radius: 4px; padding: 12px 16px; }
+
+/* ── OWASP page ──────────────────────────────────────────────── */
+.owasp-card {
+  background: var(--card-bg);
+  border-color: var(--card-border);
+  border-radius: 4px;
+  padding: 9px 12px;
+  margin-bottom: 5px;
+}
+.ostat { background: var(--card-bg); border-color: var(--card-border); border-radius: 3px; }
+.ostat-n { font-size: 18px; font-weight: 900; }
+.payload-card {
+  background: var(--card-bg);
+  border-color: var(--card-border);
+  border-radius: 3px;
+  padding: 6px 9px;
+  transition: border-color .15s;
+}
+.payload-card:hover { border-color: rgba(0,200,255,.25); }
+.payload-title { font-size: 7px; letter-spacing: .08em; margin-bottom: 3px; }
+.payload-item { font-size: 8px; }
+
+/* ── Detail drawer ───────────────────────────────────────────── */
+#detail {
+  background: rgba(4,9,20,.98);
+  border-top-color: var(--card-border);
+}
+#det-hdr { border-bottom-color: var(--card-border); height: 28px; }
+#det-ttl { font-size: 10px; }
+#det-body { font-size: 9px; line-height: 1.5; }
+
+/* ── Buttons: consistent style ───────────────────────────────── */
+.fbtn {
+  padding: 4px 10px;
+  font-size: 8px;
+  background: rgba(0,200,255,.04);
+  border-color: rgba(0,200,255,.15);
+  border-radius: 3px;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.fbtn:hover {
+  background: rgba(0,200,255,.1);
+  border-color: rgba(0,200,255,.4);
+  color: var(--acc);
+}
+.fsel {
+  background: var(--card-bg);
+  border-color: var(--card-border);
+  border-radius: 3px;
+  font-size: 9px;
+  padding: 4px 8px;
+  color: var(--txt2);
+}
+.fsel:focus { border-color: var(--acc); outline: none; }
+
+/* ── Chips: consistent ───────────────────────────────────────── */
+.chip { font-size: 8px; padding: 2px 7px; border-radius: 3px; font-weight: 600; letter-spacing: .06em; }
+.chip.critical { color: var(--red); border-color: rgba(255,50,80,.3); background: rgba(255,50,80,.06); }
+.chip.high { color: var(--ora); border-color: rgba(255,136,0,.3); background: rgba(255,136,0,.06); }
+.chip.medium { color: var(--yel); border-color: rgba(255,214,0,.3); background: rgba(255,214,0,.06); }
+.chip.low { color: var(--grn); border-color: rgba(0,255,157,.2); background: rgba(0,255,157,.04); }
+
+/* ── Scrollbar: uniform 3px ──────────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: rgba(0,200,255,.12) transparent; }
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,200,255,.14); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,200,255,.28); }
+
+/* ── Toast ───────────────────────────────────────────────────── */
+#toast {
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 8px 14px;
+  backdrop-filter: blur(10px);
+}
+#toast.ok { border-color: rgba(0,255,157,.3); color: var(--grn); background: rgba(0,255,157,.06); }
+#toast.err { border-color: rgba(255,50,80,.3); color: var(--red); background: rgba(255,50,80,.06); }
+
+
+/* ── DNS MONITOR PAGE ───────────────────────────────────────── */
+#p-dns { flex-direction: column; padding: 16px; gap: 12px; overflow-y: auto; }
+.dns-stat-row { display: grid; grid-template-columns: repeat(5,1fr); gap: 8px; }
+.dns-stat { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 4px; padding: 8px 14px; text-align: center; }
+.dns-stat-n { font-family: var(--head); font-size: 22px; font-weight: 900; line-height: 1; }
+.dns-stat-l { font-family: var(--mono); font-size: 7px; letter-spacing: .1em; text-transform: uppercase; color: var(--txt3); margin-top: 3px; }
+.dns-alert { background: var(--card-bg); border-left: 3px solid var(--ora); border-radius: 0 4px 4px 0; padding: 10px 14px; margin-bottom: 6px; }
+.dns-alert.critical { border-left-color: var(--red); }
+.dns-alert.high { border-left-color: var(--ora); }
+.dns-alert.medium { border-left-color: var(--yel); }
+.dns-domain { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--acc); }
+.dns-score-badge { font-family: var(--mono); font-size: 8px; padding: 1px 6px; border-radius: 2px; background: rgba(255,136,0,.1); color: var(--ora); border: 1px solid rgba(255,136,0,.3); }
+.dns-analyze-input { width: 100%; background: rgba(3,8,16,.8); border: 1px solid var(--card-border); border-radius: 4px; color: var(--txt); font-family: var(--mono); font-size: 11px; padding: 9px 12px; outline: none; transition: border-color .15s; }
+.dns-analyze-input:focus { border-color: var(--acc); }
+.dns-result-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 4px; padding: 12px 16px; }
+.dns-verdict { font-family: var(--head); font-size: 13px; font-weight: 700; }
+.dns-verdict.clean { color: var(--grn); }
+.dns-verdict.suspicious { color: var(--yel); }
+.dns-verdict.malicious { color: var(--red); }
+.dns-score-bar { height: 6px; background: rgba(0,200,255,.08); border-radius: 3px; overflow: hidden; margin: 6px 0; }
+.dns-score-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
 </style>
 </head>
 <body>
@@ -1080,49 +1666,40 @@ input,select,textarea{font-size:16px!important} /* Prevent iOS zoom on focus */
     </div>
   </div>
 
-  <button id="mobile-menu-btn" onclick="toggleMobileMenu()" aria-label="Menu">
-    ☰
-  </button>
-
-  <div class="tabs" id="main-tabs">
-    <div class="tab on" onclick="goPage('overview',this)"><div class="tab-dot"></div>Visão Geral</div>
-    <div class="tab" onclick="goPage('connections',this)"><div class="tab-dot"></div>Conexões</div>
-    <div class="tab" onclick="goPage('live',this)"><div class="tab-dot"></div>⬡ Ao Vivo</div>
-    <div class="tab" onclick="goPage('geomap',this)"><div class="tab-dot"></div>🌐 Geo Map</div>
-    <div class="tab" onclick="goPage('system',this)"><div class="tab-dot"></div>Sistema</div>
-    <div class="tab" onclick="goPage('owasp',this)"><div class="tab-dot"></div>⚔ OWASP</div>
-    <div class="tab" onclick="goPage('analyze',this)"><div class="tab-dot"></div>Analisar</div>
-    <div class="tab" onclick="goPage('stats',this)"><div class="tab-dot"></div>Estatísticas</div>
-    <div class="tab" onclick="goPage('killchain',this)"><div class="tab-dot"></div>⛓ Kill Chain</div>
-    <div class="tab" onclick="goPage('fail2ban',this)"><div class="tab-dot"></div>🚫 Fail2Ban</div>
-    <div class="tab" onclick="goPage('soc',this)"><div class="tab-dot"></div>🔎 SOC Events</div>
-    <div class="tab" onclick="goPage('risk',this)"><div class="tab-dot"></div>🎯 Risk Score</div>
-    <div class="tab" onclick="goPage('corr',this)"><div class="tab-dot"></div>🔗 Correlation</div>
-    <div class="tab" onclick="goPage('ml',this)"><div class="tab-dot"></div>🧠 ML Baseline</div>
-    <div class="tab" onclick="goPage('block',this)"><div class="tab-dot"></div>🛡️ Auto Block</div>
-    <div class="tab" onclick="goPage('hunt',this)"><div class="tab-dot"></div>🔍 Threat Hunt</div>
-    <div class="tab" onclick="goPage('lateral',this)"><div class="tab-dot"></div>🌐 Lateral Move</div>
-    <div class="tab" onclick="goPage('yara',this)"><div class="tab-dot"></div>🦠 YARA</div>
-  </div>
-
   <div class="hdr-r">
-    <div class="stat-pill">
-      <div class="stat-pill-dot on" id="led-mon"></div>
-      <span class="stat-pill-txt">Monitor <span id="mon-cycle">#1</span></span>
-    </div>
-    <div class="stat-pill">
-      <div class="stat-pill-dot on" id="led-cap"></div>
-      <span class="stat-pill-txt">Captura · <span id="cap-iface">Ethernet</span></span>
-    </div>
-    <div class="stat-pill">
-      <div class="stat-pill-dot on"></div>
-      <span class="stat-pill-txt" id="intel-engine">Intel</span>
-    </div>
+    <div class="stat-pill"><div class="stat-pill-dot on" id="led-mon"></div><span class="stat-pill-txt">Monitor <span id="mon-cycle">#0</span></span></div>
+    <div class="stat-pill"><div class="stat-pill-dot on" id="led-cap"></div><span class="stat-pill-txt">Captura · <span id="cap-iface">—</span></span></div>
     <div id="utc">—</div>
   </div>
 </div>
 
-<!-- KPI ROW -->
+<div class="tabs-wrapper">
+  <button class="tab-scroll-btn" id="tab-scroll-left" onclick="scrollTabs(-200)" title="← Mais abas">‹</button>
+  <div class="tabs" id="main-tabs">
+    <div class="tab on" onclick="goPage('overview',this)" title="Visão Geral">◉ Visão Geral</div>
+    <div class="tab" onclick="goPage('connections',this)" title="Conexões">⇄ Conexões</div>
+    <div class="tab" onclick="goPage('live',this)" title="Ao Vivo">⬡ Ao Vivo</div>
+    <div class="tab" onclick="goPage('geomap',this)" title="Geo Map">🌐 Geo</div>
+    <div class="tab" onclick="goPage('system',this)" title="Sistema">⊞ Sistema</div>
+    <div class="tab" onclick="goPage('owasp',this)" title="OWASP">⚔ OWASP</div>
+    <div class="tab" onclick="goPage('analyze',this)" title="Analisar">⊕ Analisar</div>
+    <div class="tab" onclick="goPage('stats',this)" title="Estatísticas">≋ Stats</div>
+    <div class="tab" onclick="goPage('killchain',this)" title="Kill Chain">⛓ Kill Chain</div>
+    <div class="tab" onclick="goPage('fail2ban',this)" title="Fail2Ban">🚫 Fail2Ban</div>
+    <div class="tab" onclick="goPage('soc',this)" title="SOC Events">🔎 SOC</div>
+    <div class="tab" onclick="goPage('corr',this)" title="Correlation">🔗 Corr</div>
+    <div class="tab" onclick="goPage('risk',this)" title="Risk Score">🎯 Risk</div>
+    <div class="tab" onclick="goPage('ml',this)" title="ML Baseline">🧠 ML</div>
+    <div class="tab" onclick="goPage('block',this)" title="Auto Block">🛡 Block</div>
+    <div class="tab" onclick="goPage('hunt',this)" title="Threat Hunt">🔍 Hunt</div>
+    <div class="tab" onclick="goPage('lateral',this)" title="Lateral Move">🌐 Lateral</div>
+    <div class="tab" onclick="goPage('yara',this)" title="YARA">🦠 YARA</div>
+    <div class="tab" onclick="goPage('dns',this)" title="DNS Monitor">🌐 DNS</div>
+  </div>
+  <button class="tab-scroll-btn" id="tab-scroll-right" onclick="scrollTabs(200)" title="Mais abas →">›</button>
+</div>
+
+  <div id="body">
 <div id="krow">
   <div class="kpi cr"><div class="kpi-l">Crítico</div><div class="kpi-n" id="k-cr">0</div><div class="kpi-s">CRITICAL</div></div>
   <div class="kpi hi"><div class="kpi-l">Alto</div><div class="kpi-n" id="k-hi">0</div><div class="kpi-s">HIGH</div></div>
@@ -1133,8 +1710,6 @@ input,select,textarea{font-size:16px!important} /* Prevent iOS zoom on focus */
   <div class="kpi sy"><div class="kpi-l">CPU</div><div class="kpi-n" id="k-cpu">—</div><div class="kpi-s">SISTEMA</div></div>
 </div>
 
-<!-- BODY -->
-<div id="body">
 
 <!-- ── OVERVIEW ──────────────────────────────────────────────────── -->
 <div class="page on" id="p-overview">
@@ -1171,8 +1746,7 @@ input,select,textarea{font-size:16px!important} /* Prevent iOS zoom on focus */
     </div>
     <div id="dev-card-list"></div>
     <div id="dev-detail-drawer"></div>
-    <div id="dev-card-list" style="flex:1;overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:5px;min-height:0"></div>
-    <div id="dev-detail-drawer" style="display:none;border-top:1px solid #102840;padding:10px 12px;background:#060e1c;max-height:200px;overflow-y:auto;flex-shrink:0"></div>
+
         <div id="sys-mini">
       <div class="mrow"><span class="ml">CPU</span><div class="mt"><div class="mf" id="m-cpu" style="background:var(--blu)"></div></div><span class="mv" id="mv-cpu">—</span></div>
       <div class="mrow"><span class="ml">RAM</span><div class="mt"><div class="mf" id="m-ram" style="background:var(--pur)"></div></div><span class="mv" id="mv-ram">—</span></div>
@@ -1963,6 +2537,67 @@ input,select,textarea{font-size:16px!important} /* Prevent iOS zoom on focus */
   </div>
 </div>
 
+<!-- ── DNS MONITOR ─────────────────────────────────────────────── -->
+<div class="page" id="p-dns">
+  <!-- Header -->
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div>
+      <div style="font-family:var(--head);font-size:14px;font-weight:900;color:var(--acc)">🌐 DNS MONITOR</div>
+      <div style="font-family:var(--mono);font-size:8px;color:var(--txt3);margin-top:2px">
+        DGA Detection · DNS Tunneling · Fast Flux · Real-time analysis
+      </div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button class="fbtn" onclick="dnsDemo()" style="color:var(--yel);border-color:rgba(255,220,0,.3);font-size:8px">⚡ Demo</button>
+      <button class="fbtn" onclick="loadDNS()" style="font-size:8px">↻</button>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="dns-stat-row">
+    <div class="dns-stat"><div class="dns-stat-n" id="dns-total" style="color:var(--acc)">0</div><div class="dns-stat-l">Queries</div></div>
+    <div class="dns-stat"><div class="dns-stat-n" id="dns-unique" style="color:var(--pur)">0</div><div class="dns-stat-l">Domínios Únicos</div></div>
+    <div class="dns-stat"><div class="dns-stat-n" id="dns-dga" style="color:var(--red)">0</div><div class="dns-stat-l">DGA Detectados</div></div>
+    <div class="dns-stat"><div class="dns-stat-n" id="dns-tunnel" style="color:var(--ora)">0</div><div class="dns-stat-l">Tunelamentos</div></div>
+    <div class="dns-stat"><div class="dns-stat-n" id="dns-flux" style="color:var(--yel)">0</div><div class="dns-stat-l">Fast Flux</div></div>
+  </div>
+
+  <!-- Info box -->
+  <div style="background:rgba(0,140,255,.04);border:1px solid rgba(0,200,255,.1);border-radius:4px;padding:10px 14px">
+    <div style="display:flex;gap:20px;flex-wrap:wrap;font-family:var(--mono);font-size:8px;color:var(--txt2)">
+      <span>🔴 <b style="color:var(--red)">DGA</b> — domínios aleatórios usados por malware (C2)</span>
+      <span>🟠 <b style="color:var(--ora)">Tunnel</b> — exfiltração de dados via DNS</span>
+      <span>🟡 <b style="color:var(--yel)">Fast Flux</b> — muitos IPs para o mesmo domínio (botnet)</span>
+    </div>
+  </div>
+
+  <!-- Analyze a domain -->
+  <div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:4px;padding:14px 16px">
+    <div style="font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:8px">Analisar Domínio</div>
+    <div style="display:flex;gap:8px">
+      <input class="dns-analyze-input" id="dns-domain-input" placeholder="ex: xgkntvazmcpwsojl.com ou data.exfil.evil.xyz"
+             onkeydown="if(event.key==='Enter')analyzeDomain()">
+      <select id="dns-qtype" style="background:var(--card-bg);border:1px solid var(--card-border);color:var(--txt2);font-family:var(--mono);font-size:9px;padding:0 8px;border-radius:3px">
+        <option>A</option><option>TXT</option><option>CNAME</option><option>MX</option>
+      </select>
+      <button class="fbtn" onclick="analyzeDomain()" style="color:var(--acc);border-color:rgba(0,200,255,.3);font-size:9px;padding:0 14px">🔍 Analisar</button>
+    </div>
+    <div id="dns-analyze-result" style="margin-top:10px"></div>
+  </div>
+
+  <!-- Alerts list -->
+  <div>
+    <div style="font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:8px;border-bottom:1px solid var(--card-border);padding-bottom:4px">
+      Alertas DNS Recentes
+    </div>
+    <div id="dns-alerts-list">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--txt3);padding:20px;text-align:center">
+        Nenhum alerta — monitorando queries DNS em tempo real
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── STATS ───────────────────────────────────────────────────────── -->
 <div class="page" id="p-stats">
   <div class="sp"><div class="ph"><span class="ph-t">Top Ameaças</span></div><div class="sp-body" id="st-thr"><div class="empty"><span>Sem dados</span></div></div></div>
@@ -1976,8 +2611,6 @@ input,select,textarea{font-size:16px!important} /* Prevent iOS zoom on focus */
 <div id="toast"></div>
 
 <script>
-// DIAG: log clicks
-document.addEventListener("click",function(e){console.log("CLK",e.target.tagName,e.clientX,e.clientY);},true);
 // ── State ─────────────────────────────────────────────────────────
 let dets=[],selId=null,netData=[],expProcs=new Set();
 let liveLog=[],logFilter='all',liveInterval=null,miniFilter='all';
@@ -1991,7 +2624,36 @@ const PRIV=["192.168.","10.","172.16.","172.17.","172.18.","127.","0.0.0.0","::1
 (function tick(){document.getElementById('utc').textContent=new Date().toISOString().replace('T',' ').slice(0,19)+' UTC';setTimeout(tick,1000);})();
 
 // ── Nav ───────────────────────────────────────────────────────────
+function scrollTabs(delta){
+  const t=document.getElementById('main-tabs');
+  if(!t)return;
+  t.scrollLeft+=delta;
+  // Show/hide left arrow based on scroll position
+  const wrapper=t.closest('.tabs-wrapper');
+  if(wrapper){
+    if(t.scrollLeft>10) wrapper.classList.add('scrolled');
+    else wrapper.classList.remove('scrolled');
+  }
+}
+// Also update on tab click scroll
+document.addEventListener('DOMContentLoaded',function(){
+  const t=document.getElementById('main-tabs');
+  if(t) t.addEventListener('scroll',function(){
+    const wrapper=t.closest('.tabs-wrapper');
+    if(wrapper){
+      if(t.scrollLeft>10) wrapper.classList.add('scrolled');
+      else wrapper.classList.remove('scrolled');
+    }
+  });
+});
+
 function goPage(name,el){
+  // Scroll active tab into view
+  if(el){
+    setTimeout(()=>{
+      el.scrollIntoView({block:'nearest',inline:'nearest',behavior:'smooth'});
+    },50);
+  }
   // Mobile menu close
   var _mt=document.getElementById('main-tabs');
   var _mb=document.getElementById('mobile-menu-btn');
@@ -2018,6 +2680,7 @@ function goPage(name,el){
   if(name==='hunt')        loadHuntSuggestions();
   if(name==='lateral')     loadLateral();
   if(name==='yara')        loadYara();
+  if(name==='dns')         loadDNS();
   if(name==='geomap'){
     loadGeo();
     if(liveInterval)clearInterval(liveInterval);
@@ -2025,7 +2688,7 @@ function goPage(name,el){
   } else if(name==='live'){
     loadLive();
     if(liveInterval)clearInterval(liveInterval);
-    liveInterval=setInterval(()=>{loadLiveLog();loadGraph();},3000);
+    liveInterval=setInterval(()=>{loadLiveLog();loadGraph();},5000);
   } else if(name!=='geomap'){
     if(liveInterval){clearInterval(liveInterval);liveInterval=null;}
   }
@@ -2074,14 +2737,10 @@ async function pollHealth(){
     document.getElementById('mv-net').textContent='↑'+net+' MB';
   }
 }
-function setKpi(id,val,cls){
+function setKpi(id,val){
   const el=document.getElementById(id);
   if(!el)return;
-  if(el.textContent!=String(val)){
-    el.textContent=val;
-    el.classList.add('flash');
-    setTimeout(()=>el.classList.remove('flash'),400);
-  }
+  el.textContent=val;
 }
 function bar(id,vid,pct,label){
   const b=document.getElementById(id);
@@ -2106,9 +2765,12 @@ async function loadFeed(){
     setKpi('k-tot',stats.total||0,'to');
   }
   if(!data)return;
-  dets=data.detections||[];
+  const newDets=data.detections||[];
+  const changed=JSON.stringify(newDets.map(d=>d.id))!==JSON.stringify(dets.map(d=>d.id));
+  dets=newDets;
   $('fc',dets.length+' eventos');
   const tbody=document.getElementById('fbody');
+  if(!changed&&dets.length>0)return; // skip DOM rebuild if same data
   if(!dets.length){
     tbody.innerHTML=`<tr><td colspan="8"><div class="empty"><span style="font-size:24px;opacity:.2">⬡</span><span>Rede monitorada · sem ameaças detectadas</span></div></td></tr>`;
     return;
@@ -2350,10 +3012,14 @@ async function setSt(status){
 }
 
 // ── Mini graph (overview right panel) ─────────────────────────────
+let _lastMiniGraphHash='';
 async function loadMiniGraph(){
   const data=await api('/graph');
   if(!data)return;
   const nodes=data.nodes||[],edges=data.edges||[];
+  const hash=nodes.length+'x'+edges.length;
+  if(hash===_lastMiniGraphHash)return;
+  _lastMiniGraphHash=hash;
   $('graph-info-mini',nodes.length+' nós');
   const svg=document.getElementById('mini-graph-svg');
   const W=svg.clientWidth||340,H=svg.clientHeight||200;
@@ -2400,6 +3066,7 @@ async function loadMiniLogData(){
 }
 function renderMiniLog(){
   const el=document.getElementById('mini-log-scroll');
+  if(!el)return;
   let filtered=miniLogData;
   if(miniFilter==='det')filtered=filtered.filter(e=>e.type==='detection'||e.type==='sigma'||e.type==='owasp');
   if(miniFilter==='pkt')filtered=filtered.filter(e=>e.type==='packet');
@@ -2728,11 +3395,16 @@ function renderGeoMap(points){
 }
 
 // ── Live Graph ────────────────────────────────────────────────────
+let _lastGraphHash='';
 async function loadGraph(){
   const data=await api('/graph');if(!data)return;
   const nodes=data.nodes||[],edges=data.edges||[];
+  const hash=nodes.length+'x'+edges.length;
+  if(hash===_lastGraphHash)return; // no change, skip rerender
+  _lastGraphHash=hash;
   graphEdges=edges;
-  document.getElementById('graph-info').textContent=nodes.length+' nós · '+edges.length+' arestas';
+  const gi=document.getElementById('graph-info');
+  if(gi)gi.textContent=nodes.length+' nós · '+edges.length+' arestas';
   renderGraph(nodes,edges);
 }
 function renderGraph(nodes,edges){
@@ -2787,10 +3459,15 @@ async function loadLiveLog(){
   const data=await api('/live-log');if(!data)return;
   const existing=new Set(liveLog.map(e=>e.ts+'|'+(e.msg||e.threat||'')));
   const newE=(data.entries||[]).filter(e=>!existing.has(e.ts+'|'+(e.msg||e.threat||'')));
-  if(newE.length){liveLog=[...liveLog,...newE].slice(-500);renderLog();}
-  document.getElementById('log-count').textContent=liveLog.length+' entradas';
-  // Also update mini log
-  loadMiniLogData();
+  if(newE.length){
+    liveLog=[...liveLog,...newE].slice(-500);
+    renderLog();
+    // Update mini log data without full re-render if not much changed
+    miniLogData=(liveLog).slice(-60);
+    renderMiniLog();
+  }
+  const cnt=document.getElementById('log-count');
+  if(cnt)cnt.textContent=liveLog.length+' entradas';
 }
 function renderLog(){
   const el=document.getElementById('log-scroll');
@@ -3575,6 +4252,100 @@ function clearYara(){
   document.getElementById('yara-results').innerHTML = '';
 }
 
+// ── DNS Monitor ──────────────────────────────────────────────────
+async function loadDNS() {
+  const d = await api('/dns/alerts');
+  if (!d) return;
+  const s = d.stats || {};
+  $('dns-total',  s.total_queries   || 0);
+  $('dns-unique', s.unique_domains  || 0);
+  $('dns-dga',    s.dga_detected    || 0);
+  $('dns-tunnel', s.tunnel_detected || 0);
+  $('dns-flux',   s.fast_flux_detected || 0);
+  renderDNSAlerts(d.alerts || []);
+}
+
+function renderDNSAlerts(alerts) {
+  const el = document.getElementById('dns-alerts-list');
+  if (!alerts.length) {
+    el.innerHTML = '<div style="font-family:var(--mono);font-size:9px;color:var(--txt3);padding:20px;text-align:center">Nenhum alerta ainda</div>';
+    return;
+  }
+  const SEV = {CRITICAL:'var(--red)',HIGH:'var(--ora)',MEDIUM:'var(--yel)',LOW:'var(--grn)'};
+  el.innerHTML = alerts.map(a => `
+    <div class="dns-alert ${a.severity.toLowerCase()}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span class="chip ${a.severity.toLowerCase()}">${a.severity}</span>
+        <span style="font-family:var(--mono);font-size:8px;padding:1px 6px;border-radius:2px;background:rgba(0,200,255,.08);color:var(--txt3)">${a.rule_id}</span>
+        <span class="dns-domain">${a.domain}</span>
+        <span class="dns-score-badge" style="margin-left:auto">score: ${a.score}</span>
+        <span style="font-family:var(--mono);font-size:8px;color:var(--txt3)">${a.timestamp?.slice(11,19)||''}</span>
+      </div>
+      <div style="font-family:var(--body);font-size:10px;color:var(--txt2)">${a.description}</div>
+      ${a.source_ip ? `<div style="font-family:var(--mono);font-size:8px;color:var(--txt3);margin-top:3px">Origem: ${a.source_ip} · Query: ${a.query_type}</div>` : ''}
+      <div style="display:flex;gap:4px;margin-top:5px">
+        ${(a.tags||[]).map(t=>`<span style="font-family:var(--mono);font-size:7px;padding:1px 6px;border-radius:2px;border:1px solid rgba(255,255,255,.08);color:var(--txt3)">${t}</span>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+async function analyzeDomain() {
+  const domain = document.getElementById('dns-domain-input')?.value?.trim();
+  const qtype = document.getElementById('dns-qtype')?.value || 'A';
+  if (!domain) { toast('Digite um domínio','err'); return; }
+
+  const res = document.getElementById('dns-analyze-result');
+  res.innerHTML = '<div style="font-family:var(--mono);font-size:9px;color:var(--txt3)">Analisando...</div>';
+
+  const r = await fetch('/api/dns/analyze', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({domain, type: qtype})
+  });
+  if (!r.ok) { res.innerHTML = '<div style="color:var(--red)">Erro</div>'; return; }
+  const d = await r.json();
+
+  const verdictColor = {clean:'var(--grn)',suspicious:'var(--yel)',malicious:'var(--red)'};
+  const verdictIcon = {clean:'✓',suspicious:'⚠',malicious:'⛔'};
+  const col = verdictColor[d.verdict] || 'var(--txt)';
+
+  res.innerHTML = `
+    <div class="dns-result-card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div class="dns-verdict ${d.verdict}">${verdictIcon[d.verdict]} ${d.verdict.toUpperCase()}</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--acc)">${domain}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <div style="font-family:var(--mono);font-size:7px;color:var(--txt3);letter-spacing:.1em;margin-bottom:4px">SCORE DGA</div>
+          <div style="font-family:var(--head);font-size:18px;font-weight:900;color:${d.dga_score>=65?'var(--red)':d.dga_score>=40?'var(--yel)':'var(--grn)'}">${d.dga_score}/100</div>
+          <div class="dns-score-bar"><div class="dns-score-fill" style="width:${d.dga_score}%;background:${d.dga_score>=65?'var(--red)':d.dga_score>=40?'var(--yel)':'var(--grn)'}"></div></div>
+          ${d.dga_reasons.length ? `<div style="font-family:var(--mono);font-size:8px;color:var(--txt3)">${d.dga_reasons.join(' · ')}</div>` : ''}
+        </div>
+        <div>
+          <div style="font-family:var(--mono);font-size:7px;color:var(--txt3);letter-spacing:.1em;margin-bottom:4px">SCORE TUNNEL</div>
+          <div style="font-family:var(--head);font-size:18px;font-weight:900;color:${d.tunnel_score>=50?'var(--ora)':'var(--grn)'}">${d.tunnel_score}/100</div>
+          <div class="dns-score-bar"><div class="dns-score-fill" style="width:${d.tunnel_score}%;background:${d.tunnel_score>=50?'var(--ora)':'var(--grn)'}"></div></div>
+          ${d.tunnel_reasons.length ? `<div style="font-family:var(--mono);font-size:8px;color:var(--txt3)">${d.tunnel_reasons.join(' · ')}</div>` : ''}
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:8px;font-family:var(--mono);font-size:8px;color:var(--txt3)">
+        <span>Entropia: <b style="color:var(--txt)">${d.entropy}</b></span>
+        <span>Consoantes: <b style="color:var(--txt)">${(d.consonant_ratio*100).toFixed(0)}%</b></span>
+        <span>Comprimento: <b style="color:var(--txt)">${d.length}</b></span>
+      </div>
+    </div>`;
+}
+
+async function dnsDemo() {
+  const r = await fetch('/api/dns/demo', {method:'POST'});
+  if (r.ok) {
+    const d = await r.json();
+    toast(`Demo: ${d.injected} alertas DNS injetados`, 'ok');
+    await loadDNS();
+  }
+}
+
 // ── Auto Block ───────────────────────────────────────────────────
 let _abEnabled = false;
 
@@ -3981,10 +4752,10 @@ loadFeed();
 loadDevices();
 loadMiniGraph();
 loadMiniLogData();
-setInterval(loadFeed,10000);
-setInterval(pollHealth,5000);
-setInterval(loadMiniGraph,8000);
-setInterval(loadMiniLogData,3000);
+setInterval(loadFeed,20000);
+setInterval(pollHealth,10000);
+setInterval(loadMiniGraph,15000);
+setInterval(loadMiniLogData,8000);
 setInterval(()=>{ if(document.getElementById("p-killchain").classList.contains("on")) loadKillChain(); },15000);
 setInterval(()=>{ if(document.getElementById("p-fail2ban").classList.contains("on")) loadFail2Ban(); },10000);
 
