@@ -52,6 +52,15 @@ except Exception as _lm_err:
     LATERAL_AVAILABLE       = False
     print(f"[WARN] LateralMovement: {_lm_err}")
 
+# Honeypot
+try:
+    from engine.honeypot import Honeypot
+    _honeypot = Honeypot()
+    HONEYPOT_AVAILABLE = True
+except Exception as _hp_err:
+    Honeypot = None; _honeypot = None; HONEYPOT_AVAILABLE = False
+    print(f"[WARN] Honeypot: {_hp_err}")
+
 # DNS Monitor
 try:
     from engine.dns_monitor import DNSMonitor
@@ -1526,6 +1535,57 @@ def sigma_analyze():
 # ── Fail2Ban API ──────────────────────────────────────────────────
 
 # ── Detection Engine API ──────────────────────────────────────────
+
+# ── Honeypot API ──────────────────────────────────────────────────
+
+@app.route("/api/honeypot/status")
+@auth
+def honeypot_status():
+    if not HONEYPOT_AVAILABLE or not _honeypot:
+        return jsonify({"available": False, "running": False})
+    s = _honeypot.stats()
+    return jsonify({"available": True, "running": True, **s})
+
+@app.route("/api/honeypot/captures")
+@auth
+def honeypot_captures():
+    if not HONEYPOT_AVAILABLE or not _honeypot:
+        return jsonify({"available": False, "captures": []})
+    limit = int(request.args.get("limit", 100))
+    return jsonify({
+        "available": True,
+        "captures": _honeypot.get_captures(limit),
+        "stats": _honeypot.stats(),
+    })
+
+@app.route("/api/honeypot/start", methods=["POST"])
+@auth
+def honeypot_start():
+    if not HONEYPOT_AVAILABLE or not _honeypot:
+        return jsonify({"error": "indisponível"}), 503
+    data = request.get_json(force=True) or {}
+    ports = data.get("ports", None)
+    try:
+        _honeypot.start(ports)
+        return jsonify({"ok": True, "stats": _honeypot.stats()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/honeypot/stop", methods=["POST"])
+@auth
+def honeypot_stop():
+    if not HONEYPOT_AVAILABLE or not _honeypot:
+        return jsonify({"error": "indisponível"}), 503
+    _honeypot.stop()
+    return jsonify({"ok": True})
+
+@app.route("/api/honeypot/demo", methods=["POST"])
+@auth
+def honeypot_demo():
+    if not HONEYPOT_AVAILABLE or not _honeypot:
+        return jsonify({"error": "indisponível"}), 503
+    captures = _honeypot.inject_demo()
+    return jsonify({"injected": len(captures), "captures": captures})
 
 # ── DNS Monitor API ───────────────────────────────────────────────
 

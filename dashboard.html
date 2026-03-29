@@ -1638,6 +1638,39 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 .dns-verdict.malicious { color: var(--red); }
 .dns-score-bar { height: 6px; background: rgba(0,200,255,.08); border-radius: 3px; overflow: hidden; margin: 6px 0; }
 .dns-score-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
+
+/* ══ HONEYPOT PAGE ══════════════════════════════════════════════ */
+#p-honeypot { flex-direction: column; padding: 16px; gap: 12px; overflow-y: auto; }
+.hp-stat-row { display: grid; grid-template-columns: repeat(5,1fr); gap: 8px; }
+.hp-stat { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 4px; padding: 8px 14px; text-align: center; }
+.hp-stat-n { font-family: var(--head); font-size: 22px; font-weight: 900; line-height: 1; }
+.hp-stat-l { font-family: var(--mono); font-size: 7px; letter-spacing: .1em; text-transform: uppercase; color: var(--txt3); margin-top: 3px; }
+.hp-port-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }
+.hp-port-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 4px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; }
+.hp-port-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.hp-port-dot.active { background: var(--grn); box-shadow: 0 0 6px var(--grn); animation: pulse-dot 2s infinite; }
+.hp-port-dot.inactive { background: rgba(100,120,150,.3); }
+.hp-port-dot.failed { background: var(--red); }
+.hp-port-n { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--txt); }
+.hp-port-svc { font-family: var(--mono); font-size: 7px; color: var(--txt3); }
+.hp-capture { background: var(--card-bg); border-left: 3px solid var(--red); border-radius: 0 4px 4px 0; padding: 10px 14px; margin-bottom: 6px; }
+.hp-capture.high { border-left-color: var(--ora); }
+.hp-attacker-ip { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--red); }
+.hp-badge { font-family: var(--mono); font-size: 7px; padding: 1px 6px; border-radius: 2px; border: 1px solid; }
+.hp-badge.ssh  { color: #60d0ff; border-color: rgba(96,208,255,.3); background: rgba(96,208,255,.06); }
+.hp-badge.rdp  { color: #ff7040; border-color: rgba(255,112,64,.3); background: rgba(255,112,64,.06); }
+.hp-badge.smb  { color: #ffd060; border-color: rgba(255,208,96,.3); background: rgba(255,208,96,.06); }
+.hp-badge.mysql { color: #40c0ff; border-color: rgba(64,192,255,.3); background: rgba(64,192,255,.06); }
+.hp-badge.telnet { color: #80e080; border-color: rgba(128,224,128,.3); background: rgba(128,224,128,.06); }
+.hp-badge.vnc  { color: #c080ff; border-color: rgba(192,128,255,.3); background: rgba(192,128,255,.06); }
+.hp-badge.http { color: #80ffcc; border-color: rgba(128,255,204,.3); background: rgba(128,255,204,.06); }
+.hp-cred-box { background: rgba(255,50,80,.06); border: 1px solid rgba(255,50,80,.2); border-radius: 3px; padding: 5px 9px; margin-top: 5px; font-family: var(--mono); font-size: 9px; }
+.hp-payload-box { background: rgba(0,0,0,.3); border: 1px solid rgba(0,200,255,.08); border-radius: 3px; padding: 4px 8px; margin-top: 4px; font-family: var(--mono); font-size: 8px; color: var(--txt3); word-break: break-all; }
+.hp-top-attacker { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(0,200,255,.05); }
+.hp-top-attacker-ip { font-family: var(--mono); font-size: 10px; color: var(--txt); }
+.hp-top-attacker-bar { flex: 1; height: 3px; background: rgba(0,200,255,.08); border-radius: 2px; overflow: hidden; }
+.hp-top-attacker-fill { height: 100%; background: var(--red); border-radius: 2px; }
+.hp-top-attacker-n { font-family: var(--mono); font-size: 9px; color: var(--red); min-width: 20px; text-align: right; }
 </style>
 </head>
 <body>
@@ -1695,6 +1728,7 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
     <div class="tab" onclick="goPage('lateral',this)" title="Lateral Move">🌐 Lateral</div>
     <div class="tab" onclick="goPage('yara',this)" title="YARA">🦠 YARA</div>
     <div class="tab" onclick="goPage('dns',this)" title="DNS Monitor">🌐 DNS</div>
+    <div class="tab" onclick="goPage('honeypot',this)" title="Honeypot">🍯 HONEYPOT</div>
   </div>
   <button class="tab-scroll-btn" id="tab-scroll-right" onclick="scrollTabs(200)" title="Mais abas →">›</button>
 </div>
@@ -2598,6 +2632,112 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
   </div>
 </div>
 
+<!-- ── HONEYPOT ──────────────────────────────────────────────────── -->
+<div class="page" id="p-honeypot">
+
+  <!-- Header -->
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div>
+      <div style="font-family:var(--head);font-size:14px;font-weight:900;color:var(--red)">🍯 HONEYPOT</div>
+      <div style="font-family:var(--mono);font-size:8px;color:var(--txt3);margin-top:2px">
+        Portas falsas · Captura de fingerprint · Detecção de atacantes reais
+      </div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button class="fbtn" id="hp-start-btn" onclick="honeypotStart()"
+        style="color:var(--grn);border-color:rgba(0,255,157,.3);font-size:8px">
+        ▶ Ativar
+      </button>
+      <button class="fbtn" onclick="honeypotStop()"
+        style="color:var(--red);border-color:rgba(255,50,80,.3);font-size:8px">
+        ■ Parar
+      </button>
+      <button class="fbtn" onclick="honeypotDemo()"
+        style="color:var(--yel);border-color:rgba(255,220,0,.3);font-size:8px">
+        ⚡ Demo
+      </button>
+      <button class="fbtn" onclick="loadHoneypot()" style="font-size:8px">↻</button>
+    </div>
+  </div>
+
+  <!-- Alert banner -->
+  <div style="background:rgba(255,50,80,.05);border:1px solid rgba(255,50,80,.15);border-radius:4px;padding:8px 14px;font-family:var(--mono);font-size:8px;color:rgba(255,150,150,.8)">
+    ⚠ O honeypot abre portas reais na sua máquina. Use apenas em redes controladas. Portas em uso pelo sistema serão ignoradas automaticamente.
+  </div>
+
+  <!-- Stats -->
+  <div class="hp-stat-row">
+    <div class="hp-stat">
+      <div class="hp-stat-n" id="hp-total" style="color:var(--red)">0</div>
+      <div class="hp-stat-l">Total de Hits</div>
+    </div>
+    <div class="hp-stat">
+      <div class="hp-stat-n" id="hp-active-ports" style="color:var(--grn)">0</div>
+      <div class="hp-stat-l">Portas Ativas</div>
+    </div>
+    <div class="hp-stat">
+      <div class="hp-stat-n" id="hp-unique-ips" style="color:var(--ora)">0</div>
+      <div class="hp-stat-l">IPs Únicos</div>
+    </div>
+    <div class="hp-stat">
+      <div class="hp-stat-n" id="hp-creds" style="color:var(--pur)">0</div>
+      <div class="hp-stat-l">Credenciais</div>
+    </div>
+    <div class="hp-stat">
+      <div class="hp-stat-n" id="hp-scanners" style="color:var(--acc)">0</div>
+      <div class="hp-stat-l">Scanners</div>
+    </div>
+  </div>
+
+  <!-- Port status grid -->
+  <div>
+    <div style="font-family:var(--mono);font-size:7px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:6px">
+      Status das Portas
+    </div>
+    <div class="hp-port-grid" id="hp-port-grid">
+      <!-- Populated by JS -->
+      <div class="hp-port-card" style="opacity:.4">
+        <div class="hp-port-dot inactive"></div>
+        <div><div class="hp-port-n">—</div><div class="hp-port-svc">Inativo</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Two column: captures + top attackers -->
+  <div style="display:grid;grid-template-columns:1fr 220px;gap:12px;flex:1;min-height:0">
+
+    <!-- Captures list -->
+    <div style="display:flex;flex-direction:column;min-height:0">
+      <div style="font-family:var(--mono);font-size:7px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:6px;border-bottom:1px solid rgba(0,200,255,.06);padding-bottom:4px">
+        Capturas Recentes
+      </div>
+      <div id="hp-captures-list" style="flex:1;overflow-y:auto;min-height:0">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--txt3);padding:20px;text-align:center">
+          Nenhuma captura ainda — ative o honeypot para começar
+        </div>
+      </div>
+    </div>
+
+    <!-- Top attackers -->
+    <div>
+      <div style="font-family:var(--mono);font-size:7px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:6px;border-bottom:1px solid rgba(0,200,255,.06);padding-bottom:4px">
+        Top Atacantes
+      </div>
+      <div id="hp-top-attackers">
+        <div style="font-family:var(--mono);font-size:8px;color:var(--txt3);padding:10px 0">Aguardando dados...</div>
+      </div>
+
+      <!-- Service breakdown -->
+      <div style="margin-top:14px">
+        <div style="font-family:var(--mono);font-size:7px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:6px">
+          Por Serviço
+        </div>
+        <div id="hp-by-service"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── STATS ───────────────────────────────────────────────────────── -->
 <div class="page" id="p-stats">
   <div class="sp"><div class="ph"><span class="ph-t">Top Ameaças</span></div><div class="sp-body" id="st-thr"><div class="empty"><span>Sem dados</span></div></div></div>
@@ -2681,6 +2821,7 @@ function goPage(name,el){
   if(name==='lateral')     loadLateral();
   if(name==='yara')        loadYara();
   if(name==='dns')         loadDNS();
+  if(name==='honeypot')    loadHoneypot();
   if(name==='geomap'){
     loadGeo();
     if(liveInterval)clearInterval(liveInterval);
@@ -4343,6 +4484,159 @@ async function dnsDemo() {
     const d = await r.json();
     toast(`Demo: ${d.injected} alertas DNS injetados`, 'ok');
     await loadDNS();
+  }
+}
+
+// ── Honeypot ──────────────────────────────────────────────────────
+const HP_PORTS = [
+  {port:22,   svc:'SSH',    cls:'ssh'},
+  {port:23,   svc:'Telnet', cls:'telnet'},
+  {port:445,  svc:'SMB',    cls:'smb'},
+  {port:1433, svc:'MSSQL',  cls:'mysql'},
+  {port:3306, svc:'MySQL',  cls:'mysql'},
+  {port:3389, svc:'RDP',    cls:'rdp'},
+  {port:5900, svc:'VNC',    cls:'vnc'},
+  {port:8080, svc:'HTTP',   cls:'http'},
+];
+
+async function loadHoneypot() {
+  const d = await api('/honeypot/captures');
+  if (!d) return;
+  const s = d.stats || {};
+  $('hp-total',        s.total_hits || 0);
+  $('hp-active-ports', (s.active_ports||[]).length);
+  $('hp-unique-ips',   (s.top_attackers||[]).length);
+
+  const caps = d.captures || [];
+  let creds = 0, scanners = 0;
+  caps.forEach(c => {
+    if (c.credentials) creds++;
+    if (c.fingerprint?.scanner) scanners++;
+  });
+  $('hp-creds',    creds);
+  $('hp-scanners', scanners);
+
+  renderHPPorts(s.active_ports || [], s.failed_ports || []);
+  renderHPCaptures(caps);
+  renderHPTopAttackers(s.top_attackers || [], s.by_service || {});
+}
+
+function renderHPPorts(activePorts, failedPorts) {
+  const el = document.getElementById('hp-port-grid');
+  el.innerHTML = HP_PORTS.map(p => {
+    const active = activePorts.includes(p.port);
+    const failed = failedPorts.includes(p.port);
+    const cls = active ? 'active' : failed ? 'failed' : 'inactive';
+    const label = active ? 'ATIVO' : failed ? 'FALHOU' : 'INATIVO';
+    const col   = active ? 'var(--grn)' : failed ? 'var(--red)' : 'rgba(100,120,150,.5)';
+    return `<div class="hp-port-card">
+      <div class="hp-port-dot ${cls}"></div>
+      <div>
+        <div class="hp-port-n" style="color:${active?'var(--txt)':'rgba(100,120,150,.5)'}">:${p.port}</div>
+        <div class="hp-port-svc">${p.svc} <span style="color:${col}">${label}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderHPCaptures(caps) {
+  const el = document.getElementById('hp-captures-list');
+  if (!caps.length) {
+    el.innerHTML = '<div style="font-family:var(--mono);font-size:9px;color:var(--txt3);padding:20px;text-align:center">Nenhuma captura ainda</div>';
+    return;
+  }
+  el.innerHTML = caps.map(c => {
+    const svcCls = (c.service||'').toLowerCase();
+    const isCrit = !!c.credentials;
+    const borderCol = isCrit ? 'var(--red)' : 'var(--ora)';
+    const tags = (c.tags||[]).map(t =>
+      `<span style="font-family:var(--mono);font-size:7px;padding:1px 5px;border-radius:2px;border:1px solid rgba(255,255,255,.08);color:var(--txt3)">${t}</span>`
+    ).join('');
+    const credBox = c.credentials ? `
+      <div class="hp-cred-box">
+        🔑 Credencial capturada: 
+        <b style="color:var(--red)">${c.credentials.username||''}${c.credentials.password?':'+c.credentials.password:''}</b>
+      </div>` : '';
+    const scannerBadge = c.fingerprint?.scanner ?
+      `<span style="font-family:var(--mono);font-size:7px;padding:1px 6px;border-radius:2px;background:rgba(255,200,0,.08);color:var(--yel);border:1px solid rgba(255,200,0,.2)">🔍 ${c.fingerprint.scanner}</span>` : '';
+    const payload = c.payload_preview?.trim() ?
+      `<div class="hp-payload-box">▶ ${escH(c.payload_preview.slice(0,80))}</div>` : '';
+    return `
+      <div class="hp-capture ${isCrit?'':'high'}" style="border-left-color:${borderCol}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap">
+          <span class="chip ${isCrit?'critical':'high'}">${isCrit?'CRITICAL':'HIGH'}</span>
+          <span class="hp-badge ${svcCls}">${c.service}</span>
+          <span class="hp-attacker-ip">${escH(c.ip)}</span>
+          <span style="font-family:var(--mono);font-size:8px;color:var(--txt3)">:${c.src_port}</span>
+          ${scannerBadge}
+          <span style="font-family:var(--mono);font-size:8px;color:var(--txt3);margin-left:auto">${(c.timestamp||'').slice(11,19)}</span>
+        </div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px">${tags}</div>
+        ${credBox}
+        ${payload}
+        ${c.fingerprint?.ssh_client?`<div style="font-family:var(--mono);font-size:8px;color:var(--txt3);margin-top:3px">SSH Client: ${escH(c.fingerprint.ssh_client)}</div>`:''}
+      </div>`;
+  }).join('');
+}
+
+function renderHPTopAttackers(topIPs, byService) {
+  const el = document.getElementById('hp-top-attackers');
+  if (!topIPs.length) {
+    el.innerHTML = '<div style="font-family:var(--mono);font-size:8px;color:var(--txt3)">Nenhum atacante ainda</div>';
+  } else {
+    const max = topIPs[0]?.hits || 1;
+    el.innerHTML = topIPs.map(a => `
+      <div class="hp-top-attacker">
+        <div class="hp-top-attacker-ip">${escH(a.ip)}</div>
+        <div class="hp-top-attacker-bar">
+          <div class="hp-top-attacker-fill" style="width:${(a.hits/max*100).toFixed(0)}%"></div>
+        </div>
+        <div class="hp-top-attacker-n">${a.hits}</div>
+      </div>`).join('');
+  }
+
+  const svcEl = document.getElementById('hp-by-service');
+  const svcs = Object.entries(byService).sort((a,b)=>b[1]-a[1]);
+  if (!svcs.length) {
+    svcEl.innerHTML = '<div style="font-family:var(--mono);font-size:8px;color:var(--txt3)">—</div>';
+  } else {
+    const maxS = svcs[0][1];
+    const SVC_COLORS = {SSH:'#60d0ff',RDP:'#ff7040',SMB:'#ffd060',MySQL:'#40c0ff',Telnet:'#80e080',VNC:'#c080ff',HTTP:'#80ffcc',MSSQL:'#ff9060'};
+    svcEl.innerHTML = svcs.map(([svc, n]) => `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="font-family:var(--mono);font-size:8px;color:${SVC_COLORS[svc]||'var(--txt3)'};min-width:50px">${svc}</span>
+        <div style="flex:1;height:3px;background:rgba(255,255,255,.05);border-radius:2px;overflow:hidden">
+          <div style="width:${(n/maxS*100).toFixed(0)}%;height:100%;background:${SVC_COLORS[svc]||'var(--acc)'};border-radius:2px"></div>
+        </div>
+        <span style="font-family:var(--mono);font-size:8px;color:var(--txt3);min-width:16px;text-align:right">${n}</span>
+      </div>`).join('');
+  }
+}
+
+async function honeypotStart() {
+  const r = await fetch('/api/honeypot/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
+  if (r.ok) {
+    const d = await r.json();
+    const active = d.stats?.active_ports || [];
+    const failed = d.stats?.failed_ports || [];
+    toast(`Honeypot ativo em ${active.length} portas${failed.length?' ('+failed.length+' falharam)':''}`, 'ok');
+    await loadHoneypot();
+  } else {
+    toast('Erro ao ativar honeypot','err');
+  }
+}
+
+async function honeypotStop() {
+  const r = await fetch('/api/honeypot/stop', {method:'POST'});
+  if (r.ok) { toast('Honeypot parado', 'ok'); await loadHoneypot(); }
+}
+
+async function honeypotDemo() {
+  const r = await fetch('/api/honeypot/demo', {method:'POST'});
+  if (r.ok) {
+    const d = await r.json();
+    toast(`Demo: ${d.injected} capturas injetadas`, 'ok');
+    await loadHoneypot();
   }
 }
 
