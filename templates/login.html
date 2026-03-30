@@ -224,17 +224,20 @@
     btn.textContent = 'Verificando...';
     btn.disabled = true;
 
-    fetch('/api/auth/validate', {
+    // POST para /api/auth/login — valida e seta cookie httponly server-side
+    fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ token })
     })
-    .then(r => r.json())
+    .then(r => {
+      if (r.ok) return r.json();
+      throw new Error('invalid');
+    })
     .then(data => {
       if (data.valid) {
-        // Salva token em sessionStorage e redireciona
-        sessionStorage.setItem('ng_token', token);
-        sessionStorage.setItem('ng_tenant', JSON.stringify(data.tenant || {}));
+        // Cookie já foi setado pelo servidor — redireciona
         const next = new URLSearchParams(location.search).get('next') || '/';
         window.location.href = next;
       } else {
@@ -244,10 +247,9 @@
       }
     })
     .catch(() => {
-      // Se endpoint não existe ainda, redireciona direto (modo dev)
-      sessionStorage.setItem('ng_token', token);
-      const next = new URLSearchParams(location.search).get('next') || '/';
-      window.location.href = next;
+      showError();
+      btn.textContent = 'Entrar →';
+      btn.disabled = false;
     });
   }
 

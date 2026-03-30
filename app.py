@@ -120,7 +120,10 @@ except Exception as _bill_err:
 
 # Auth + HTTPS
 try:
-    from auth import auth, AUTH_ENABLED, get_ssl_context, print_startup_info, HTTPS_PORT
+    from auth import (
+        auth, AUTH_ENABLED, get_ssl_context, print_startup_info, HTTPS_PORT,
+        verify_any_token, _extract_token,
+    )
     AUTH_MODULE_OK = True
 except Exception as _auth_err:
     # Fallback: auth decorator que não faz nada
@@ -129,6 +132,8 @@ except Exception as _auth_err:
     AUTH_MODULE_OK = False
     def get_ssl_context(): return None
     def print_startup_info(): pass
+    def verify_any_token(token, repo=None): return {"valid": False, "type": None}
+    def _extract_token(): return ""
     print(f"[WARN] Auth module: {_auth_err}")
 
 # Correlation Engine
@@ -2506,27 +2511,74 @@ def health():
 def login_page():
     """Página de login com token de API."""
     from flask import render_template
+    # Se já tem cookie válido, redireciona direto pro dashboard
+    if AUTH_ENABLED:
+        token = request.cookies.get("netguard_token", "")
+        if token:
+            result = verify_any_token(token, repo)
+            if result["valid"]:
+                from flask import redirect as _redir
+                return _redir(request.args.get("next", "/"))
     return render_template("login.html")
 
 
-@app.route("/api/auth/validate", methods=["POST"])
-def auth_validate():
-    """Valida token de API de um tenant e retorna seus dados."""
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    """
+    Endpoint de login — valida token (admin ou tenant) e define cookie de sessão.
+    Seta cookie httponly válido por 8h.
+    """
+    from flask import make_response
     data  = request.get_json(silent=True) or {}
     token = data.get("token", "").strip()
     if not token:
         return jsonify({"valid": False, "error": "Token ausente"}), 400
-    tenant = repo.get_tenant_by_token(token)
-    if tenant:
+
+    result = verify_any_token(token, repo)
+    if not result["valid"]:
+        logger.warning("Login falhou | ip=%s | token=%s…", request.remote_addr, token[:8])
+        return jsonify({"valid": False, "error": "Token inválido"}), 401
+
+    logger.info("Login OK | ip=%s | type=%s", request.remote_addr, result["type"])
+    resp = make_response(jsonify({
+        "valid":  True,
+        "type":   result["type"],
+        "tenant": result.get("tenant"),
+    }))
+    resp.set_cookie(
+        "netguard_token",
+        token,
+        httponly=True,
+        samesite="Lax",
+        max_age=8 * 3600,
+        secure=False,  # mudar para True em produção com HTTPS
+    )
+    return resp
+
+
+@app.route("/logout")
+def logout():
+    """Limpa cookie de sessão e redireciona para login."""
+    from flask import make_response, redirect as _redir
+    resp = make_response(_redir("/login"))
+    resp.delete_cookie("netguard_token")
+    logger.info("Logout | ip=%s", request.remote_addr)
+    return resp
+
+
+@app.route("/api/auth/validate", methods=["POST"])
+def auth_validate():
+    """Valida token e retorna dados do tenant (sem setar cookie)."""
+    data  = request.get_json(silent=True) or {}
+    token = data.get("token", "").strip()
+    if not token:
+        return jsonify({"valid": False, "error": "Token ausente"}), 400
+    result = verify_any_token(token, repo)
+    if result["valid"]:
         return jsonify({
             "valid":  True,
-            "tenant": {
-                "tenant_id": tenant.get("tenant_id"),
-                "name":      tenant.get("name"),
-                "plan":      tenant.get("plan"),
-                "max_hosts": tenant.get("max_hosts"),
-                "email":     tenant.get("email", ""),
-            }
+            "type":   result["type"],
+            "tenant": result.get("tenant"),
         })
     return jsonify({"valid": False, "error": "Token inválido"}), 401
 
@@ -2759,6 +2811,7 @@ def stripe_webhook():
 
 @app.route("/")
 @app.route("/dashboard")
+@auth
 def dashboard():
     p = pathlib.Path(__file__).parent/"dashboard.html"
     if not p.exists(): return "dashboard.html nao encontrado",404

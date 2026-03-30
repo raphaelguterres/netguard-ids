@@ -48,9 +48,55 @@ def get_or_create_token() -> str:
 
 
 def verify_token(token: str) -> bool:
-    """Verifica se o token é válido usando comparação segura."""
+    """Verifica se é o token de admin (arquivo .netguard_token)."""
     expected = get_or_create_token()
     return secrets.compare_digest(token.encode(), expected.encode())
+
+
+def verify_any_token(token: str, repo=None) -> dict:
+    """
+    Verifica token de admin OU token de tenant SaaS (ng_xxx).
+
+    Retorna dict com:
+      {"valid": True,  "type": "admin"|"tenant", "tenant": {...}}
+      {"valid": False, "type": None}
+    """
+    if not token:
+        return {"valid": False, "type": None}
+
+    # 1. Token de admin
+    if verify_token(token):
+        return {"valid": True, "type": "admin", "tenant": None}
+
+    # 2. Token de tenant (ng_xxx) — requer repo
+    if repo is not None and token.startswith("ng_"):
+        try:
+            tenant = repo.get_tenant_by_token(token)
+            if tenant:
+                return {"valid": True, "type": "tenant", "tenant": dict(tenant)}
+        except Exception as _e:
+            logger.debug("verify_any_token tenant lookup error: %s", _e)
+
+    return {"valid": False, "type": None}
+
+
+# ── Helpers internos ──────────────────────────────────────────────
+
+def _extract_token() -> str:
+    """Extrai token de header Bearer, query param ou cookie."""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header[7:].strip()
+    t = request.args.get("token", "").strip()
+    if t:
+        return t
+    return request.cookies.get("netguard_token", "").strip()
+
+
+def _is_browser_request() -> bool:
+    """Retorna True se a requisição provavelmente veio de um browser (não API)."""
+    accept = request.headers.get("Accept", "")
+    return "text/html" in accept
 
 
 # ── Decorador de autenticação ─────────────────────────────────────
@@ -66,6 +112,10 @@ def auth(f):
       - Query param: ?token=<token>
       - Cookie:      netguard_token=<token>
 
+    Comportamento por tipo de request:
+      - Browser (Accept: text/html) → redireciona para /login?next=<path>
+      - API (Accept: application/json ou outros) → retorna 401 JSON
+
     Se AUTH_ENABLED=false, passa direto (default).
     """
     @wraps(f)
@@ -77,27 +127,22 @@ def auth(f):
         if _valid_token is None:
             _valid_token = get_or_create_token()
 
-        # Extrai token de diferentes fontes
-        token = None
-
-        # 1. Authorization header
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-
-        # 2. Query param
-        if not token:
-            token = request.args.get("token", "")
-
-        # 3. Cookie
-        if not token:
-            token = request.cookies.get("netguard_token", "")
+        token = _extract_token()
 
         if not token or not secrets.compare_digest(
             token.encode(), _valid_token.encode()
         ):
             logger.warning("Auth falhou | ip=%s | path=%s",
                            request.remote_addr, request.path)
+
+            # Browser → redireciona para login
+            if _is_browser_request():
+                next_url = request.path
+                if request.query_string:
+                    next_url += "?" + request.query_string.decode()
+                return redirect(f"/login?next={next_url}")
+
+            # API → retorna 401 JSON
             return jsonify({
                 "error": "Unauthorized",
                 "message": "Token inválido ou ausente. "
