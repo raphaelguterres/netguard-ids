@@ -279,32 +279,19 @@ class Fail2BanEngine:
         return entry
 
     def _firewall_ban(self, ip: str, rule_name: str) -> bool:
-        """Adiciona regra de bloqueio no Windows Firewall."""
+        """Adiciona regra de bloqueio no firewall do sistema (Windows ou Linux)."""
         try:
-            cmd = [
-                "netsh", "advfirewall", "firewall", "add", "rule",
-                f"name={rule_name}",
-                "dir=in",
-                "action=block",
-                f"remoteip={ip}",
-                "enable=yes",
-                "description=NetGuard Fail2Ban automatic block",
-            ]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            return r.returncode == 0
+            from platform_utils import block_ip
+            return block_ip(ip, rule_name)
         except Exception as e:
             logger.error("Firewall ban failed for %s: %s", ip, e)
             return False
 
-    def _firewall_unban(self, rule_name: str) -> bool:
-        """Remove regra de bloqueio do Windows Firewall."""
+    def _firewall_unban(self, rule_name: str, ip: str = "") -> bool:
+        """Remove regra de bloqueio do firewall do sistema."""
         try:
-            cmd = [
-                "netsh", "advfirewall", "firewall", "delete", "rule",
-                f"name={rule_name}",
-            ]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            return r.returncode == 0
+            from platform_utils import unblock_ip
+            return unblock_ip(ip, rule_name)
         except Exception as e:
             logger.error("Firewall unban failed: %s", e)
             return False

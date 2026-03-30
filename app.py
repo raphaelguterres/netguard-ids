@@ -5,6 +5,11 @@ Um único processo. Sem simulador. Sem dados falsos.
 """
 
 import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress
+from platform_utils import (
+    OS, IS_WINDOWS, IS_LINUX,
+    get_processes, get_pid_name_map, get_connections, get_listen_ports,
+    get_security_events, get_arp_table, ping as platform_ping, get_hostname,
+)
 
 try:
     import psutil
@@ -239,7 +244,7 @@ def _get_real_hostname() -> str:
         pass
     return "netguard-host"
 
-REAL_HOSTNAME = _get_real_hostname()
+REAL_HOSTNAME = get_hostname()
 logger.info("Hostname detectado: %s", REAL_HOSTNAME)
 
 # ── App ───────────────────────────────────────────────────────────
@@ -561,16 +566,10 @@ def get_pid_name_cached(pid) -> str:
     now = time.time()
     if now - _pid_cache_time > 30:
         try:
-            r = subprocess.run(["tasklist","/fo","csv","/nh"],capture_output=True,text=True,timeout=8)
-            _pid_cache = {}
-            for linha in r.stdout.strip().split("\n"):
-                partes = linha.strip().split(",")
-                if len(partes) >= 2:
-                    nome = partes[0].strip('"').lower()
-                    p = partes[1].strip('"')
-                    if p.isdigit(): _pid_cache[p] = nome
+            _pid_cache = get_pid_name_map()
             _pid_cache_time = now
-        except Exception: pass
+        except Exception:
+            pass
     return _pid_cache.get(str(pid), "")
 
 def ip_ok(ip: str) -> bool:
@@ -667,19 +666,12 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = ""):
 # ── Monitor: Event Log ────────────────────────────────────────────
 def checar_event_log():
     try:
-        script = """
-        $cutoff = (Get-Date).AddSeconds(-35)
-        $ids = @(4625,4648,4720,4732,4740,4756,7045)
-        $events = Get-WinEvent -FilterHashtable @{LogName='Security','System'; Id=$ids; StartTime=$cutoff} -ErrorAction SilentlyContinue
-        if ($events) { $events | ForEach-Object { Write-Output "$($_.Id)|$($_.Message.Substring(0, [Math]::Min(200,$_.Message.Length)))" } }
-        """
-        r = subprocess.run(["powershell","-Command",script],capture_output=True,text=True,timeout=10)
-        count = 0
-        for linha in r.stdout.strip().split("\n"):
-            if "|" in linha:
-                eid, msg = linha.split("|",1)
-                analisar(f"EventID={eid} {msg}","127.0.0.1","syslog","event_log")
-                count += 1
+        events = get_security_events(seconds_back=35)
+        count  = 0
+        for ev in events:
+            msg = f"EventID={ev.get('event_id','')} {ev.get('message','')}"
+            analisar(msg, "127.0.0.1", "syslog", ev.get("source", "event_log"))
+            count += 1
         monitor_status["event_log"] = f"{count} eventos novos" if count else "sem eventos novos"
     except Exception as e:
         monitor_status["event_log"] = f"erro: {e}"
@@ -687,25 +679,15 @@ def checar_event_log():
 # ── Monitor: Conexões ─────────────────────────────────────────────
 def checar_conexoes():
     try:
-        pid_map_local = get_pid_name_cached(0) and _pid_cache
-        r = subprocess.run(["netstat","-n","-o"],capture_output=True,text=True,timeout=10)
+        conns_raw  = get_connections()
         sus=0; total=0; info_conexoes=[]; conn_map={}
 
-        for linha in r.stdout.strip().split("\n"):
-            if "ESTABLISHED" not in linha: continue
-            p = linha.split()
-            if len(p)<5: continue
-            end = p[2]
-            if ":" not in end: continue
-            idx = end.rfind(":")
-            ip_r = end[:idx].strip("[]")
-            try:
-                porta = int(end[idx+1:])
-                pid   = p[4]
-            except: continue
-            total += 1
+        for conn_entry in conns_raw:
+            ip_r      = conn_entry.get("ip", "")
+            porta     = conn_entry.get("port", 0)
+            proc_nome = conn_entry.get("process", "")
+            total    += 1
 
-            proc_nome = get_pid_name_cached(pid)
             is_trusted = any(b in proc_nome for b in [x.lower() for x in BROWSERS_E_APPS])
 
             # Popula mapa de conexões
@@ -749,17 +731,15 @@ def checar_conexoes():
 # ── Monitor: Processos ────────────────────────────────────────────
 def checar_processos():
     try:
-        r = subprocess.run(["tasklist","/fo","csv","/nh"],capture_output=True,text=True,timeout=10)
-        found=[]
-        for linha in r.stdout.strip().split('\n'):
-            p = linha.strip().split(',')
-            if not p: continue
-            nome = p[0].strip('"').lower()
-            pid  = p[1].strip('"') if len(p)>1 else "?"
+        procs = get_processes()
+        found = []
+        for p in procs:
+            nome = p.get("name", "").lower()
+            pid  = str(p.get("pid", "?"))
             for s in PROCESSOS_SUSPEITOS:
                 if s.lower() in nome and nome not in _processos_alertados:
                     _processos_alertados.add(nome)
-                    analisar(f"Suspicious process running: {nome} PID={pid}", "127.0.0.1","command","tasklist")
+                    analisar(f"Suspicious process running: {nome} PID={pid}", "127.0.0.1", "command", "process_monitor")
                     found.append(nome)
         monitor_status["processos"] = f"suspeitos: {found}" if found else "nenhum suspeito"
     except Exception as e:
@@ -1149,24 +1129,7 @@ def _scan_device_ports(ip: str) -> list:
 
 def _ping_latency(ip: str) -> float:
     """Retorna latência em ms via ping. Retorna -1 se falhar."""
-    try:
-        r = subprocess.run(
-            ["ping", "-n", "1", "-w", "500", ip],
-            capture_output=True, text=True, timeout=2
-        )
-        for line in r.stdout.split("\n"):
-            if "ms" in line.lower() and ("tempo" in line.lower() or "time" in line.lower() or "=" in line):
-                parts = line.replace("<","=").split("=")
-                for part in parts:
-                    part = part.strip()
-                    if part.endswith("ms"):
-                        try:
-                            return float(part[:-2].strip())
-                        except ValueError:
-                            pass
-    except Exception:
-        pass
-    return -1.0
+    return platform_ping(ip, timeout_ms=500)
 
 def _infer_services(ports: list) -> list:
     """Infere serviços pelo número de porta."""
@@ -2192,22 +2155,15 @@ def geo_ips():
         return jsonify({"error": "geo_ip module not found"}), 500
 
     seen = {}
-    # Fetch live connections directly
+    # Fetch live connections via platform_utils (cross-platform)
     live_conns = []
     try:
-        r = subprocess.run(["netstat","-n","-o"],capture_output=True,text=True,timeout=8)
-        for linha in r.stdout.strip().split("\n"):
-            if "ESTABLISHED" not in linha: continue
-            p = linha.split()
-            if len(p) < 5: continue
-            end = p[2]
-            if ":" not in end: continue
-            idx = end.rfind(":")
-            ip2 = end[:idx].strip("[]")
-            try: porta2 = int(end[idx+1:])
-            except: continue
-            proc2 = get_pid_name_cached(p[4]) or f"pid:{p[4]}"
-            live_conns.append({"ip": ip2, "port": porta2, "process": proc2})
+        for c in get_connections():
+            live_conns.append({
+                "ip":      c.get("ip", ""),
+                "port":    c.get("port", 0),
+                "process": c.get("process", ""),
+            })
     except Exception:
         pass
 
@@ -2257,6 +2213,191 @@ def geo_ips():
         "total":     len(seen),
         "timestamp": datetime.now().isoformat() + "Z",
     })
+
+
+# ── /metrics — Prometheus Exposition Format ───────────────────────
+_metrics_start_time = time.time()
+
+@app.route("/metrics")
+def prometheus_metrics():
+    """
+    Endpoint de métricas no formato Prometheus Text Exposition.
+    Compatível com Prometheus scrape, Grafana, VictoriaMetrics, etc.
+
+    Scrape config (prometheus.yml):
+      - job_name: 'netguard'
+        static_configs:
+          - targets: ['localhost:5000']
+        metrics_path: '/metrics'
+    """
+    lines = []
+
+    def g(name, desc, type_="gauge"):
+        lines.append(f"# HELP {name} {desc}")
+        lines.append(f"# TYPE {name} {type_}")
+
+    def m(name, value, labels=None):
+        if value is None:
+            return
+        lbl = ""
+        if labels:
+            pairs = ",".join(f'{k}="{v}"' for k, v in labels.items())
+            lbl = "{" + pairs + "}"
+        lines.append(f"{name}{lbl} {value}")
+
+    uptime = time.time() - _metrics_start_time
+
+    # ── Info / Uptime ─────────────────────────────────────────────
+    g("netguard_info", "Informações estáticas do NetGuard IDS", "gauge")
+    m("netguard_info", 1, {"version": "3.0", "host": REAL_HOSTNAME})
+
+    g("netguard_uptime_seconds", "Tempo em segundos desde o início do servidor", "counter")
+    m("netguard_uptime_seconds", round(uptime, 2))
+
+    # ── IDS Detections ────────────────────────────────────────────
+    try:
+        detections = ids.get_detections(limit=10000)
+        g("netguard_ids_detections_total", "Total de detecções do IDS Engine", "counter")
+        m("netguard_ids_detections_total", len(detections))
+
+        sev_counts = {"LOW": 0, "MEDIUM": 0, "HIGH": 0, "CRITICAL": 0}
+        for d in detections:
+            sev = (d.get("severity") or "LOW").upper()
+            sev_counts[sev] = sev_counts.get(sev, 0) + 1
+
+        g("netguard_ids_detections_by_severity", "Detecções do IDS por severidade", "gauge")
+        for sev, count in sev_counts.items():
+            m("netguard_ids_detections_by_severity", count, {"severity": sev})
+    except Exception:
+        pass
+
+    # ── SOC Engine ────────────────────────────────────────────────
+    try:
+        if SOC_IMPORT_OK and detection_engine:
+            soc_stats = detection_engine.get_stats() if hasattr(detection_engine, "get_stats") else {}
+            g("netguard_soc_events_total", "Total de eventos gerados pelo SOC Engine", "counter")
+            m("netguard_soc_events_total", soc_stats.get("total_events", 0))
+
+            g("netguard_soc_rules_active", "Regras ativas no SOC Engine", "gauge")
+            m("netguard_soc_rules_active", soc_stats.get("rules_active", 0))
+    except Exception:
+        pass
+
+    # ── Correlation Engine ────────────────────────────────────────
+    try:
+        if CORR_AVAILABLE and _corr_engine:
+            corr_stats = _corr_engine.get_stats()
+            g("netguard_correlation_alerts_total", "Total de alertas de correlação detectados", "counter")
+            m("netguard_correlation_alerts_total", corr_stats.get("total", 0))
+
+            g("netguard_correlation_alerts_by_rule", "Alertas de correlação por regra", "gauge")
+            for rule_id, count in corr_stats.get("by_rule", {}).items():
+                m("netguard_correlation_alerts_by_rule", count, {"rule": rule_id})
+
+            g("netguard_correlation_alerts_by_severity", "Alertas de correlação por severidade", "gauge")
+            for sev, count in corr_stats.get("by_severity", {}).items():
+                m("netguard_correlation_alerts_by_severity", count, {"severity": sev})
+
+            g("netguard_correlation_suspicious_procs", "Processos suspeitos rastreados pelo correlator", "gauge")
+            m("netguard_correlation_suspicious_procs", corr_stats.get("suspicious_procs", 0))
+
+            g("netguard_correlation_beacons_tracked", "IPs de beaconing rastreados", "gauge")
+            m("netguard_correlation_beacons_tracked", corr_stats.get("tracked_beacons", 0))
+    except Exception:
+        pass
+
+    # ── Risk Engine ───────────────────────────────────────────────
+    try:
+        if RISK_AVAILABLE and risk_engine:
+            risk_summary = risk_engine.get_summary()
+            g("netguard_risk_hosts_total", "Total de hosts monitorados pelo Risk Engine", "gauge")
+            m("netguard_risk_hosts_total", risk_summary.get("total_hosts", 0))
+
+            g("netguard_risk_hosts_by_level", "Hosts por nível de risco", "gauge")
+            for level in ("critical", "high", "medium", "low"):
+                m("netguard_risk_hosts_by_level", risk_summary.get(f"{level}_hosts", 0), {"level": level.upper()})
+
+            g("netguard_risk_score_max", "Risk score máximo entre todos os hosts", "gauge")
+            m("netguard_risk_score_max", risk_summary.get("max_score", 0))
+
+            g("netguard_risk_score_avg", "Risk score médio entre todos os hosts", "gauge")
+            m("netguard_risk_score_avg", risk_summary.get("avg_score", 0))
+
+            g("netguard_risk_score", "Risk score individual por host", "gauge")
+            for host in risk_engine.get_all_hosts():
+                m("netguard_risk_score", host.get("score", 0), {"host": host.get("host_id", "unknown")})
+    except Exception:
+        pass
+
+    # ── Fail2Ban ──────────────────────────────────────────────────
+    try:
+        if F2B_AVAILABLE and fail2ban:
+            f2b_status = fail2ban.get_status() if hasattr(fail2ban, "get_status") else {}
+            g("netguard_fail2ban_banned_total", "Total de IPs banidos pelo Fail2Ban", "gauge")
+            m("netguard_fail2ban_banned_total", f2b_status.get("total_banned", 0))
+
+            g("netguard_fail2ban_jails_active", "Jails ativos no Fail2Ban", "gauge")
+            m("netguard_fail2ban_jails_active", f2b_status.get("active_jails", len(F2B_JAILS)))
+
+            g("netguard_fail2ban_bans_by_jail", "Bans por jail do Fail2Ban", "gauge")
+            for jail_name, jail_data in f2b_status.get("jails", {}).items():
+                count = jail_data.get("banned", 0) if isinstance(jail_data, dict) else 0
+                m("netguard_fail2ban_bans_by_jail", count, {"jail": jail_name})
+    except Exception:
+        pass
+
+    # ── Kill Chain ────────────────────────────────────────────────
+    try:
+        if KC_AVAILABLE and kc_correlator:
+            incidents = kc_correlator.get_incidents() if hasattr(kc_correlator, "get_incidents") else []
+            g("netguard_killchain_incidents_total", "Total de incidentes na Kill Chain", "gauge")
+            m("netguard_killchain_incidents_total", len(incidents))
+    except Exception:
+        pass
+
+    # ── Sistema (psutil) ──────────────────────────────────────────
+    try:
+        if PSUTIL_OK and psutil:
+            g("netguard_system_cpu_percent", "Uso de CPU do sistema (%)", "gauge")
+            m("netguard_system_cpu_percent", psutil.cpu_percent(interval=0.1))
+
+            vm = psutil.virtual_memory()
+            g("netguard_system_memory_percent", "Uso de memória RAM do sistema (%)", "gauge")
+            m("netguard_system_memory_percent", round(vm.percent, 1))
+
+            g("netguard_system_memory_used_bytes", "Memória RAM usada em bytes", "gauge")
+            m("netguard_system_memory_used_bytes", vm.used)
+
+            disk = psutil.disk_usage("/")
+            g("netguard_system_disk_percent", "Uso de disco do sistema (%)", "gauge")
+            m("netguard_system_disk_percent", round(disk.percent, 1))
+
+            g("netguard_system_processes_total", "Total de processos em execução", "gauge")
+            m("netguard_system_processes_total", len(list(psutil.process_iter())))
+
+            net_io = psutil.net_io_counters()
+            g("netguard_system_net_bytes_sent_total", "Total de bytes enviados pela rede", "counter")
+            m("netguard_system_net_bytes_sent_total", net_io.bytes_sent)
+
+            g("netguard_system_net_bytes_recv_total", "Total de bytes recebidos pela rede", "counter")
+            m("netguard_system_net_bytes_recv_total", net_io.bytes_recv)
+
+            try:
+                conns = psutil.net_connections(kind="inet")
+                g("netguard_system_connections_active", "Conexões de rede ativas (ESTABLISHED)", "gauge")
+                m("netguard_system_connections_active",
+                  sum(1 for c in conns if c.status == "ESTABLISHED"))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # ── Scrape metadata ───────────────────────────────────────────
+    g("netguard_scrape_timestamp_seconds", "Timestamp Unix do último scrape", "gauge")
+    m("netguard_scrape_timestamp_seconds", round(time.time(), 3))
+
+    output = "\n".join(lines) + "\n"
+    return Response(output, mimetype="text/plain; version=0.0.4; charset=utf-8")
 
 
 @app.route("/")

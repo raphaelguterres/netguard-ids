@@ -1,11 +1,16 @@
 """
 NetGuard — Event Repository
 Camada de armazenamento de eventos de segurança.
-SQLite com índices otimizados para queries SIEM.
-Suporta upgrade futuro para PostgreSQL / Elasticsearch.
+
+Suporta dois backends via DATABASE_URL:
+  - SQLite  (padrão, desenvolvimento/desktop):  não definir DATABASE_URL
+  - PostgreSQL (produção/VPS/SaaS):             DATABASE_URL=postgresql://user:pass@host/db
+
+Multi-tenant: todos os registros carregam tenant_id.
+O tenant é identificado pelo token do agente (mapeado em app.py).
 """
 
-import sqlite3
+import os
 import json
 import logging
 import threading
@@ -15,249 +20,463 @@ from pathlib import Path
 
 logger = logging.getLogger("netguard.storage")
 
-DEFAULT_DB = Path(__file__).parent.parent / "netguard_events.db"
+DEFAULT_DB   = Path(__file__).parent.parent / "netguard_events.db"
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
+# ── Backend detection ─────────────────────────────────────────────
+USE_POSTGRES = DATABASE_URL.startswith("postgresql") or DATABASE_URL.startswith("postgres")
+
+if USE_POSTGRES:
+    try:
+        import psycopg2
+        import psycopg2.extras
+        PSYCOPG2_OK = True
+        logger.info("Storage backend: PostgreSQL (%s)", DATABASE_URL.split("@")[-1])
+    except ImportError:
+        PSYCOPG2_OK = False
+        USE_POSTGRES = False
+        logger.warning("psycopg2 não instalado — usando SQLite. "
+                       "Instale com: pip install psycopg2-binary")
+else:
+    PSYCOPG2_OK = False
+    logger.info("Storage backend: SQLite (%s)", DEFAULT_DB)
+
+if not USE_POSTGRES:
+    import sqlite3
+
+
+# ══════════════════════════════════════════════════════════════════
+#  DDL — Schema compartilhado (SQLite e PostgreSQL)
+# ══════════════════════════════════════════════════════════════════
+
+_DDL_SQLITE = """
+    CREATE TABLE IF NOT EXISTS events (
+        event_id     TEXT PRIMARY KEY,
+        tenant_id    TEXT NOT NULL DEFAULT 'default',
+        timestamp    TEXT NOT NULL,
+        host_id      TEXT NOT NULL,
+        event_type   TEXT NOT NULL,
+        severity     TEXT NOT NULL,
+        source       TEXT NOT NULL,
+        rule_id      TEXT,
+        rule_name    TEXT,
+        details      TEXT,
+        mitre        TEXT,
+        tags         TEXT,
+        raw          TEXT,
+        acknowledged INTEGER DEFAULT 0,
+        created_at   TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_events_tenant    ON events(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_severity  ON events(severity);
+    CREATE INDEX IF NOT EXISTS idx_events_type      ON events(event_type);
+    CREATE INDEX IF NOT EXISTS idx_events_host      ON events(host_id);
+    CREATE INDEX IF NOT EXISTS idx_events_rule      ON events(rule_id);
+
+    CREATE TABLE IF NOT EXISTS baselines (
+        tenant_id     TEXT NOT NULL DEFAULT 'default',
+        host_id       TEXT NOT NULL,
+        baseline_type TEXT NOT NULL,
+        value         TEXT NOT NULL,
+        first_seen    TEXT NOT NULL,
+        last_seen     TEXT NOT NULL,
+        count         INTEGER DEFAULT 1,
+        PRIMARY KEY (tenant_id, host_id, baseline_type, value)
+    );
+
+    CREATE TABLE IF NOT EXISTS event_stats (
+        tenant_id  TEXT NOT NULL DEFAULT 'default',
+        date       TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        severity   TEXT NOT NULL,
+        count      INTEGER DEFAULT 0,
+        PRIMARY KEY (tenant_id, date, event_type, severity)
+    );
+
+    CREATE TABLE IF NOT EXISTS tenants (
+        tenant_id   TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        token       TEXT NOT NULL UNIQUE,
+        plan        TEXT NOT NULL DEFAULT 'free',
+        max_hosts   INTEGER DEFAULT 1,
+        created_at  TEXT DEFAULT (datetime('now')),
+        active      INTEGER DEFAULT 1
+    );
+"""
+
+_DDL_POSTGRES = """
+    CREATE TABLE IF NOT EXISTS events (
+        event_id     TEXT PRIMARY KEY,
+        tenant_id    TEXT NOT NULL DEFAULT 'default',
+        timestamp    TIMESTAMPTZ NOT NULL,
+        host_id      TEXT NOT NULL,
+        event_type   TEXT NOT NULL,
+        severity     TEXT NOT NULL,
+        source       TEXT NOT NULL,
+        rule_id      TEXT,
+        rule_name    TEXT,
+        details      JSONB,
+        mitre        JSONB,
+        tags         JSONB,
+        raw          TEXT,
+        acknowledged BOOLEAN DEFAULT FALSE,
+        created_at   TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_events_tenant    ON events(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_severity  ON events(severity);
+    CREATE INDEX IF NOT EXISTS idx_events_type      ON events(event_type);
+    CREATE INDEX IF NOT EXISTS idx_events_host      ON events(host_id);
+    CREATE INDEX IF NOT EXISTS idx_events_ts_tenant ON events(tenant_id, timestamp DESC);
+
+    CREATE TABLE IF NOT EXISTS baselines (
+        tenant_id     TEXT NOT NULL DEFAULT 'default',
+        host_id       TEXT NOT NULL,
+        baseline_type TEXT NOT NULL,
+        value         TEXT NOT NULL,
+        first_seen    TIMESTAMPTZ NOT NULL,
+        last_seen     TIMESTAMPTZ NOT NULL,
+        count         INTEGER DEFAULT 1,
+        PRIMARY KEY (tenant_id, host_id, baseline_type, value)
+    );
+
+    CREATE TABLE IF NOT EXISTS event_stats (
+        tenant_id  TEXT NOT NULL DEFAULT 'default',
+        date       DATE NOT NULL,
+        event_type TEXT NOT NULL,
+        severity   TEXT NOT NULL,
+        count      INTEGER DEFAULT 0,
+        PRIMARY KEY (tenant_id, date, event_type, severity)
+    );
+
+    CREATE TABLE IF NOT EXISTS tenants (
+        tenant_id   TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        token       TEXT NOT NULL UNIQUE,
+        plan        TEXT NOT NULL DEFAULT 'free',
+        max_hosts   INTEGER DEFAULT 1,
+        created_at  TIMESTAMPTZ DEFAULT NOW(),
+        active      BOOLEAN DEFAULT TRUE
+    );
+"""
+
+
+# ══════════════════════════════════════════════════════════════════
+#  EVENT REPOSITORY
+# ══════════════════════════════════════════════════════════════════
 
 class EventRepository:
     """
     Repositório de eventos de segurança.
-    Thread-safe, com índices para queries rápidas.
+    Thread-safe. Suporta SQLite (dev) e PostgreSQL (produção).
+    Todos os dados são isolados por tenant_id.
     """
 
-    def __init__(self, db_path: str = None):
-        self.db_path = str(db_path or DEFAULT_DB)
-        self._local = threading.local()
-        self._init_db()
-        logger.info("EventRepository iniciado: %s", self.db_path)
+    def __init__(self, db_path: str = None, tenant_id: str = "default"):
+        self.db_path   = str(db_path or DEFAULT_DB)
+        self.tenant_id = tenant_id
+        self._lock     = threading.RLock()
 
-    def _conn(self) -> sqlite3.Connection:
-        if not hasattr(self._local, 'conn') or self._local.conn is None:
+        if USE_POSTGRES:
+            self._pg_pool = []  # simple connection reuse
+            self._pg_lock = threading.RLock()
+        else:
+            self._local = threading.local()
+
+        self._init_db()
+        logger.info("EventRepository iniciado | backend=%s | tenant=%s",
+                    "postgres" if USE_POSTGRES else "sqlite", tenant_id)
+
+    # ── Connection management ─────────────────────────────────────
+
+    def _conn(self):
+        """Retorna conexão ativa para o backend configurado."""
+        if USE_POSTGRES:
+            return self._pg_conn()
+        return self._sqlite_conn()
+
+    def _sqlite_conn(self):
+        if not hasattr(self._local, "conn") or self._local.conn is None:
             self._local.conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self._local.conn.row_factory = sqlite3.Row
             self._local.conn.execute("PRAGMA journal_mode=WAL")
             self._local.conn.execute("PRAGMA synchronous=NORMAL")
         return self._local.conn
 
+    def _pg_conn(self):
+        """Retorna conexão PostgreSQL (thread-local via pool simples)."""
+        if not hasattr(self._local, "pg_conn") or self._local.pg_conn is None or self._local.pg_conn.closed:
+            self._local.pg_conn = psycopg2.connect(
+                DATABASE_URL,
+                cursor_factory=psycopg2.extras.RealDictCursor,
+            )
+            self._local.pg_conn.autocommit = False
+        return self._local.pg_conn
+
     def _init_db(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS events (
-                event_id     TEXT PRIMARY KEY,
-                timestamp    TEXT NOT NULL,
-                host_id      TEXT NOT NULL,
-                event_type   TEXT NOT NULL,
-                severity     TEXT NOT NULL,
-                source       TEXT NOT NULL,
-                rule_id      TEXT,
-                rule_name    TEXT,
-                details      TEXT,
-                mitre        TEXT,
-                tags         TEXT,
-                raw          TEXT,
-                acknowledged INTEGER DEFAULT 0,
-                created_at   TEXT DEFAULT (datetime('now'))
-            );
+        """Cria tabelas se não existirem."""
+        if USE_POSTGRES:
+            conn = psycopg2.connect(DATABASE_URL)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(_DDL_POSTGRES)
+                conn.commit()
+            finally:
+                conn.close()
+        else:
+            conn = sqlite3.connect(self.db_path)
+            conn.executescript(_DDL_SQLITE)
+            conn.commit()
+            conn.close()
 
-            CREATE INDEX IF NOT EXISTS idx_events_timestamp  ON events(timestamp DESC);
-            CREATE INDEX IF NOT EXISTS idx_events_severity   ON events(severity);
-            CREATE INDEX IF NOT EXISTS idx_events_type       ON events(event_type);
-            CREATE INDEX IF NOT EXISTS idx_events_host       ON events(host_id);
-            CREATE INDEX IF NOT EXISTS idx_events_rule       ON events(rule_id);
+    def _placeholder(self) -> str:
+        """Retorna placeholder de query correto para o backend."""
+        return "%s" if USE_POSTGRES else "?"
 
-            CREATE TABLE IF NOT EXISTS baselines (
-                host_id      TEXT NOT NULL,
-                baseline_type TEXT NOT NULL,
-                value        TEXT NOT NULL,
-                first_seen   TEXT NOT NULL,
-                last_seen    TEXT NOT NULL,
-                count        INTEGER DEFAULT 1,
-                PRIMARY KEY (host_id, baseline_type, value)
-            );
-
-            CREATE TABLE IF NOT EXISTS event_stats (
-                date         TEXT NOT NULL,
-                event_type   TEXT NOT NULL,
-                severity     TEXT NOT NULL,
-                count        INTEGER DEFAULT 0,
-                PRIMARY KEY (date, event_type, severity)
-            );
-        """)
-        conn.commit()
-        conn.close()
+    # ── Save ──────────────────────────────────────────────────────
 
     def save(self, event) -> bool:
         """Salva um SecurityEvent no banco."""
+        ph = self._placeholder()
         try:
+            details = json.dumps(event.details) if not USE_POSTGRES else event.details
+            mitre   = json.dumps(event.mitre.to_dict() if hasattr(event.mitre, "to_dict") else {})
+            tags    = json.dumps(event.tags) if not USE_POSTGRES else event.tags
+            ack     = (1 if event.acknowledged else 0) if not USE_POSTGRES else bool(event.acknowledged)
+
             conn = self._conn()
-            conn.execute("""
-                INSERT OR REPLACE INTO events
-                (event_id, timestamp, host_id, event_type, severity, source,
-                 rule_id, rule_name, details, mitre, tags, raw, acknowledged)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (
-                event.event_id,
-                event.timestamp,
-                event.host_id,
-                event.event_type,
-                event.severity,
-                event.source,
-                event.rule_id,
-                event.rule_name,
-                json.dumps(event.details),
-                json.dumps(event.mitre.to_dict() if hasattr(event.mitre, 'to_dict') else {}),
-                json.dumps(event.tags),
-                event.raw,
-                1 if event.acknowledged else 0,
-            ))
-            # Update stats
-            date = event.timestamp[:10]
-            conn.execute("""
-                INSERT INTO event_stats (date, event_type, severity, count)
-                VALUES (?,?,?,1)
-                ON CONFLICT(date, event_type, severity)
-                DO UPDATE SET count = count + 1
-            """, (date, event.event_type, event.severity))
-            conn.commit()
+            if USE_POSTGRES:
+                cur = conn.cursor()
+                cur.execute(f"""
+                    INSERT INTO events
+                        (event_id, tenant_id, timestamp, host_id, event_type, severity,
+                         source, rule_id, rule_name, details, mitre, tags, raw, acknowledged)
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph}::jsonb,{ph}::jsonb,{ph}::jsonb,{ph},{ph})
+                    ON CONFLICT (event_id) DO UPDATE SET acknowledged = EXCLUDED.acknowledged
+                """, (
+                    event.event_id, self.tenant_id, event.timestamp, event.host_id,
+                    event.event_type, event.severity, event.source, event.rule_id,
+                    event.rule_name,
+                    json.dumps(event.details),
+                    json.dumps(event.mitre.to_dict() if hasattr(event.mitre, "to_dict") else {}),
+                    json.dumps(event.tags),
+                    event.raw, ack,
+                ))
+                date = event.timestamp[:10]
+                cur.execute(f"""
+                    INSERT INTO event_stats (tenant_id, date, event_type, severity, count)
+                    VALUES ({ph},{ph},{ph},{ph},1)
+                    ON CONFLICT (tenant_id, date, event_type, severity)
+                    DO UPDATE SET count = event_stats.count + 1
+                """, (self.tenant_id, date, event.event_type, event.severity))
+                conn.commit()
+                cur.close()
+            else:
+                conn.execute(f"""
+                    INSERT OR REPLACE INTO events
+                    (event_id, tenant_id, timestamp, host_id, event_type, severity,
+                     source, rule_id, rule_name, details, mitre, tags, raw, acknowledged)
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+                """, (
+                    event.event_id, self.tenant_id, event.timestamp, event.host_id,
+                    event.event_type, event.severity, event.source, event.rule_id,
+                    event.rule_name, details, mitre, tags, event.raw, ack,
+                ))
+                date = event.timestamp[:10]
+                conn.execute(f"""
+                    INSERT INTO event_stats (tenant_id, date, event_type, severity, count)
+                    VALUES ({ph},{ph},{ph},{ph},1)
+                    ON CONFLICT(tenant_id, date, event_type, severity)
+                    DO UPDATE SET count = count + 1
+                """, (self.tenant_id, date, event.event_type, event.severity))
+                conn.commit()
             return True
         except Exception as e:
             logger.error("Error saving event: %s", e)
+            if USE_POSTGRES:
+                try:
+                    self._conn().rollback()
+                except Exception:
+                    pass
             return False
 
     def save_batch(self, events: list) -> int:
-        """Salva múltiplos eventos em batch."""
-        saved = 0
-        for e in events:
-            if self.save(e):
-                saved += 1
-        return saved
+        return sum(1 for e in events if self.save(e))
+
+    # ── Query ─────────────────────────────────────────────────────
 
     def query(
         self,
-        limit:      int  = 100,
-        offset:     int  = 0,
-        severity:   str  = None,
-        event_type: str  = None,
-        host_id:    str  = None,
-        rule_id:    str  = None,
-        since:      str  = None,
+        limit:        int  = 100,
+        offset:       int  = 0,
+        severity:     str  = None,
+        event_type:   str  = None,
+        host_id:      str  = None,
+        rule_id:      str  = None,
+        since:        str  = None,
         acknowledged: bool = None,
+        tenant_id:    str  = None,
     ) -> List[dict]:
-        """Query flexível de eventos."""
-        sql    = "SELECT * FROM events WHERE 1=1"
-        params = []
+        ph = self._placeholder()
+        tid = tenant_id or self.tenant_id
+        sql    = f"SELECT * FROM events WHERE tenant_id = {ph}"
+        params = [tid]
 
         if severity:
-            sql += " AND severity = ?"
-            params.append(severity.upper())
+            sql += f" AND severity = {ph}"; params.append(severity.upper())
         if event_type:
-            sql += " AND event_type = ?"
-            params.append(event_type)
+            sql += f" AND event_type = {ph}"; params.append(event_type)
         if host_id:
-            sql += " AND host_id = ?"
-            params.append(host_id)
+            sql += f" AND host_id = {ph}"; params.append(host_id)
         if rule_id:
-            sql += " AND rule_id = ?"
-            params.append(rule_id)
+            sql += f" AND rule_id = {ph}"; params.append(rule_id)
         if since:
-            sql += " AND timestamp >= ?"
-            params.append(since)
+            sql += f" AND timestamp >= {ph}"; params.append(since)
         if acknowledged is not None:
-            sql += " AND acknowledged = ?"
-            params.append(1 if acknowledged else 0)
+            val = acknowledged if USE_POSTGRES else (1 if acknowledged else 0)
+            sql += f" AND acknowledged = {ph}"; params.append(val)
 
-        sql += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+        sql += f" ORDER BY timestamp DESC LIMIT {ph} OFFSET {ph}"
         params += [limit, offset]
 
         try:
-            rows = self._conn().execute(sql, params).fetchall()
-            return [self._row_to_dict(r) for r in rows]
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+                cur.close()
+                return [self._pg_row_to_dict(r) for r in rows]
+            else:
+                rows = self._conn().execute(sql, params).fetchall()
+                return [self._sqlite_row_to_dict(r) for r in rows]
         except Exception as e:
             logger.error("Query error: %s", e)
             return []
 
-    def count(self, **filters) -> int:
-        sql    = "SELECT COUNT(*) FROM events WHERE 1=1"
-        params = []
-        if filters.get('severity'):
-            sql += " AND severity = ?"; params.append(filters['severity'].upper())
-        if filters.get('event_type'):
-            sql += " AND event_type = ?"; params.append(filters['event_type'])
-        if filters.get('since'):
-            sql += " AND timestamp >= ?"; params.append(filters['since'])
+    def count(self, tenant_id: str = None, **filters) -> int:
+        ph  = self._placeholder()
+        tid = tenant_id or self.tenant_id
+        sql    = f"SELECT COUNT(*) FROM events WHERE tenant_id = {ph}"
+        params = [tid]
+        if filters.get("severity"):
+            sql += f" AND severity = {ph}"; params.append(filters["severity"].upper())
+        if filters.get("event_type"):
+            sql += f" AND event_type = {ph}"; params.append(filters["event_type"])
+        if filters.get("since"):
+            sql += f" AND timestamp >= {ph}"; params.append(filters["since"])
         try:
-            return self._conn().execute(sql, params).fetchone()[0]
-        except:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(sql, params)
+                result = cur.fetchone()
+                cur.close()
+                return result["count"] if result else 0
+            else:
+                return self._conn().execute(sql, params).fetchone()[0]
+        except Exception:
             return 0
 
-    def stats(self) -> dict:
-        """Estatísticas agregadas para o dashboard."""
-        conn = self._conn()
+    def stats(self, tenant_id: str = None) -> dict:
+        ph  = self._placeholder()
+        tid = tenant_id or self.tenant_id
         try:
-            total = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-            by_sev = {}
-            for row in conn.execute(
-                "SELECT severity, COUNT(*) as c FROM events GROUP BY severity"
-            ):
-                by_sev[row['severity']] = row['c']
-
-            by_type = {}
-            for row in conn.execute(
-                "SELECT event_type, COUNT(*) as c FROM events GROUP BY event_type ORDER BY c DESC LIMIT 10"
-            ):
-                by_type[row['event_type']] = row['c']
-
-            # Last 24h
-            since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-            last24 = conn.execute(
-                "SELECT COUNT(*) FROM events WHERE timestamp >= ?", (since,)
-            ).fetchone()[0]
-
-            # Hourly last 24h
-            hourly = []
-            for row in conn.execute("""
-                SELECT strftime('%Y-%m-%dT%H:00:00Z', timestamp) as hour,
-                       COUNT(*) as c
-                FROM events
-                WHERE timestamp >= ?
-                GROUP BY hour ORDER BY hour
-            """, (since,)):
-                hourly.append({"hour": row['hour'], "c": row['c']})
-
-            return {
-                "total":      total,
-                "by_severity": by_sev,
-                "by_type":    by_type,
-                "last_24h":   last24,
-                "hourly":     hourly,
-            }
+            if USE_POSTGRES:
+                return self._stats_postgres(tid, ph)
+            return self._stats_sqlite(tid, ph)
         except Exception as e:
             logger.error("Stats error: %s", e)
             return {}
 
+    def _stats_sqlite(self, tid, ph) -> dict:
+        conn = self._conn()
+        total  = conn.execute(f"SELECT COUNT(*) FROM events WHERE tenant_id={ph}", (tid,)).fetchone()[0]
+        by_sev = {r["severity"]: r["c"] for r in conn.execute(
+            f"SELECT severity, COUNT(*) as c FROM events WHERE tenant_id={ph} GROUP BY severity", (tid,))}
+        by_type = {r["event_type"]: r["c"] for r in conn.execute(
+            f"SELECT event_type, COUNT(*) as c FROM events WHERE tenant_id={ph} "
+            f"GROUP BY event_type ORDER BY c DESC LIMIT 10", (tid,))}
+        since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        last24 = conn.execute(
+            f"SELECT COUNT(*) FROM events WHERE tenant_id={ph} AND timestamp>={ph}", (tid, since)
+        ).fetchone()[0]
+        hourly = [{"hour": r["hour"], "c": r["c"]} for r in conn.execute(f"""
+            SELECT strftime('%Y-%m-%dT%H:00:00Z', timestamp) as hour, COUNT(*) as c
+            FROM events WHERE tenant_id={ph} AND timestamp>={ph}
+            GROUP BY hour ORDER BY hour
+        """, (tid, since))]
+        return {"total": total, "by_severity": by_sev, "by_type": by_type,
+                "last_24h": last24, "hourly": hourly}
+
+    def _stats_postgres(self, tid, ph) -> dict:
+        cur = self._conn().cursor()
+        cur.execute(f"SELECT COUNT(*) FROM events WHERE tenant_id={ph}", (tid,))
+        total = cur.fetchone()["count"]
+        cur.execute(f"SELECT severity, COUNT(*) as c FROM events WHERE tenant_id={ph} GROUP BY severity", (tid,))
+        by_sev = {r["severity"]: r["c"] for r in cur.fetchall()}
+        cur.execute(f"""SELECT event_type, COUNT(*) as c FROM events WHERE tenant_id={ph}
+                        GROUP BY event_type ORDER BY c DESC LIMIT 10""", (tid,))
+        by_type = {r["event_type"]: r["c"] for r in cur.fetchall()}
+        since   = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        cur.execute(f"SELECT COUNT(*) FROM events WHERE tenant_id={ph} AND timestamp>={ph}", (tid, since))
+        last24  = cur.fetchone()["count"]
+        cur.execute(f"""
+            SELECT date_trunc('hour', timestamp) as hour, COUNT(*) as c
+            FROM events WHERE tenant_id={ph} AND timestamp>={ph}
+            GROUP BY hour ORDER BY hour
+        """, (tid, since))
+        hourly = [{"hour": str(r["hour"]), "c": r["c"]} for r in cur.fetchall()]
+        cur.close()
+        return {"total": total, "by_severity": by_sev, "by_type": by_type,
+                "last_24h": last24, "hourly": hourly}
+
     # ── Baseline management ───────────────────────────────────────
 
     def get_baseline(self, host_id: str, baseline_type: str) -> set:
-        """Retorna baseline como set de valores."""
+        ph  = self._placeholder()
+        tid = self.tenant_id
         try:
-            rows = self._conn().execute(
-                "SELECT value FROM baselines WHERE host_id=? AND baseline_type=?",
-                (host_id, baseline_type)
-            ).fetchall()
-            return {r['value'] for r in rows}
-        except:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"SELECT value FROM baselines WHERE tenant_id={ph} AND host_id={ph} AND baseline_type={ph}",
+                    (tid, host_id, baseline_type)
+                )
+                result = {r["value"] for r in cur.fetchall()}
+                cur.close()
+                return result
+            else:
+                rows = self._conn().execute(
+                    f"SELECT value FROM baselines WHERE tenant_id={ph} AND host_id={ph} AND baseline_type={ph}",
+                    (tid, host_id, baseline_type)
+                ).fetchall()
+                return {r["value"] for r in rows}
+        except Exception:
             return set()
 
     def update_baseline(self, host_id: str, baseline_type: str, value: str):
-        """Adiciona ou atualiza um valor no baseline."""
+        ph  = self._placeholder()
+        tid = self.tenant_id
         now = datetime.now(timezone.utc).isoformat()
         try:
-            self._conn().execute("""
-                INSERT INTO baselines (host_id, baseline_type, value, first_seen, last_seen, count)
-                VALUES (?,?,?,?,?,1)
-                ON CONFLICT(host_id, baseline_type, value)
-                DO UPDATE SET last_seen=?, count=count+1
-            """, (host_id, baseline_type, value, now, now, now))
-            self._conn().commit()
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(f"""
+                    INSERT INTO baselines (tenant_id, host_id, baseline_type, value, first_seen, last_seen, count)
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},1)
+                    ON CONFLICT (tenant_id, host_id, baseline_type, value)
+                    DO UPDATE SET last_seen={ph}, count=baselines.count+1
+                """, (tid, host_id, baseline_type, value, now, now, now))
+                self._conn().commit()
+                cur.close()
+            else:
+                self._conn().execute(f"""
+                    INSERT INTO baselines (tenant_id, host_id, baseline_type, value, first_seen, last_seen, count)
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},1)
+                    ON CONFLICT(tenant_id, host_id, baseline_type, value)
+                    DO UPDATE SET last_seen={ph}, count=count+1
+                """, (tid, host_id, baseline_type, value, now, now, now))
+                self._conn().commit()
         except Exception as e:
             logger.error("Baseline update error: %s", e)
 
@@ -265,13 +484,67 @@ class EventRepository:
         for v in values:
             self.update_baseline(host_id, baseline_type, str(v))
 
+    # ── Tenant management ─────────────────────────────────────────
+
+    def get_tenant_by_token(self, token: str) -> Optional[dict]:
+        """Resolve um token de agente para seu tenant_id e configurações."""
+        ph = self._placeholder()
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"SELECT * FROM tenants WHERE token={ph} AND active=TRUE", (token,)
+                )
+                row = cur.fetchone()
+                cur.close()
+                return dict(row) if row else None
+            else:
+                row = self._conn().execute(
+                    f"SELECT * FROM tenants WHERE token={ph} AND active=1", (token,)
+                ).fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.debug("get_tenant_by_token error: %s", e)
+            return None
+
+    def create_tenant(self, tenant_id: str, name: str, token: str,
+                      plan: str = "free", max_hosts: int = 1) -> bool:
+        ph = self._placeholder()
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(f"""
+                    INSERT INTO tenants (tenant_id, name, token, plan, max_hosts)
+                    VALUES ({ph},{ph},{ph},{ph},{ph})
+                    ON CONFLICT (tenant_id) DO NOTHING
+                """, (tenant_id, name, token, plan, max_hosts))
+                self._conn().commit()
+                cur.close()
+            else:
+                self._conn().execute(f"""
+                    INSERT OR IGNORE INTO tenants (tenant_id, name, token, plan, max_hosts)
+                    VALUES ({ph},{ph},{ph},{ph},{ph})
+                """, (tenant_id, name, token, plan, max_hosts))
+                self._conn().commit()
+            return True
+        except Exception as e:
+            logger.error("create_tenant error: %s", e)
+            return False
+
+    # ── Row converters ────────────────────────────────────────────
+
     @staticmethod
-    def _row_to_dict(row: sqlite3.Row) -> dict:
+    def _sqlite_row_to_dict(row: "sqlite3.Row") -> dict:
         d = dict(row)
-        for field in ('details', 'mitre', 'tags'):
+        for field in ("details", "mitre", "tags"):
             if d.get(field):
                 try:
                     d[field] = json.loads(d[field])
-                except:
+                except Exception:
                     pass
         return d
+
+    @staticmethod
+    def _pg_row_to_dict(row: dict) -> dict:
+        """PostgreSQL rows via RealDictCursor já são dicts com JSONB parsed."""
+        return dict(row) if row else {}
