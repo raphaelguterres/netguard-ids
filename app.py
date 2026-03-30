@@ -2419,6 +2419,89 @@ def prometheus_metrics():
 #  BILLING — Stripe SaaS routes
 # ══════════════════════════════════════════════════════════════════
 
+@app.route("/health")
+@app.route("/api/health")
+def health():
+    """
+    Health check completo — retorna status de todos os subsistemas.
+    Usado por Docker healthcheck, load balancers e make health.
+    HTTP 200 = tudo OK  |  HTTP 503 = algum subsistema crítico down.
+    """
+    import time as _time
+
+    # ── Banco de dados ─────────────────────────────────────────────
+    try:
+        stats = repo.stats()
+        db_ok = True
+        db_info = f"ok | {stats.get('total', 0)} eventos"
+    except Exception as _e:
+        db_ok = False
+        db_info = f"erro: {_e}"
+
+    # ── Monitor loop ───────────────────────────────────────────────
+    monitor_ok  = monitor_status.get("rodando", False)
+    monitor_info = (
+        f"ciclo #{monitor_status.get('ciclo', 0)} | "
+        f"ultimo={monitor_status.get('ultimo_ciclo', 'nunca')}"
+        if monitor_ok else "parado"
+    )
+
+    # ── Captura de pacotes ─────────────────────────────────────────
+    captura_info = monitor_status.get("captura", "desconhecido")
+    captura_ok   = "indisponivel" not in captura_info and "erro" not in captura_info.lower()
+
+    # ── IDS Engine ─────────────────────────────────────────────────
+    try:
+        ids_ok   = engine is not None
+        ids_info = f"ok | {len(getattr(engine, 'rules', []))} regras" if ids_ok else "não inicializado"
+    except Exception:
+        ids_ok   = False
+        ids_info = "erro"
+
+    # ── Fail2Ban ───────────────────────────────────────────────────
+    try:
+        from fail2ban_engine import Fail2BanEngine
+        f2b_ok   = True
+        f2b_info = "ok"
+    except Exception:
+        f2b_ok   = False
+        f2b_info = "não disponível"
+
+    # ── Threat Feeds ──────────────────────────────────────────────
+    try:
+        feeds_ok   = True
+        feeds_info = "ok"
+    except Exception:
+        feeds_ok   = False
+        feeds_info = "não disponível"
+
+    # ── Billing ───────────────────────────────────────────────────
+    billing_info = "stripe ativo" if (BILLING_OK and billing_active()) else "modo demo (sem Stripe)"
+
+    # ── Status geral ──────────────────────────────────────────────
+    critical_ok = db_ok and monitor_ok
+    overall     = "healthy" if critical_ok else "degraded"
+
+    payload = {
+        "status":    overall,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "version":   "3.0",
+        "uptime_cycles": monitor_status.get("ciclo", 0),
+        "subsystems": {
+            "database":    db_info,
+            "monitor":     monitor_info,
+            "packet_capture": captura_info,
+            "ids_engine":  ids_info,
+            "fail2ban":    f2b_info,
+            "billing":     billing_info,
+        },
+        "connections_active": len(conexoes_ativas),
+    }
+
+    status_code = 200 if critical_ok else 503
+    return jsonify(payload), status_code
+
+
 @app.route("/login")
 def login_page():
     """Página de login com token de API."""
