@@ -7,8 +7,9 @@ Um único processo. Sem simulador. Sem dados falsos.
 import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress
 from platform_utils import (
     OS, IS_WINDOWS, IS_LINUX,
-    get_processes, get_pid_name_map, get_connections, get_listen_ports,
+    get_processes, get_pid_name_map, get_listen_ports,
     get_security_events, get_arp_table, ping as platform_ping, get_hostname,
+    get_connections as platform_get_connections,
 )
 
 try:
@@ -679,7 +680,7 @@ def checar_event_log():
 # ── Monitor: Conexões ─────────────────────────────────────────────
 def checar_conexoes():
     try:
-        conns_raw  = get_connections()
+        conns_raw  = platform_get_connections()
         sus=0; total=0; info_conexoes=[]; conn_map={}
 
         for conn_entry in conns_raw:
@@ -700,7 +701,7 @@ def checar_conexoes():
             conn_map[proc_nome]["connections"].append({
                 "dst_ip":    ip_r,
                 "dst_port":  porta,
-                "local_port": int(p[1].rsplit(":",1)[-1]) if ":" in p[1] else 0,
+                "local_port": conn_entry.get("local_port", 0),
                 "hostname":  resolve_ip(ip_r) if not ip_r.startswith("127.") else "localhost",
             })
 
@@ -751,9 +752,10 @@ def loop_monitor(intervalo=30):
     while monitor_status["rodando"]:
         monitor_status["ciclo"] += 1
         monitor_status["ultimo_ciclo"] = datetime.now().strftime('%H:%M:%S')
-        checar_event_log()
-        checar_conexoes()
-        checar_processos()
+        with app.app_context():
+            checar_event_log()
+            checar_conexoes()
+            checar_processos()
         logger.info("Ciclo #%d | evlog=%s | rede=%s | proc=%s",
                     monitor_status["ciclo"],
                     monitor_status["event_log"],
@@ -2158,7 +2160,7 @@ def geo_ips():
     # Fetch live connections via platform_utils (cross-platform)
     live_conns = []
     try:
-        for c in get_connections():
+        for c in platform_get_connections():
             live_conns.append({
                 "ip":      c.get("ip", ""),
                 "port":    c.get("port", 0),
