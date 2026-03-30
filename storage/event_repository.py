@@ -95,13 +95,16 @@ _DDL_SQLITE = """
     );
 
     CREATE TABLE IF NOT EXISTS tenants (
-        tenant_id   TEXT PRIMARY KEY,
-        name        TEXT NOT NULL,
-        token       TEXT NOT NULL UNIQUE,
-        plan        TEXT NOT NULL DEFAULT 'free',
-        max_hosts   INTEGER DEFAULT 1,
-        created_at  TEXT DEFAULT (datetime('now')),
-        active      INTEGER DEFAULT 1
+        tenant_id              TEXT PRIMARY KEY,
+        name                   TEXT NOT NULL,
+        token                  TEXT NOT NULL UNIQUE,
+        plan                   TEXT NOT NULL DEFAULT 'free',
+        max_hosts              INTEGER DEFAULT 1,
+        created_at             TEXT DEFAULT (datetime('now')),
+        active                 INTEGER DEFAULT 1,
+        email                  TEXT,
+        stripe_customer_id     TEXT,
+        stripe_subscription_id TEXT
     );
 """
 
@@ -151,13 +154,16 @@ _DDL_POSTGRES = """
     );
 
     CREATE TABLE IF NOT EXISTS tenants (
-        tenant_id   TEXT PRIMARY KEY,
-        name        TEXT NOT NULL,
-        token       TEXT NOT NULL UNIQUE,
-        plan        TEXT NOT NULL DEFAULT 'free',
-        max_hosts   INTEGER DEFAULT 1,
-        created_at  TIMESTAMPTZ DEFAULT NOW(),
-        active      BOOLEAN DEFAULT TRUE
+        tenant_id              TEXT PRIMARY KEY,
+        name                   TEXT NOT NULL,
+        token                  TEXT NOT NULL UNIQUE,
+        plan                   TEXT NOT NULL DEFAULT 'free',
+        max_hosts              INTEGER DEFAULT 1,
+        created_at             TIMESTAMPTZ DEFAULT NOW(),
+        active                 BOOLEAN DEFAULT TRUE,
+        email                  TEXT,
+        stripe_customer_id     TEXT,
+        stripe_subscription_id TEXT
     );
 """
 
@@ -215,7 +221,7 @@ class EventRepository:
         return self._local.pg_conn
 
     def _init_db(self):
-        """Cria tabelas se não existirem."""
+        """Cria tabelas se não existirem e aplica migrations."""
         if USE_POSTGRES:
             conn = psycopg2.connect(DATABASE_URL)
             try:
@@ -226,9 +232,18 @@ class EventRepository:
                 conn.close()
         else:
             conn = sqlite3.connect(self.db_path)
-            conn.executescript(_DDL_SQLITE)
+            # Executa cada statement individualmente para tolerar schema antigo
+            for stmt in _DDL_SQLITE.split(";"):
+                stmt = stmt.strip()
+                if stmt:
+                    try:
+                        conn.execute(stmt)
+                    except Exception as _e:
+                        logger.debug("DDL skip (schema antigo): %s | %s", _e, stmt[:60])
             conn.commit()
             conn.close()
+        # Aplica migrations (adiciona colunas novas em bancos pré-existentes)
+        self._migrate_schema()
 
     def _placeholder(self) -> str:
         """Retorna placeholder de query correto para o backend."""
@@ -508,28 +523,107 @@ class EventRepository:
             return None
 
     def create_tenant(self, tenant_id: str, name: str, token: str,
-                      plan: str = "free", max_hosts: int = 1) -> bool:
+                      plan: str = "free", max_hosts: int = 1,
+                      email: str = "",
+                      stripe_customer_id: str = "",
+                      stripe_subscription_id: str = "") -> bool:
         ph = self._placeholder()
         try:
             if USE_POSTGRES:
                 cur = self._conn().cursor()
                 cur.execute(f"""
-                    INSERT INTO tenants (tenant_id, name, token, plan, max_hosts)
-                    VALUES ({ph},{ph},{ph},{ph},{ph})
+                    INSERT INTO tenants
+                        (tenant_id, name, token, plan, max_hosts, email,
+                         stripe_customer_id, stripe_subscription_id)
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
                     ON CONFLICT (tenant_id) DO NOTHING
-                """, (tenant_id, name, token, plan, max_hosts))
+                """, (tenant_id, name, token, plan, max_hosts, email,
+                      stripe_customer_id, stripe_subscription_id))
                 self._conn().commit()
                 cur.close()
             else:
                 self._conn().execute(f"""
-                    INSERT OR IGNORE INTO tenants (tenant_id, name, token, plan, max_hosts)
-                    VALUES ({ph},{ph},{ph},{ph},{ph})
-                """, (tenant_id, name, token, plan, max_hosts))
+                    INSERT OR IGNORE INTO tenants
+                        (tenant_id, name, token, plan, max_hosts, email,
+                         stripe_customer_id, stripe_subscription_id)
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+                """, (tenant_id, name, token, plan, max_hosts, email,
+                      stripe_customer_id, stripe_subscription_id))
                 self._conn().commit()
             return True
         except Exception as e:
             logger.error("create_tenant error: %s", e)
             return False
+
+    def _exec_sql(self, sql: str, params: tuple = ()) -> bool:
+        """
+        Executa SQL arbitrário de forma segura (usado pelo webhook handler).
+        Suporta ? (SQLite) e %s (PostgreSQL) automaticamente.
+        """
+        ph = self._placeholder()
+        # Normaliza placeholder para o backend correto
+        if ph == "%s" and "?" in sql:
+            sql = sql.replace("?", "%s")
+        elif ph == "?" and "%s" in sql:
+            sql = sql.replace("%s", "?")
+        try:
+            conn = self._conn()
+            if USE_POSTGRES:
+                cur = conn.cursor()
+                cur.execute(sql, params)
+                conn.commit()
+                cur.close()
+            else:
+                conn.execute(sql, params)
+                conn.commit()
+            return True
+        except Exception as exc:
+            logger.error("_exec_sql error: %s | sql=%s", exc, sql[:80])
+            return False
+
+    # ── Migrations (adiciona colunas novas em DBs existentes) ─────
+
+    def _migrate_schema(self):
+        """
+        Adiciona colunas ausentes em bancos pré-existentes.
+        Seguro de rodar múltiplas vezes — ignora colunas que já existem.
+        """
+        migrations = {
+            # tabela: [(coluna, definição), ...]
+            "events": [
+                ("tenant_id",    "TEXT NOT NULL DEFAULT 'default'"),
+            ],
+            "baselines": [
+                ("tenant_id",    "TEXT NOT NULL DEFAULT 'default'"),
+            ],
+            "event_stats": [
+                ("tenant_id",    "TEXT NOT NULL DEFAULT 'default'"),
+            ],
+            "tenants": [
+                ("email",                  "TEXT DEFAULT ''"),
+                ("stripe_customer_id",     "TEXT DEFAULT ''"),
+                ("stripe_subscription_id", "TEXT DEFAULT ''"),
+            ],
+        }
+
+        for table, cols in migrations.items():
+            for col, definition in cols:
+                try:
+                    if USE_POSTGRES:
+                        cur = self._conn().cursor()
+                        cur.execute(
+                            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {definition}"
+                        )
+                        self._conn().commit()
+                        cur.close()
+                    else:
+                        self._conn().execute(
+                            f"ALTER TABLE {table} ADD COLUMN {col} {definition}"
+                        )
+                        self._conn().commit()
+                    logger.debug("Migration OK: %s.%s", table, col)
+                except Exception:
+                    pass  # Coluna já existe ou tabela não existe ainda — ignorar
 
     # ── Row converters ────────────────────────────────────────────
 

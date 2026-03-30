@@ -105,6 +105,19 @@ except Exception as _ab_err:
     AUTOBLOCK_AVAILABLE = False
     print(f"[WARN] AutoBlock: {_ab_err}")
 
+# Billing (Stripe)
+try:
+    from billing import (
+        PLANS, STRIPE_PUBLISHABLE_KEY, billing_active,
+        create_checkout_session, create_portal_session,
+        retrieve_checkout_session, handle_webhook,
+        generate_api_token, get_plan,
+    )
+    BILLING_OK = True
+except Exception as _bill_err:
+    BILLING_OK = False
+    print(f"[WARN] Billing module: {_bill_err}")
+
 # Auth + HTTPS
 try:
     from auth import auth, AUTH_ENABLED, get_ssl_context, print_startup_info, HTTPS_PORT
@@ -2400,6 +2413,236 @@ def prometheus_metrics():
 
     output = "\n".join(lines) + "\n"
     return Response(output, mimetype="text/plain; version=0.0.4; charset=utf-8")
+
+
+# ══════════════════════════════════════════════════════════════════
+#  BILLING — Stripe SaaS routes
+# ══════════════════════════════════════════════════════════════════
+
+@app.route("/pricing")
+def pricing():
+    """Página pública de planos e preços."""
+    from flask import render_template
+    cancelled = request.args.get("cancelled") == "1"
+    return render_template("pricing.html", cancelled=cancelled)
+
+
+@app.route("/checkout", methods=["POST"])
+def checkout():
+    """Inicia sessão de checkout no Stripe."""
+    from flask import redirect
+    if not BILLING_OK:
+        return jsonify({"error": "Billing module não disponível"}), 500
+
+    plan    = request.form.get("plan", "pro")
+    email   = request.form.get("email", "").strip()
+    name    = request.form.get("name", "").strip()
+    company = request.form.get("company", "").strip()
+
+    if not email or not name:
+        return jsonify({"error": "Nome e email são obrigatórios"}), 400
+
+    url = create_checkout_session(plan, email, name, company)
+    if not url:
+        return jsonify({"error": "Falha ao criar sessão de checkout"}), 500
+
+    return redirect(url)
+
+
+@app.route("/welcome")
+def welcome():
+    """
+    Página de boas-vindas pós-pagamento.
+    Dois modos:
+      ?session_id=cs_...  → pagamento real via Stripe
+      ?demo=1&...         → modo demo sem Stripe
+    """
+    from flask import render_template
+    import uuid
+
+    demo       = request.args.get("demo") == "1"
+    session_id = request.args.get("session_id", "")
+    plan_key   = request.args.get("plan", "pro")
+    token      = request.args.get("token", "")
+    name       = request.args.get("name", "")
+    email      = request.args.get("email", "")
+
+    if demo:
+        # Modo demo: cria tenant simulado no banco
+        if not token:
+            token = generate_api_token()
+        plan_info = get_plan(plan_key)
+        tenant_id = str(uuid.uuid4())
+        try:
+            repo.create_tenant(
+                tenant_id = tenant_id,
+                name      = name or email or "Demo Tenant",
+                token     = token,
+                plan      = plan_key,
+                max_hosts = plan_info["max_hosts"],
+            )
+            logger.info("Tenant demo criado: %s | plan=%s | token=%s…",
+                        tenant_id, plan_key, token[:12])
+        except Exception as exc:
+            logger.error("Erro ao criar tenant demo: %s", exc)
+
+        return render_template(
+            "welcome.html",
+            demo       = True,
+            token      = token,
+            name       = name,
+            plan_label = plan_info["name"],
+            server_url = request.host_url.rstrip("/"),
+        )
+
+    # Pagamento real: busca dados no Stripe
+    if not session_id:
+        from flask import redirect
+        return redirect("/pricing")
+
+    if not BILLING_OK:
+        return jsonify({"error": "Billing não configurado"}), 500
+
+    stripe_session = retrieve_checkout_session(session_id)
+    if not stripe_session:
+        return jsonify({"error": "Sessão de checkout inválida"}), 400
+
+    meta      = stripe_session.get("metadata", {})
+    plan_key  = meta.get("plan", "pro")
+    name      = meta.get("name", "")
+    email     = meta.get("email", "")
+    plan_info = get_plan(plan_key)
+    token     = generate_api_token()
+
+    stripe_customer_id      = (stripe_session.get("customer") or {}).get("id", "")
+    stripe_subscription_id  = (stripe_session.get("subscription") or {}).get("id", "")
+
+    tenant_id = str(uuid.uuid4())
+    try:
+        repo.create_tenant(
+            tenant_id = tenant_id,
+            name      = name or email,
+            token     = token,
+            plan      = plan_key,
+            max_hosts = plan_info["max_hosts"],
+        )
+        logger.info("Tenant criado via Stripe: %s | plan=%s | cust=%s",
+                    tenant_id, plan_key, stripe_customer_id)
+    except Exception as exc:
+        logger.error("Erro ao criar tenant: %s", exc)
+
+    return render_template(
+        "welcome.html",
+        demo       = False,
+        token      = token,
+        name       = name,
+        plan_label = plan_info["name"],
+        server_url = request.host_url.rstrip("/"),
+    )
+
+
+@app.route("/billing/portal")
+def billing_portal():
+    """Redireciona para o portal de auto-atendimento do Stripe."""
+    from flask import redirect
+    # Identifica tenant pelo token de API enviado como query param ou header
+    token = (
+        request.args.get("token")
+        or request.headers.get("X-API-Token", "")
+        or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    )
+    if not token:
+        return jsonify({"error": "Token de API necessário"}), 401
+
+    tenant = repo.get_tenant_by_token(token)
+    if not tenant:
+        return jsonify({"error": "Token inválido"}), 401
+
+    stripe_customer_id = tenant.get("stripe_customer_id", "")
+    if not stripe_customer_id:
+        return jsonify({"error": "Tenant sem customer Stripe — use o portal demo"}), 400
+
+    url = create_portal_session(stripe_customer_id)
+    if not url:
+        return jsonify({"error": "Falha ao criar sessão do portal"}), 500
+
+    return redirect(url)
+
+
+@app.route("/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    """
+    Webhook handler do Stripe.
+    Eventos tratados:
+      checkout.session.completed     → tenant já criado em /welcome; log apenas
+      invoice.paid                   → confirma renovação
+      customer.subscription.deleted  → desativa tenant
+      customer.subscription.updated  → atualiza plano
+    """
+    import uuid
+    payload    = request.get_data()
+    sig_header = request.headers.get("Stripe-Signature", "")
+
+    if not BILLING_OK:
+        return jsonify({"error": "Billing não configurado"}), 500
+
+    event = handle_webhook(payload, sig_header)
+    if event is None:
+        return jsonify({"error": "Webhook inválido"}), 400
+
+    etype = event.get("type", "")
+    data  = event["data"]["object"]
+
+    if etype == "checkout.session.completed":
+        # Tenant já criado em /welcome — apenas log
+        meta = data.get("metadata", {})
+        logger.info("Stripe checkout.session.completed | plan=%s | email=%s",
+                    meta.get("plan"), meta.get("email"))
+
+    elif etype == "invoice.paid":
+        customer_id = data.get("customer", "")
+        logger.info("Stripe invoice.paid | customer=%s — assinatura ativa", customer_id)
+        # Reativa tenant se estava suspenso
+        try:
+            repo._exec_sql(
+                "UPDATE tenants SET active=? WHERE stripe_customer_id=?",
+                (1, customer_id)
+            )
+        except Exception:
+            pass
+
+    elif etype == "customer.subscription.deleted":
+        customer_id = data.get("customer", "")
+        logger.warning("Stripe subscription.deleted | customer=%s — desativando tenant", customer_id)
+        try:
+            repo._exec_sql(
+                "UPDATE tenants SET active=? WHERE stripe_customer_id=?",
+                (0, customer_id)
+            )
+        except Exception:
+            pass
+
+    elif etype == "customer.subscription.updated":
+        customer_id = data.get("customer", "")
+        # Descobre novo plano pelo price metadata
+        items    = data.get("items", {}).get("data", [])
+        price_id = items[0]["price"]["id"] if items else ""
+        new_plan = next(
+            (k for k, v in PLANS.items() if v.get("price_id") == price_id),
+            None
+        ) if BILLING_OK else None
+        if new_plan:
+            plan_info = get_plan(new_plan)
+            try:
+                repo._exec_sql(
+                    "UPDATE tenants SET plan=?, max_hosts=? WHERE stripe_customer_id=?",
+                    (new_plan, plan_info["max_hosts"], customer_id)
+                )
+                logger.info("Plano atualizado: customer=%s → %s", customer_id, new_plan)
+            except Exception:
+                pass
+
+    return jsonify({"received": True}), 200
 
 
 @app.route("/")
