@@ -122,14 +122,16 @@ except Exception as _bill_err:
 try:
     from auth import (
         auth, AUTH_ENABLED, get_ssl_context, print_startup_info, HTTPS_PORT,
-        verify_any_token, _extract_token,
+        verify_any_token, _extract_token, require_session, DASHBOARD_AUTH,
     )
     AUTH_MODULE_OK = True
 except Exception as _auth_err:
     # Fallback: auth decorator que não faz nada
     def auth(f): return f
-    AUTH_ENABLED   = False
-    AUTH_MODULE_OK = False
+    def require_session(f): return f
+    AUTH_ENABLED    = False
+    DASHBOARD_AUTH  = False
+    AUTH_MODULE_OK  = False
     def get_ssl_context(): return None
     def print_startup_info(): pass
     def verify_any_token(token, repo=None): return {"valid": False, "type": None}
@@ -285,10 +287,17 @@ ids = IDSEngine(
 )
 log_proc = LogProcessor()
 
+# ── Event Repository (multi-tenant storage) ───────────────────────
+from storage.event_repository import EventRepository
+repo = EventRepository()
+
 # ── Auth ──────────────────────────────────────────────────────────
+# Nota: auth() importado de auth.py (token-based) tem prioridade.
+# API_KEY é um segundo mecanismo legado via header X-API-Key.
 API_KEY = os.environ.get("IDS_API_KEY","")
 
-def auth(f):
+def _api_key_auth(f):
+    """Auth legado por X-API-Key (usado em endpoints de agente externo)."""
     @functools.wraps(f)
     def d(*a,**kw):
         if not API_KEY: return f(*a,**kw)
@@ -937,19 +946,6 @@ def after(resp):
     return resp
 
 # ── API routes ────────────────────────────────────────────────────
-
-@app.route("/api/health")
-def health():
-    return jsonify({
-        "status":"healthy","modo":"rede_real","simulador":"desativado",
-        "timestamp":datetime.now().isoformat()+"Z",
-        "total_detections":ids.store.count_total(),
-        "whitelist_ips":list(ids.whitelist_ips),
-        "signatures_loaded":len(ids.signatures),
-        "auto_block":AUTO_BLOCK,
-        "monitor":monitor_status,
-        "captura":monitor_status.get("captura","indisponivel"),
-    })
 
 @app.route("/api/detections")
 @auth
@@ -2811,7 +2807,7 @@ def stripe_webhook():
 
 @app.route("/")
 @app.route("/dashboard")
-@auth
+@require_session
 def dashboard():
     p = pathlib.Path(__file__).parent/"dashboard.html"
     if not p.exists(): return "dashboard.html nao encontrado",404

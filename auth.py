@@ -99,6 +99,62 @@ def _is_browser_request() -> bool:
     return "text/html" in accept
 
 
+# ── Proteção de dashboard (sempre ativa, independente de IDS_AUTH) ─
+
+# Pode desativar com IDS_DASHBOARD_AUTH=false (ex.: desenvolvimento local)
+DASHBOARD_AUTH = os.environ.get("IDS_DASHBOARD_AUTH", "true").lower() != "false"
+
+def require_session(f):
+    """
+    Decorador para rotas HTML (dashboard).
+    Sempre redireciona para /login se não houver cookie de sessão válido.
+
+    Diferente de @auth (que respeita IDS_AUTH), este é sempre ativo.
+    Desative com: IDS_DASHBOARD_AUTH=false
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not DASHBOARD_AUTH:
+            return f(*args, **kwargs)
+
+        token = request.cookies.get("netguard_token", "").strip()
+        if not token:
+            next_url = request.path
+            if request.query_string:
+                next_url += "?" + request.query_string.decode()
+            logger.info("Sessão ausente → /login | ip=%s | path=%s",
+                        request.remote_addr, request.path)
+            return redirect(f"/login?next={next_url}")
+
+        # Valida o cookie (admin token ou tenant token)
+        # repo é injetado como parâmetro opcional via g ou importado sob demanda
+        try:
+            from flask import g
+            repo = getattr(g, "_repo", None)
+        except Exception:
+            repo = None
+
+        # Tenta importar repo do app se não estiver em g
+        if repo is None:
+            try:
+                import sys
+                app_module = sys.modules.get("__main__") or sys.modules.get("app")
+                if app_module:
+                    repo = getattr(app_module, "repo", None)
+            except Exception:
+                pass
+
+        result = verify_any_token(token, repo)
+        if not result["valid"]:
+            logger.warning("Cookie inválido → /login | ip=%s", request.remote_addr)
+            resp = redirect(f"/login?next={request.path}&expired=1")
+            resp.delete_cookie("netguard_token")
+            return resp
+
+        return f(*args, **kwargs)
+    return decorated
+
+
 # ── Decorador de autenticação ─────────────────────────────────────
 
 _valid_token = None  # cache em memória
