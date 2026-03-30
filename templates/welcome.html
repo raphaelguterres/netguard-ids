@@ -261,9 +261,19 @@ netguard-agent</pre>
   </div>
 
   <div class="actions">
-    <a href="/" class="btn btn-primary">Ir para o dashboard →</a>
+    <a id="btn-dashboard" href="/login" class="btn btn-primary">Acessar painel →</a>
     <a href="/billing/portal" class="btn btn-outline">Gerenciar billing</a>
   </div>
+
+  <script>
+    // Injeta token na URL do botão para auto-login
+    (function() {
+      const token = document.querySelector('.token-value') && document.querySelector('.token-value').textContent.trim();
+      if (token) {
+        document.getElementById('btn-dashboard').href = '/login?token=' + encodeURIComponent(token);
+      }
+    })();
+  </script>
 </div>
 
 <script>

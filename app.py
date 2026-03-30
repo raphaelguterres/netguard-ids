@@ -2419,6 +2419,35 @@ def prometheus_metrics():
 #  BILLING — Stripe SaaS routes
 # ══════════════════════════════════════════════════════════════════
 
+@app.route("/login")
+def login_page():
+    """Página de login com token de API."""
+    from flask import render_template
+    return render_template("login.html")
+
+
+@app.route("/api/auth/validate", methods=["POST"])
+def auth_validate():
+    """Valida token de API de um tenant e retorna seus dados."""
+    data  = request.get_json(silent=True) or {}
+    token = data.get("token", "").strip()
+    if not token:
+        return jsonify({"valid": False, "error": "Token ausente"}), 400
+    tenant = repo.get_tenant_by_token(token)
+    if tenant:
+        return jsonify({
+            "valid":  True,
+            "tenant": {
+                "tenant_id": tenant.get("tenant_id"),
+                "name":      tenant.get("name"),
+                "plan":      tenant.get("plan"),
+                "max_hosts": tenant.get("max_hosts"),
+                "email":     tenant.get("email", ""),
+            }
+        })
+    return jsonify({"valid": False, "error": "Token inválido"}), 401
+
+
 @app.route("/pricing")
 def pricing():
     """Página pública de planos e preços."""
