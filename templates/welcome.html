@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bem-vindo ao NetGuard IDS!</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+    .card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 14px;
+      padding: 2.5rem;
+      max-width: 600px;
+      width: 100%;
+    }
+    .success-icon {
+      width: 60px;
+      height: 60px;
+      background: #1a3a1f;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 1.5rem;
+    }
+    .success-icon svg { width: 30px; height: 30px; }
+
+    h1 { text-align: center; font-size: 1.7rem; margin-bottom: 0.5rem; }
+    .subtitle { text-align: center; color: #8b949e; font-size: 0.95rem; margin-bottom: 2rem; }
+
+    .plan-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: #1f3a4f;
+      color: #58a6ff;
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 0.3rem 0.8rem;
+      border-radius: 999px;
+      margin: 0 auto 2rem;
+      display: flex;
+      justify-content: center;
+      width: fit-content;
+      margin: 0 auto 2rem;
+    }
+
+    /* Token box */
+    .token-section { margin-bottom: 2rem; }
+    .token-label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.6rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .token-label::before { content: "🔑"; }
+    .token-box {
+      display: flex;
+      align-items: center;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .token-value {
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: 0.85rem;
+      padding: 0.8rem 1rem;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #79c0ff;
+    }
+    .copy-btn {
+      background: #21262d;
+      border: none;
+      border-left: 1px solid #30363d;
+      color: #8b949e;
+      padding: 0.8rem 1rem;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 600;
+      transition: background .2s, color .2s;
+      white-space: nowrap;
+    }
+    .copy-btn:hover { background: #30363d; color: #e6edf3; }
+    .copy-btn.copied { color: #3fb950; }
+
+    .token-warning {
+      margin-top: 0.6rem;
+      font-size: 0.8rem;
+      color: #f0883e;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.4rem;
+    }
+
+    /* Steps */
+    .steps-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 1rem;
+    }
+    .steps { display: flex; flex-direction: column; gap: 0.8rem; margin-bottom: 2rem; }
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 0.9rem 1rem;
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+    }
+    .step-num {
+      width: 28px;
+      height: 28px;
+      background: #1f3a4f;
+      color: #58a6ff;
+      border-radius: 50%;
+      font-size: 0.75rem;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .step-content { flex: 1; }
+    .step-title { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem; }
+    .step-desc { color: #8b949e; font-size: 0.82rem; line-height: 1.5; }
+    pre {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      padding: 0.5rem 0.8rem;
+      margin-top: 0.5rem;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 0.78rem;
+      color: #79c0ff;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* Actions */
+    .actions { display: flex; gap: 0.8rem; flex-wrap: wrap; }
+    .btn {
+      flex: 1;
+      min-width: 140px;
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border: none;
+      text-align: center;
+      display: inline-block;
+      transition: opacity .2s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: #238636; color: #fff; }
+    .btn-outline  { background: transparent; border: 1px solid #30363d; color: #e6edf3; }
+
+    .demo-notice {
+      background: #1c1e12;
+      border: 1px solid #9e6a0344;
+      border-radius: 8px;
+      padding: 0.8rem 1rem;
+      color: #e3b341;
+      font-size: 0.82rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      gap: 0.5rem;
+      align-items: flex-start;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="success-icon">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  </div>
+
+  <h1>Tudo certo, {{ name or 'bem-vindo' }}! 🎉</h1>
+  <p class="subtitle">Sua conta NetGuard IDS foi criada com sucesso.</p>
+
+  <div class="plan-badge">
+    🛡️ Plano {{ plan_label or 'Pro' }} ativo
+  </div>
+
+  {% if demo %}
+  <div class="demo-notice">
+    ⚠️ <span><strong>Modo demo</strong> — Stripe não está configurado. Este é um token de teste, nenhuma cobrança foi feita.</span>
+  </div>
+  {% endif %}
+
+  <div class="token-section">
+    <div class="token-label">Seu token de API</div>
+    <div class="token-box">
+      <span class="token-value" id="token-val">{{ token }}</span>
+      <button class="copy-btn" id="copy-btn" onclick="copyToken()">Copiar</button>
+    </div>
+    <p class="token-warning">
+      ⚠️ Guarde este token agora. Por segurança, ele não será exibido novamente.
+    </p>
+  </div>
+
+  <div class="steps-title">Como começar</div>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-content">
+        <div class="step-title">Instale o agente no seu servidor</div>
+        <div class="step-desc">Rode o comando abaixo em cada host que deseja monitorar:</div>
+        <pre>pip install netguard-agent
+netguard-agent --token {{ token }} --server {{ server_url }}</pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-content">
+        <div class="step-title">Ou use via variável de ambiente</div>
+        <div class="step-desc">Ideal para Docker / systemd:</div>
+        <pre>export NETGUARD_TOKEN="{{ token }}"
+export NETGUARD_SERVER="{{ server_url }}"
+netguard-agent</pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-content">
+        <div class="step-title">Acesse o dashboard</div>
+        <div class="step-desc">Eventos aparecerão no dashboard em até 60 segundos após o agente iniciar.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <a href="/" class="btn btn-primary">Ir para o dashboard →</a>
+    <a href="/billing/portal" class="btn btn-outline">Gerenciar billing</a>
+  </div>
+</div>
+
+<script>
+  function copyToken() {
+    const val = document.getElementById('token-val').textContent.trim();
+    navigator.clipboard.writeText(val).then(() => {
+      const btn = document.getElementById('copy-btn');
+      btn.textContent = '✓ Copiado!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'Copiar';
+        btn.classList.remove('copied');
+      }, 2500);
+    });
+  }
+</script>
+
+</body>
+</html>
