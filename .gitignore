@@ -1,43 +1,75 @@
+# ========================
 # Python
+# ========================
 __pycache__/
 *.pyc
 *.pyo
-venv/
+*.pyd
 *.egg-info/
 
-# Database
+venv/
+.venv/
+
+# ========================
+# Database local
+# ========================
 *.db
-*.db-journal
 *.sqlite
+*.sqlite3
+*.db-journal
 *.db-shm
 *.db-wal
 
+# ========================
+# Tokens / secrets
+# ========================
+.netguard_token
+*.token
+
+.env
+.env.*
+
+# exemplo permitido
+!.env.example
+
+# ========================
 # Logs
+# ========================
 *.log
 .pytest_cache/
 .coverage
 
+# ========================
 # Build / distribuição
+# ========================
 build/
 dist/
 *.spec
 *.exe
 
-# Browser profile (pywebview)
+# ========================
+# pywebview profile
+# ========================
 .netguard_browser_profile/
 
-# Windows
-Thumbs.db
-desktop.ini
-
+# ========================
 # IDE
+# ========================
 .vscode/
 .idea/
 
-# Forçar inclusão de pastas do projeto (override de gitignore global)
+# ========================
+# Sistema operacional
+# ========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ========================
+# Garantir inclusão de código
+# ========================
 !templates/
 !templates/**
 !storage/
 !storage/**
 !billing.py
-!.env.example
