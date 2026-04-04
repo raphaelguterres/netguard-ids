@@ -2903,6 +2903,143 @@ def stripe_webhook():
     return jsonify({"received": True}), 200
 
 
+# ── Demo ──────────────────────────────────────────────────────────
+
+@app.route("/demo")
+def demo_access():
+    """
+    Acesso direto ao ambiente de demonstração.
+    Cria o tenant demo (se não existir), seta cookie e redireciona ao dashboard.
+    Desative com IDS_DEMO_DISABLED=true em produção.
+    """
+    from flask import make_response, redirect as _redir
+    if os.environ.get("IDS_DEMO_DISABLED", "false").lower() == "true":
+        return redirect("/pricing")
+
+    try:
+        from demo_seed import seed_demo, DEMO_TOKEN, DEMO_TENANT_ID
+        existing = repo.get_tenant_by_token(DEMO_TOKEN)
+        if not existing:
+            seed_demo(repo, n_events=350, verbose=False)
+            logger.info("Demo seed criado via /demo | ip=%s", request.remote_addr)
+        audit("DEMO_ACCESS", ip=request.remote_addr or "-",
+              detail=f"tenant={DEMO_TENANT_ID}")
+    except Exception as exc:
+        logger.warning("Demo seed falhou: %s", exc)
+        return redirect("/login")
+
+    resp = make_response(_redir("/"))
+    resp.set_cookie(
+        "netguard_token", DEMO_TOKEN,
+        httponly=True, samesite="Lax",
+        max_age=4 * 3600,          # 4h — suficiente para demo
+        secure=_HTTPS_ONLY,
+    )
+    return resp
+
+
+@app.route("/demo/reset", methods=["POST"])
+def demo_reset():
+    """Recria os dados de demo do zero (útil para apresentações)."""
+    if os.environ.get("IDS_DEMO_DISABLED", "false").lower() == "true":
+        return jsonify({"error": "Demo desativado"}), 403
+    try:
+        from demo_seed import seed_demo, clear_demo, DEMO_TOKEN
+        clear_demo(repo, verbose=False)
+        result = seed_demo(repo, n_events=350, verbose=False)
+        audit("DEMO_RESET", ip=request.remote_addr or "-")
+        return jsonify({"ok": True, "events": result["events"]})
+    except Exception as exc:
+        logger.error("Demo reset falhou: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+# ── Relatório PDF mensal ──────────────────────────────────────────
+
+@app.route("/api/report/monthly")
+@require_session
+def report_monthly():
+    """
+    Gera e baixa o relatório mensal em PDF.
+
+    Query params:
+      month       YYYY-MM (default: mês anterior)
+      tenant_id   ID do tenant (default: tenant do cookie)
+      name        Nome do cliente no relatório
+      company     Nome do parceiro/MSSP no relatório
+    """
+    try:
+        from reports.pdf_report import generate_monthly_report
+    except ImportError as exc:
+        logger.error("reportlab não instalado: %s", exc)
+        return jsonify({
+            "error": "Módulo de relatório não disponível. "
+                     "Instale com: pip install reportlab"
+        }), 503
+
+    month      = request.args.get("month")
+    tenant_id  = request.args.get("tenant_id", "default")
+    name       = request.args.get("name", "Cliente")
+    company    = request.args.get("company", "NetGuard IDS")
+
+    try:
+        pdf_bytes = generate_monthly_report(
+            repo,
+            tenant_id   = tenant_id,
+            month       = month,
+            tenant_name = name,
+            company_name= company,
+        )
+    except Exception as exc:
+        logger.error("Erro ao gerar relatório PDF: %s", exc)
+        return jsonify({"error": f"Falha ao gerar relatório: {exc}"}), 500
+
+    from datetime import datetime as _dt
+    label    = month or _dt.now().strftime("%Y-%m")
+    filename = f"netguard-relatorio-{label}.pdf"
+
+    audit("REPORT_DOWNLOAD", ip=request.remote_addr or "-",
+          detail=f"tenant={tenant_id} month={label}")
+
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
+@app.route("/api/report/monthly/preview")
+@require_session
+def report_monthly_preview():
+    """Mesmo que /api/report/monthly mas exibe inline (para preview no browser)."""
+    try:
+        from reports.pdf_report import generate_monthly_report
+    except ImportError:
+        return jsonify({"error": "reportlab não instalado"}), 503
+
+    month     = request.args.get("month")
+    tenant_id = request.args.get("tenant_id", "default")
+    name      = request.args.get("name", "Cliente")
+    company   = request.args.get("company", "NetGuard IDS")
+
+    try:
+        pdf_bytes = generate_monthly_report(
+            repo, tenant_id=tenant_id, month=month,
+            tenant_name=name, company_name=company,
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": "inline"},
+    )
+
+
 @app.route("/")
 @app.route("/dashboard")
 @require_session

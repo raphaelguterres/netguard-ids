@@ -25,5 +25,8 @@ pyinstaller==6.6.0
 # Billing (SaaS)
 stripe==9.9.0
 
+# Relatórios PDF
+reportlab==4.2.2
+
 # Banco de dados (PostgreSQL)
 psycopg2-binary==2.9.9
