@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(gh pr:*)",
+      "Bash(python -m pytest tests/ -x --tb=long)",
+      "Bash(python -m flake8 engine/email_alerts.py app.py --max-line-length=120 --select=E,F,W)"
+    ]
+  }
+}

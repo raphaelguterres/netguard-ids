@@ -8,7 +8,7 @@ import uuid
 import socket
 from datetime import datetime, timezone
 from dataclasses import dataclass, field, asdict
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any  # noqa: F401
 from enum import Enum
 
 

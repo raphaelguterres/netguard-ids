@@ -4,8 +4,8 @@ Monitor de rede real + API REST + Dashboard executivo.
 Um único processo. Sem simulador. Sem dados falsos.
 """
 
-import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress
-from platform_utils import (
+import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress  # noqa: F401
+from platform_utils import (  # noqa: F401
     OS, IS_WINDOWS, IS_LINUX,
     get_processes, get_pid_name_map, get_listen_ports,
     get_security_events, get_arp_table, ping as platform_ping, get_hostname,
@@ -98,7 +98,7 @@ except Exception as _yr_err:
 
 # Auto Block Engine
 try:
-    from engine.auto_block import auto_block, AutoBlockEngine, BLOCK_WHITELIST
+    from engine.auto_block import auto_block, AutoBlockEngine, BLOCK_WHITELIST  # noqa: F401
     AUTOBLOCK_AVAILABLE = True
 except Exception as _ab_err:
     auto_block = None
@@ -116,7 +116,7 @@ except Exception as _ea_err:
 
 # Billing (Stripe)
 try:
-    from billing import (
+    from billing import (  # noqa: F401
         PLANS, STRIPE_PUBLISHABLE_KEY, billing_active,
         create_checkout_session, create_portal_session,
         retrieve_checkout_session, handle_webhook,
@@ -216,7 +216,7 @@ except ImportError:
 
 # Kill Chain Correlator
 try:
-    from killchain import correlator as kc_correlator, TACTIC_LABELS, TACTIC_COLORS
+    from killchain import correlator as kc_correlator, TACTIC_LABELS, TACTIC_COLORS  # noqa: F401
     KC_AVAILABLE = True
 except ImportError:
     kc_correlator = None
@@ -721,7 +721,7 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = ""):
             already = any(e.threat_name == rule.title for e in eventos)
             if not already:
                 # Injeta como detecção sintética
-                from ids_engine import Detection
+                from ids_engine import Detection  # noqa: F401
                 try:
                     fake_ctx = {"field": field, "sigma": True}
                     synthetic = ids.analyze(
@@ -2537,7 +2537,7 @@ def health():
     Usado por Docker healthcheck, load balancers e make health.
     HTTP 200 = tudo OK  |  HTTP 503 = algum subsistema crítico down.
     """
-    import time as _time
+    import time as _time  # noqa: F401
 
     # ── Banco de dados ─────────────────────────────────────────────
     try:
@@ -2570,7 +2570,7 @@ def health():
 
     # ── Fail2Ban ───────────────────────────────────────────────────
     try:
-        from fail2ban_engine import Fail2BanEngine
+        from fail2ban_engine import Fail2BanEngine  # noqa: F401
         f2b_ok   = True
         f2b_info = "ok"
     except Exception:
@@ -2878,7 +2878,7 @@ def stripe_webhook():
       customer.subscription.deleted  → desativa tenant
       customer.subscription.updated  → atualiza plano
     """
-    import uuid
+    import uuid  # noqa: F401
     payload    = request.get_data()
     sig_header = request.headers.get("Stripe-Signature", "")
 
@@ -2985,7 +2985,7 @@ def demo_reset():
     if os.environ.get("IDS_DEMO_DISABLED", "false").lower() == "true":
         return jsonify({"error": "Demo desativado"}), 403
     try:
-        from demo_seed import seed_demo, clear_demo, DEMO_TOKEN
+        from demo_seed import seed_demo, clear_demo, DEMO_TOKEN  # noqa: F401
         clear_demo(repo, verbose=False)
         result = seed_demo(repo, n_events=350, verbose=False)
         audit("DEMO_RESET", ip=request.remote_addr or "-")

@@ -2,8 +2,8 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pytest
-from engine.rule_executor import execute_rules, RuleRegistry, make_alert, Alert
+import pytest  # noqa: F401
+from engine.rule_executor import execute_rules, RuleRegistry, make_alert, Alert  # noqa: F401
 
 
 # ── Sample rules ──────────────────────────────────────────────────

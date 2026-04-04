@@ -23,12 +23,12 @@ Exemplos:
   conn_count>50 AND severity!="LOW"
 """
 
-import re
+import re  # noqa: F401
 import json
 import logging
 import sqlite3
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple  # noqa: F401
 
 logger = logging.getLogger("netguard.hunter")
 

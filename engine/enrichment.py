@@ -19,7 +19,7 @@ import threading
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any  # noqa: F401
 
 logger = logging.getLogger("netguard.enrichment")
 

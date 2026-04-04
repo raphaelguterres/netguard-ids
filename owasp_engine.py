@@ -22,8 +22,8 @@ Cobre:
 
 import re
 import logging
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass, field  # noqa: F401
+from typing import List, Dict, Optional, Tuple  # noqa: F401
 
 logger = logging.getLogger("ids.owasp")
 
