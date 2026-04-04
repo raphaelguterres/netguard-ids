@@ -6,7 +6,7 @@ Como usar:
   python build.py
 
 Saída:
-  dist\NetGuard.exe
+  dist/NetGuard.exe
 """
 
 import subprocess

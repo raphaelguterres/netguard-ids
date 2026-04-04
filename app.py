@@ -1340,10 +1340,10 @@ def log_ao_vivo(entry: dict):
     with _live_log_lock:
         _live_log.append(entry)
 
-# Patch analisar to also feed live log
-_orig_analisar = analisar
-def analisar(log: str, ip: str = None, field: str = "raw", origem: str = ""):
-    eventos = _orig_analisar(log, ip, field, origem)
+# Integra analisar com o live log — wrapper sem redefinir o nome
+def _analisar_com_live_log(log: str, ip: str = None, field: str = "raw", origem: str = ""):
+    """Chama analisar() e alimenta o buffer de log ao vivo com as detecções."""
+    eventos = analisar(log, ip, field, origem)
     if eventos:
         for e in eventos:
             log_ao_vivo({
@@ -1680,7 +1680,7 @@ def dns_stats():
 
 @app.route("/api/enrich/<ip>")
 @auth
-def enrich_ip(ip):
+def enrich_ip_api(ip):
     # Use new enrichment engine if available, fallback to old
     if ENRICH_AVAILABLE and _enrichment:
         try:
