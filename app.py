@@ -268,9 +268,62 @@ def _get_real_hostname() -> str:
 REAL_HOSTNAME = get_hostname()
 logger.info("Hostname detectado: %s", REAL_HOSTNAME)
 
+# ── Audit log ─────────────────────────────────────────────────────
+_audit_logger = logging.getLogger("netguard.audit")
+_audit_file   = os.environ.get("IDS_AUDIT_LOG", "netguard_audit.log")
+if not _audit_logger.handlers:
+    _ah = logging.FileHandler(_audit_file, encoding="utf-8")
+    _ah.setFormatter(logging.Formatter(
+        '%(asctime)s\t%(message)s', datefmt="%Y-%m-%dT%H:%M:%SZ"
+    ))
+    _audit_logger.addHandler(_ah)
+    _audit_logger.setLevel(logging.INFO)
+    _audit_logger.propagate = False
+
+def audit(action: str, actor: str = "system", ip: str = "-", detail: str = ""):
+    """Registra evento no audit log. Formato TSV para fácil parsing."""
+    _audit_logger.info("%s\t%s\t%s\t%s", action, actor, ip, detail)
+
 # ── App ───────────────────────────────────────────────────────────
 app = Flask(__name__)
-CORS(app, resources={r"/api/*":{"origins":"*"}})
+
+# ── CORS — whitelist configurável via env (não mais wildcard) ─────
+_cors_origins_raw = os.environ.get("IDS_CORS_ORIGINS", "")
+_cors_origins = (
+    [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    if _cors_origins_raw
+    else ["http://localhost:5000", "http://127.0.0.1:5000"]
+)
+CORS(app, resources={r"/api/*": {"origins": _cors_origins}})
+
+# ── Security headers via Flask-Talisman (se disponível) ──────────
+_HTTPS_ONLY = os.environ.get("HTTPS_ONLY", "false").lower() == "true"
+try:
+    from flask_talisman import Talisman
+    Talisman(
+        app,
+        force_https=_HTTPS_ONLY,
+        strict_transport_security=_HTTPS_ONLY,
+        strict_transport_security_max_age=31536000,
+        content_security_policy={
+            "default-src": "'self'",
+            "script-src":  "'self' 'unsafe-inline' https://js.stripe.com https://cdnjs.cloudflare.com",
+            "style-src":   "'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "font-src":    "'self' https://fonts.gstatic.com",
+            "img-src":     "'self' data:",
+            "frame-src":   "https://js.stripe.com",
+            "connect-src": "'self'",
+        },
+        x_frame_options="DENY",
+        x_content_type_options=True,
+        referrer_policy="strict-origin-when-cross-origin",
+        session_cookie_secure=_HTTPS_ONLY,
+        session_cookie_http_only=True,
+    )
+    logger.info("Flask-Talisman ativo | HTTPS_ONLY=%s", _HTTPS_ONLY)
+except ImportError:
+    logger.warning("flask-talisman não instalado — headers de segurança desativados. "
+                   "Instale com: pip install flask-talisman")
 
 # ── Whitelist ─────────────────────────────────────────────────────
 WHITELIST = ["127.0.0.1","::1","192.168.15.1","192.168.15.2"]
@@ -2567,7 +2620,9 @@ def auth_login():
     # Login OK — limpa contador de tentativas
     _rl.pop(ip, None)
 
-    logger.info("Login OK | ip=%s | type=%s", request.remote_addr, result["type"])
+    tenant_id = (result.get("tenant") or {}).get("tenant_id", "-")
+    logger.info("Login OK | ip=%s | type=%s", ip, result["type"])
+    audit("LOGIN_OK", actor=tenant_id, ip=ip, detail=f"type={result['type']}")
     resp = make_response(jsonify({
         "valid":  True,
         "type":   result["type"],
@@ -2579,7 +2634,7 @@ def auth_login():
         httponly=True,
         samesite="Lax",
         max_age=8 * 3600,
-        secure=False,  # mudar para True em produção com HTTPS
+        secure=_HTTPS_ONLY,  # True automaticamente quando HTTPS_ONLY=true
     )
     return resp
 
@@ -2591,6 +2646,7 @@ def logout():
     resp = make_response(_redir("/login"))
     resp.delete_cookie("netguard_token")
     logger.info("Logout | ip=%s", request.remote_addr)
+    audit("LOGOUT", ip=request.remote_addr or "-")
     return resp
 
 
@@ -2638,6 +2694,8 @@ def checkout():
     if not url:
         return jsonify({"error": "Falha ao criar sessão de checkout"}), 500
 
+    audit("CHECKOUT_START", actor=email, ip=request.remote_addr or "-",
+          detail=f"plan={plan} company={company}")
     return redirect(url)
 
 
@@ -2675,6 +2733,9 @@ def welcome():
             )
             logger.info("Tenant demo criado: %s | plan=%s | token=%s…",
                         tenant_id, plan_key, token[:12])
+            audit("TENANT_CREATE", actor=email or name or tenant_id,
+                  ip=request.remote_addr or "-",
+                  detail=f"plan={plan_key} mode=demo tenant_id={tenant_id}")
         except Exception as exc:
             logger.error("Erro ao criar tenant demo: %s", exc)
 
@@ -2720,6 +2781,9 @@ def welcome():
         )
         logger.info("Tenant criado via Stripe: %s | plan=%s | cust=%s",
                     tenant_id, plan_key, stripe_customer_id)
+        audit("TENANT_CREATE", actor=email or tenant_id,
+              ip=request.remote_addr or "-",
+              detail=f"plan={plan_key} mode=stripe stripe_customer={stripe_customer_id} tenant_id={tenant_id}")
     except Exception as exc:
         logger.error("Erro ao criar tenant: %s", exc)
 
