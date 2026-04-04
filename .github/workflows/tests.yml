@@ -1,4 +1,4 @@
-name: Tests
+name: CI
 
 on:
   push:
@@ -7,31 +7,110 @@ on:
     branches: [ main ]
 
 jobs:
+  # ── Job 1: Testes + Coverage ──────────────────────────────────────
   test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.docker.txt
+          pip install pytest pytest-cov
+
+      - name: Run tests with coverage
+        env:
+          IDS_AUTH: "false"
+          IDS_DASHBOARD_AUTH: "false"
+          IDS_CSRF_DISABLED: "true"
+          HTTPS_ONLY: "false"
+        run: |
+          pytest tests/ -v --tb=short \
+            --cov=. \
+            --cov-omit="tests/*,*/site-packages/*" \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=20
+
+      - name: Upload coverage to GitHub Summary
+        if: always()
+        run: |
+          echo "## Test Results — Python ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          pytest tests/ --tb=no -q 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY || true
+
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 7
+
+  # ── Job 2: Lint (flake8 — erros críticos apenas) ──────────────────
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
         with:
-          python-version: '3.11'
+          python-version: "3.11"
           cache: 'pip'
 
-      - name: Install dependencies
-        run: pip install -r requirements.docker.txt pytest
+      - name: Install flake8
+        run: pip install flake8
 
-      - name: Run tests
-        run: pytest tests/ -v --tb=short
-
-      - name: Summary
-        if: always()
+      - name: Run flake8 (erros fatais apenas)
         run: |
-          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
-          pytest tests/ --tb=no -q 2>&1 | tail -3 >> $GITHUB_STEP_SUMMARY
+          # E9xx = erros de runtime (undefined names, syntax errors)
+          # F401 = imports não usados
+          # F811 = redefinição de função/variável
+          # W605 = invalid escape sequences
+          flake8 . \
+            --select=E9,F401,F811,W605 \
+            --exclude=.git,__pycache__,*.egg-info,venv,.venv \
+            --max-line-length=120 \
+            --statistics
+
+  # ── Job 3: Security audit (pip-audit) ────────────────────────────
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit dependencies for CVEs
+        run: |
+          pip install -r requirements.docker.txt
+          pip-audit --requirement requirements.docker.txt \
+            --ignore-vuln GHSA-jfh8-c2jp-jqjq \
+            || echo "::warning::Vulnerabilidades encontradas — revisar antes do próximo release"

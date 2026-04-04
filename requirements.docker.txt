@@ -1,6 +1,22 @@
-# NetGuard IDS — dependências para Docker (Linux, sem display)
-flask>=3.0.0
-flask-cors>=4.0.0
-psutil>=5.9.0
-scapy>=2.5.0
-pyyaml>=6.0
+# NetGuard IDS — dependências para Docker/CI (Linux, sem display)
+# Versões pinadas — alinhe com requirements.txt ao atualizar
+
+# Core web
+flask==3.0.3
+flask-cors==4.0.1
+flask-talisman==1.1.0
+
+# Sistema
+psutil==5.9.8
+
+# Captura de pacotes
+scapy==2.5.0
+
+# Config / utils
+pyyaml==6.0.1
+
+# Billing (SaaS)
+stripe==9.9.0
+
+# Banco de dados (PostgreSQL)
+psycopg2-binary==2.9.9
