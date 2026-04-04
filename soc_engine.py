@@ -7,9 +7,9 @@ Motor de detecção SIEM/XDR — arquivo único, sem dependências internas.
 import re, uuid, time, json, logging, threading, queue, sqlite3, socket, statistics
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict, deque
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import List, Dict, Optional, Callable
+from dataclasses import dataclass, field, asdict  # noqa: F401
+from pathlib import Path  # noqa: F401
+from typing import List, Dict, Optional, Callable  # noqa: F401
 
 logger = logging.getLogger("netguard.soc")
 

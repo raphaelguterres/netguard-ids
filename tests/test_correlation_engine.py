@@ -1,7 +1,7 @@
 """Tests — CorrelationEngine
 Testa as 5 regras de correlação com eventos sintéticos.
 """
-import sys, os, time
+import sys, os, time  # noqa: F401
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest

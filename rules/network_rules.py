@@ -8,7 +8,7 @@ import time
 import math
 import logging
 from collections import defaultdict, deque
-from typing import Optional, List
+from typing import Optional, List  # noqa: F401
 from models.event_model import make_event, Severity, EventType
 
 logger = logging.getLogger("netguard.rules.network")

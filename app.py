@@ -4,8 +4,8 @@ Monitor de rede real + API REST + Dashboard executivo.
 Um único processo. Sem simulador. Sem dados falsos.
 """
 
-import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress
-from platform_utils import (
+import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress  # noqa: F401
+from platform_utils import (  # noqa: F401
     OS, IS_WINDOWS, IS_LINUX,
     get_processes, get_pid_name_map, get_listen_ports,
     get_security_events, get_arp_table, ping as platform_ping, get_hostname,
@@ -98,16 +98,25 @@ except Exception as _yr_err:
 
 # Auto Block Engine
 try:
-    from engine.auto_block import auto_block, AutoBlockEngine, BLOCK_WHITELIST
+    from engine.auto_block import auto_block, AutoBlockEngine, BLOCK_WHITELIST  # noqa: F401
     AUTOBLOCK_AVAILABLE = True
 except Exception as _ab_err:
     auto_block = None
     AUTOBLOCK_AVAILABLE = False
     print(f"[WARN] AutoBlock: {_ab_err}")
 
+# Email Alerts
+try:
+    from engine.email_alerts import send_alert as _send_email_alert
+    EMAIL_ALERTS_OK = True
+except Exception as _ea_err:
+    _send_email_alert = None
+    EMAIL_ALERTS_OK = False
+    print(f"[WARN] EmailAlerts: {_ea_err}")
+
 # Billing (Stripe)
 try:
-    from billing import (
+    from billing import (  # noqa: F401
         PLANS, STRIPE_PUBLISHABLE_KEY, billing_active,
         create_checkout_session, create_portal_session,
         retrieve_checkout_session, handle_webhook,
@@ -207,7 +216,7 @@ except ImportError:
 
 # Kill Chain Correlator
 try:
-    from killchain import correlator as kc_correlator, TACTIC_LABELS, TACTIC_COLORS
+    from killchain import correlator as kc_correlator, TACTIC_LABELS, TACTIC_COLORS  # noqa: F401
     KC_AVAILABLE = True
 except ImportError:
     kc_correlator = None
@@ -712,7 +721,7 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = ""):
             already = any(e.threat_name == rule.title for e in eventos)
             if not already:
                 # Injeta como detecção sintética
-                from ids_engine import Detection
+                from ids_engine import Detection  # noqa: F401
                 try:
                     fake_ctx = {"field": field, "sigma": True}
                     synthetic = ids.analyze(
@@ -1360,6 +1369,17 @@ def log_ao_vivo(entry: dict):
     entry["ts"] = datetime.now().strftime('%H:%M:%S.%f')[:12]
     with _live_log_lock:
         _live_log.append(entry)
+    # Dispara e-mail para eventos críticos/altos
+    if EMAIL_ALERTS_OK and _send_email_alert:
+        sev = entry.get("sev", "")
+        if sev.lower() in ("critical", "high"):
+            _send_email_alert(
+                sev         = sev,
+                threat      = entry.get("threat", "Detecção"),
+                ip          = entry.get("ip", "—"),
+                msg         = entry.get("msg", ""),
+                tenant_name = entry.get("tenant", "NetGuard"),
+            )
 
 # Integra analisar com o live log — wrapper sem redefinir o nome
 def _analisar_com_live_log(log: str, ip: str = None, field: str = "raw", origem: str = ""):
@@ -2517,7 +2537,7 @@ def health():
     Usado por Docker healthcheck, load balancers e make health.
     HTTP 200 = tudo OK  |  HTTP 503 = algum subsistema crítico down.
     """
-    import time as _time
+    import time as _time  # noqa: F401
 
     # ── Banco de dados ─────────────────────────────────────────────
     try:
@@ -2550,7 +2570,7 @@ def health():
 
     # ── Fail2Ban ───────────────────────────────────────────────────
     try:
-        from fail2ban_engine import Fail2BanEngine
+        from fail2ban_engine import Fail2BanEngine  # noqa: F401
         f2b_ok   = True
         f2b_info = "ok"
     except Exception:
@@ -2858,7 +2878,7 @@ def stripe_webhook():
       customer.subscription.deleted  → desativa tenant
       customer.subscription.updated  → atualiza plano
     """
-    import uuid
+    import uuid  # noqa: F401
     payload    = request.get_data()
     sig_header = request.headers.get("Stripe-Signature", "")
 
@@ -2965,7 +2985,7 @@ def demo_reset():
     if os.environ.get("IDS_DEMO_DISABLED", "false").lower() == "true":
         return jsonify({"error": "Demo desativado"}), 403
     try:
-        from demo_seed import seed_demo, clear_demo, DEMO_TOKEN
+        from demo_seed import seed_demo, clear_demo, DEMO_TOKEN  # noqa: F401
         clear_demo(repo, verbose=False)
         result = seed_demo(repo, n_events=350, verbose=False)
         audit("DEMO_RESET", ip=request.remote_addr or "-")
@@ -3061,6 +3081,52 @@ def report_monthly_preview():
         mimetype="application/pdf",
         headers={"Content-Disposition": "inline"},
     )
+
+
+@app.route("/api/alerts/test", methods=["POST"])
+@csrf_protect
+def alerts_test():
+    """Envia e-mail de alerta de teste para o endereço informado."""
+    if not EMAIL_ALERTS_OK or not _send_email_alert:
+        return jsonify({"error": "Módulo de e-mail indisponível"}), 503
+
+    data = request.get_json(silent=True)
+    if data is None:
+        logger.warning("POST /api/alerts/test: JSON inválido de %s", request.remote_addr)
+        return jsonify({"error": "JSON inválido"}), 400
+
+    email = (data.get("email") or "").strip()[:254]
+    name  = (data.get("name") or "NetGuard Test").strip()[:100]
+
+    if not email:
+        return jsonify({"error": "Campo 'email' obrigatório"}), 400
+
+    import re as _re
+    if not _re.match(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", email):
+        return jsonify({"error": "E-mail inválido"}), 400
+
+    # Rate limit por IP: máximo 5 testes por janela de 10 min
+    _ip = request.remote_addr or "unknown"
+    _now = datetime.now()
+    _rl_key = f"alerttest:{_ip}"
+    with _live_log_lock:
+        _rl = getattr(app, "_alert_test_rl", {})
+        _hits = [t for t in _rl.get(_rl_key, []) if (_now - t).total_seconds() < 600]
+        if len(_hits) >= 5:
+            return jsonify({"error": "Muitas tentativas. Aguarde alguns minutos."}), 429
+        _hits.append(_now)
+        _rl[_rl_key] = _hits
+        app._alert_test_rl = _rl
+
+    _send_email_alert(
+        sev         = "critical",
+        threat      = "Teste de Alerta NetGuard",
+        ip          = "192.168.1.100",
+        msg         = "Este é um alerta de teste. Se você recebeu, a integração está funcionando.",
+        tenant_name = name,
+        to          = email,
+    )
+    return jsonify({"ok": True, "message": f"E-mail de teste enviado para {email}"})
 
 
 @app.route("/")

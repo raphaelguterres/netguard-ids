@@ -1,4 +1,4 @@
-import os
+import os  # noqa: F401
 import platform
 import socket
 import subprocess

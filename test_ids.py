@@ -9,8 +9,8 @@ Execute com: python test_ids.py
 """
 
 import sys
-import json
-import time
+import json  # noqa: F401
+import time  # noqa: F401
 from ids_engine import IDSEngine, LogProcessor
 
 # ─────────────────────────────────────────────

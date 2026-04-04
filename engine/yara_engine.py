@@ -25,7 +25,7 @@ import hashlib
 import logging
 import threading
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any  # noqa: F401
 from pathlib import Path
 
 logger = logging.getLogger("netguard.yara")

@@ -12,7 +12,7 @@ O tenant demo usa token fixo: ng_DEMO00000000000000000000000000
 from __future__ import annotations
 
 import os
-import sys
+import sys  # noqa: F401
 import uuid
 import random
 import argparse

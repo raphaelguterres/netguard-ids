@@ -15,7 +15,7 @@ import json
 import logging
 import threading
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any  # noqa: F401
 from pathlib import Path
 
 logger = logging.getLogger("netguard.storage")

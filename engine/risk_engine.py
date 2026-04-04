@@ -14,7 +14,7 @@ Estrutura multi-host: cada host tem seu próprio score, baseline e histórico.
 import time
 import threading
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta  # noqa: F401
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional

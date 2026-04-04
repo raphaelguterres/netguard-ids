@@ -2,7 +2,7 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pytest
+import pytest  # noqa: F401
 from engine.severity_classifier import classify_severity, severity_score, is_high_priority
 
 

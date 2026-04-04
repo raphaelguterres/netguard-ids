@@ -15,7 +15,7 @@ import math
 import time
 import logging
 import threading
-import ipaddress
+import ipaddress  # noqa: F401
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple

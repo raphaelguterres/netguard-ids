@@ -13,7 +13,7 @@ import subprocess
 import sys
 import pathlib
 import os
-import shutil
+import shutil  # noqa: F401
 
 BASE = pathlib.Path(__file__).parent.resolve()
 DIST = BASE / "dist"

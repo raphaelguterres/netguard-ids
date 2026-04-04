@@ -11,7 +11,7 @@ Substitui 2-4h de trabalho manual de analista SOC nível 1/2 por análise instan
 import time
 import threading
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta  # noqa: F401
 from collections import defaultdict
 from typing import List, Dict, Optional
 from dataclasses import dataclass, field

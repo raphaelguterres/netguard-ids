@@ -17,7 +17,7 @@ Padrões implementados:
 import time
 import threading
 import logging
-import math
+import math  # noqa: F401
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone

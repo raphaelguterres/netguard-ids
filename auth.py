@@ -13,11 +13,11 @@ Acesso após ativar:
 
 import os
 import secrets
-import hashlib
+import hashlib  # noqa: F401
 import logging
 import pathlib
 from functools import wraps
-from datetime import datetime, timezone
+from datetime import datetime, timezone  # noqa: F401
 from flask import request, jsonify, redirect
 
 logger = logging.getLogger("netguard.auth")
@@ -222,7 +222,7 @@ def _get_or_set_csrf_cookie(response=None):
     Retorna o token CSRF do cookie existente ou gera um novo.
     Se `response` for passado, define o cookie nele.
     """
-    from flask import request as _req, make_response
+    from flask import request as _req, make_response  # noqa: F401
     token = _req.cookies.get("csrf_token")
     if not token:
         token = secrets.token_hex(32)

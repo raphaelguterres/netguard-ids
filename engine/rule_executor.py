@@ -18,7 +18,7 @@ Design:
 import time
 import logging
 import traceback
-from typing import Callable, Any, Optional
+from typing import Callable, Any, Optional  # noqa: F401
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 

@@ -8,7 +8,7 @@ import re
 import time
 import logging
 from datetime import datetime, timezone
-from collections import defaultdict
+from collections import defaultdict  # noqa: F401
 from typing import Optional
 from models.event_model import make_event, Severity, EventType
 
