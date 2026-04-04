@@ -3090,16 +3090,33 @@ def alerts_test():
     if not EMAIL_ALERTS_OK or not _send_email_alert:
         return jsonify({"error": "Módulo de e-mail indisponível"}), 503
 
-    data  = request.get_json(silent=True) or {}
-    email = (data.get("email") or "").strip()
-    name  = (data.get("name") or "NetGuard Test").strip()
+    data = request.get_json(silent=True)
+    if data is None:
+        logger.warning("POST /api/alerts/test: JSON inválido de %s", request.remote_addr)
+        return jsonify({"error": "JSON inválido"}), 400
+
+    email = (data.get("email") or "").strip()[:254]
+    name  = (data.get("name") or "NetGuard Test").strip()[:100]
 
     if not email:
         return jsonify({"error": "Campo 'email' obrigatório"}), 400
 
     import re as _re
-    if not _re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+    if not _re.match(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", email):
         return jsonify({"error": "E-mail inválido"}), 400
+
+    # Rate limit por IP: máximo 5 testes por janela de 10 min
+    _ip = request.remote_addr or "unknown"
+    _now = datetime.now()
+    _rl_key = f"alerttest:{_ip}"
+    with _live_log_lock:
+        _rl = getattr(app, "_alert_test_rl", {})
+        _hits = [t for t in _rl.get(_rl_key, []) if (_now - t).total_seconds() < 600]
+        if len(_hits) >= 5:
+            return jsonify({"error": "Muitas tentativas. Aguarde alguns minutos."}), 429
+        _hits.append(_now)
+        _rl[_rl_key] = _hits
+        app._alert_test_rl = _rl
 
     _send_email_alert(
         sev         = "critical",
