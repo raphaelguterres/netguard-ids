@@ -52,13 +52,19 @@ SEV_COLOR  = {
 
 # ── Helpers ───────────────────────────────────────────────────────
 
+_MESES_PT = {
+    1: "Janeiro", 2: "Fevereiro", 3: "Março",    4: "Abril",
+    5: "Maio",    6: "Junho",     7: "Julho",     8: "Agosto",
+    9: "Setembro",10: "Outubro", 11: "Novembro", 12: "Dezembro",
+}
+
 def _month_range(month_str: str):
     """Retorna (start_iso, end_iso, label) para 'YYYY-MM'."""
     year, mo = int(month_str[:4]), int(month_str[5:7])
-    start = datetime(year, mo, 1, tzinfo=timezone.utc)
+    start    = datetime(year, mo, 1, tzinfo=timezone.utc)
     last_day = calendar.monthrange(year, mo)[1]
-    end   = datetime(year, mo, last_day, 23, 59, 59, tzinfo=timezone.utc)
-    label = start.strftime("%B %Y")
+    end      = datetime(year, mo, last_day, 23, 59, 59, tzinfo=timezone.utc)
+    label    = f"{_MESES_PT[mo]} {year}"
     return start.isoformat(), end.isoformat(), label
 
 

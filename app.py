@@ -286,6 +286,27 @@ def audit(action: str, actor: str = "system", ip: str = "-", detail: str = ""):
     """Registra evento no audit log. Formato TSV para fácil parsing."""
     _audit_logger.info("%s\t%s\t%s\t%s", action, actor, ip, detail)
 
+
+def _resolve_tenant_id(fallback: str = None) -> str:
+    """
+    Resolve o tenant_id da requisição atual.
+    Prioridade: query param → cookie → 'default'
+    """
+    if fallback:
+        return fallback
+    try:
+        token = request.cookies.get("netguard_token", "").strip()
+        if token and token.startswith("ng_"):
+            tenant = repo.get_tenant_by_token(token)
+            if tenant:
+                tid = (dict(tenant) if not isinstance(tenant, dict) else tenant).get("tenant_id")
+                if tid:
+                    return tid
+    except Exception:
+        pass
+    return "default"
+
+
 # ── App ───────────────────────────────────────────────────────────
 app = Flask(__name__)
 
@@ -2977,10 +2998,12 @@ def report_monthly():
                      "Instale com: pip install reportlab"
         }), 503
 
-    month      = request.args.get("month")
-    tenant_id  = request.args.get("tenant_id", "default")
-    name       = request.args.get("name", "Cliente")
-    company    = request.args.get("company", "NetGuard IDS")
+    month   = request.args.get("month")
+    name    = request.args.get("name", "Cliente")
+    company = request.args.get("company", "NetGuard IDS")
+
+    # Detecta tenant do cookie — usa query param como fallback
+    tenant_id = _resolve_tenant_id(request.args.get("tenant_id"))
 
     try:
         pdf_bytes = generate_monthly_report(
@@ -3021,9 +3044,9 @@ def report_monthly_preview():
         return jsonify({"error": "reportlab não instalado"}), 503
 
     month     = request.args.get("month")
-    tenant_id = request.args.get("tenant_id", "default")
     name      = request.args.get("name", "Cliente")
     company   = request.args.get("company", "NetGuard IDS")
+    tenant_id = _resolve_tenant_id(request.args.get("tenant_id"))
 
     try:
         pdf_bytes = generate_monthly_report(
