@@ -105,6 +105,15 @@ except Exception as _ab_err:
     AUTOBLOCK_AVAILABLE = False
     print(f"[WARN] AutoBlock: {_ab_err}")
 
+# Email Alerts
+try:
+    from engine.email_alerts import send_alert as _send_email_alert
+    EMAIL_ALERTS_OK = True
+except Exception as _ea_err:
+    _send_email_alert = None
+    EMAIL_ALERTS_OK = False
+    print(f"[WARN] EmailAlerts: {_ea_err}")
+
 # Billing (Stripe)
 try:
     from billing import (
@@ -1360,6 +1369,17 @@ def log_ao_vivo(entry: dict):
     entry["ts"] = datetime.now().strftime('%H:%M:%S.%f')[:12]
     with _live_log_lock:
         _live_log.append(entry)
+    # Dispara e-mail para eventos críticos/altos
+    if EMAIL_ALERTS_OK and _send_email_alert:
+        sev = entry.get("sev", "")
+        if sev.lower() in ("critical", "high"):
+            _send_email_alert(
+                sev         = sev,
+                threat      = entry.get("threat", "Detecção"),
+                ip          = entry.get("ip", "—"),
+                msg         = entry.get("msg", ""),
+                tenant_name = entry.get("tenant", "NetGuard"),
+            )
 
 # Integra analisar com o live log — wrapper sem redefinir o nome
 def _analisar_com_live_log(log: str, ip: str = None, field: str = "raw", origem: str = ""):
@@ -3061,6 +3081,35 @@ def report_monthly_preview():
         mimetype="application/pdf",
         headers={"Content-Disposition": "inline"},
     )
+
+
+@app.route("/api/alerts/test", methods=["POST"])
+@csrf_protect
+def alerts_test():
+    """Envia e-mail de alerta de teste para o endereço informado."""
+    if not EMAIL_ALERTS_OK or not _send_email_alert:
+        return jsonify({"error": "Módulo de e-mail indisponível"}), 503
+
+    data  = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip()
+    name  = (data.get("name") or "NetGuard Test").strip()
+
+    if not email:
+        return jsonify({"error": "Campo 'email' obrigatório"}), 400
+
+    import re as _re
+    if not _re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        return jsonify({"error": "E-mail inválido"}), 400
+
+    _send_email_alert(
+        sev         = "critical",
+        threat      = "Teste de Alerta NetGuard",
+        ip          = "192.168.1.100",
+        msg         = "Este é um alerta de teste. Se você recebeu, a integração está funcionando.",
+        tenant_name = name,
+        to          = email,
+    )
+    return jsonify({"ok": True, "message": f"E-mail de teste enviado para {email}"})
 
 
 @app.route("/")
