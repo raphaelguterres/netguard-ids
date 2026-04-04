@@ -376,6 +376,23 @@
   // Highlight se voltou com ?plan=
   const params = new URLSearchParams(location.search);
   if (params.get('plan')) openSignup(params.get('plan'));
+
+  // CSRF — injeta token no submit do formulário (double-submit cookie)
+  function getCsrfToken() {
+    return document.cookie.split(';')
+      .map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
+  }
+
+  document.getElementById('signup-form').addEventListener('submit', function() {
+    let csrfInput = this.querySelector('input[name="csrf_token"]');
+    if (!csrfInput) {
+      csrfInput = document.createElement('input');
+      csrfInput.type = 'hidden';
+      csrfInput.name = 'csrf_token';
+      this.appendChild(csrfInput);
+    }
+    csrfInput.value = getCsrfToken();
+  });
 </script>
 
 </body>

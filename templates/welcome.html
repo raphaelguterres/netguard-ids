@@ -266,11 +266,39 @@ netguard-agent</pre>
   </div>
 
   <script>
-    // Injeta token na URL do botão para auto-login
+    // Login via POST — token nunca vai na URL (segurança)
+    function loginAndRedirect() {
+      const btn   = document.getElementById('btn-dashboard');
+      const token = document.getElementById('token-val').textContent.trim();
+      if (!token) { window.location.href = '/login'; return; }
+
+      btn.textContent = 'Acessando...';
+      btn.style.pointerEvents = 'none';
+
+      const csrfToken = document.cookie.split(';')
+        .map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
+
+      fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        credentials: 'same-origin',
+        body: JSON.stringify({ token })
+      })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(data => {
+        if (data.valid) { window.location.href = '/'; }
+        else { window.location.href = '/login'; }
+      })
+      .catch(() => { window.location.href = '/login'; });
+    }
+
+    // Substitui o href do botão por chamada segura
     (function() {
-      const token = document.querySelector('.token-value') && document.querySelector('.token-value').textContent.trim();
-      if (token) {
-        document.getElementById('btn-dashboard').href = '/login?token=' + encodeURIComponent(token);
+      const btn = document.getElementById('btn-dashboard');
+      if (btn) {
+        btn.removeAttribute('href');
+        btn.style.cursor = 'pointer';
+        btn.addEventListener('click', function(e) { e.preventDefault(); loginAndRedirect(); });
       }
     })();
   </script>

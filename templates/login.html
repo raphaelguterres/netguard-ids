@@ -224,10 +224,14 @@
     btn.textContent = 'Verificando...';
     btn.disabled = true;
 
+    // Lê CSRF token do cookie (double-submit pattern)
+    const csrfToken = document.cookie.split(';')
+      .map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
+
     // POST para /api/auth/login — valida e seta cookie httponly server-side
     fetch('/api/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
       credentials: 'same-origin',
       body: JSON.stringify({ token })
     })

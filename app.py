@@ -123,12 +123,14 @@ try:
     from auth import (
         auth, AUTH_ENABLED, get_ssl_context, print_startup_info, HTTPS_PORT,
         verify_any_token, _extract_token, require_session, DASHBOARD_AUTH,
+        csrf_protect,
     )
     AUTH_MODULE_OK = True
 except Exception as _auth_err:
     # Fallback: auth decorator que não faz nada
     def auth(f): return f
     def require_session(f): return f
+    def csrf_protect(f): return f
     AUTH_ENABLED    = False
     DASHBOARD_AUTH  = False
     AUTH_MODULE_OK  = False

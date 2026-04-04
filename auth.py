@@ -209,6 +209,61 @@ def auth(f):
     return decorated
 
 
+# ── Proteção CSRF (double-submit cookie) ─────────────────────────
+
+# Desative com IDS_CSRF_DISABLED=true (apenas desenvolvimento local)
+_CSRF_ENABLED = os.environ.get("IDS_CSRF_DISABLED", "false").lower() != "true"
+
+_CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _get_or_set_csrf_cookie(response=None):
+    """
+    Retorna o token CSRF do cookie existente ou gera um novo.
+    Se `response` for passado, define o cookie nele.
+    """
+    from flask import request as _req, make_response
+    token = _req.cookies.get("csrf_token")
+    if not token:
+        token = secrets.token_hex(32)
+    if response is not None:
+        response.set_cookie(
+            "csrf_token", token,
+            samesite="Strict",
+            httponly=False,   # JavaScript precisa ler para enviar no header
+            max_age=8 * 3600,
+        )
+    return token
+
+
+def csrf_protect(f):
+    """
+    Decorador que valida CSRF token em mutações (POST/PUT/PATCH/DELETE).
+    Cliente deve enviar o valor do cookie csrf_token no header X-CSRFToken.
+    Pattern: double-submit cookie.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not _CSRF_ENABLED or request.method in _CSRF_SAFE_METHODS:
+            return f(*args, **kwargs)
+
+        cookie_token = request.cookies.get("csrf_token", "")
+        header_token = request.headers.get("X-CSRFToken", "")
+
+        if not cookie_token or not header_token:
+            logger.warning("CSRF token ausente | ip=%s | path=%s",
+                           request.remote_addr, request.path)
+            return jsonify({"error": "CSRF token ausente"}), 403
+
+        if not secrets.compare_digest(cookie_token, header_token):
+            logger.warning("CSRF token inválido | ip=%s | path=%s",
+                           request.remote_addr, request.path)
+            return jsonify({"error": "CSRF token inválido"}), 403
+
+        return f(*args, **kwargs)
+    return decorated
+
+
 # ── HTTPS / certificado self-signed ──────────────────────────────
 
 def generate_self_signed_cert() -> tuple:
