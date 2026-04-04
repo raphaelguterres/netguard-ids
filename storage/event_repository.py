@@ -184,11 +184,10 @@ class EventRepository:
         self.tenant_id = tenant_id
         self._lock     = threading.RLock()
 
+        self._local = threading.local()  # sempre inicializado (SQLite e PostgreSQL)
         if USE_POSTGRES:
             self._pg_pool = []  # simple connection reuse
             self._pg_lock = threading.RLock()
-        else:
-            self._local = threading.local()
 
         self._init_db()
         logger.info("EventRepository iniciado | backend=%s | tenant=%s",

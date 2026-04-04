@@ -589,16 +589,22 @@ _processos_alertados: set = set()
 _pid_cache: dict = {}
 _pid_cache_time: float = 0.0
 
+# Locks para thread safety nos sets/dicts globais modificados por threads de monitor
+_conexoes_lock    = threading.Lock()
+_processos_lock   = threading.Lock()
+_pid_cache_lock   = threading.Lock()
+
 def get_pid_name_cached(pid) -> str:
     global _pid_cache, _pid_cache_time
     now = time.time()
-    if now - _pid_cache_time > 30:
-        try:
-            _pid_cache = get_pid_name_map()
-            _pid_cache_time = now
-        except Exception:
-            pass
-    return _pid_cache.get(str(pid), "")
+    with _pid_cache_lock:
+        if now - _pid_cache_time > 30:
+            try:
+                _pid_cache = get_pid_name_map()
+                _pid_cache_time = now
+            except Exception:
+                pass
+        return _pid_cache.get(str(pid), "")
 
 def ip_ok(ip: str) -> bool:
     return ip.startswith(REDE_LOCAL) or ip in ("127.0.0.1","::1","0.0.0.0")
@@ -735,13 +741,16 @@ def checar_conexoes():
             if ip_ok(ip_r) or ip_r.startswith("127."): continue
 
             chave = f"{ip_r}:{porta}:{proc_nome}"
-            if porta in PORTAS_SUSPEITAS and chave not in _conexoes_vistas:
-                _conexoes_vistas.add(chave)
+            with _conexoes_lock:
+                nova_suspeita  = porta in PORTAS_SUSPEITAS and chave not in _conexoes_vistas
+                nova_externa   = (not ip_r.startswith(REDE_LOCAL) and porta not in PORTAS_LEGITIMAS
+                                  and porta < 1024 and not is_trusted and chave not in _conexoes_vistas)
+                if nova_suspeita or nova_externa:
+                    _conexoes_vistas.add(chave)
+            if nova_suspeita:
                 analisar(f"SUSPICIOUS CONNECTION DST={ip_r} DPT={porta} PROC={proc_nome}", ip_r, "firewall")
                 sus += 1
-            elif (not ip_r.startswith(REDE_LOCAL) and porta not in PORTAS_LEGITIMAS
-                  and porta < 1024 and not is_trusted and chave not in _conexoes_vistas):
-                _conexoes_vistas.add(chave)
+            elif nova_externa:
                 analisar(f"EXTERNAL CONNECTION DST={ip_r} DPT={porta} PROC={proc_nome}", ip_r, "firewall")
                 sus += 1
 
@@ -765,10 +774,14 @@ def checar_processos():
             nome = p.get("name", "").lower()
             pid  = str(p.get("pid", "?"))
             for s in PROCESSOS_SUSPEITOS:
-                if s.lower() in nome and nome not in _processos_alertados:
-                    _processos_alertados.add(nome)
-                    analisar(f"Suspicious process running: {nome} PID={pid}", "127.0.0.1", "command", "process_monitor")
-                    found.append(nome)
+                if s.lower() in nome:
+                    with _processos_lock:
+                        novo = nome not in _processos_alertados
+                        if novo:
+                            _processos_alertados.add(nome)
+                    if novo:
+                        analisar(f"Suspicious process running: {nome} PID={pid}", "127.0.0.1", "command", "process_monitor")
+                        found.append(nome)
         monitor_status["processos"] = f"suspeitos: {found}" if found else "nenhum suspeito"
     except Exception as e:
         monitor_status["processos"] = f"erro: {e}"
@@ -2523,8 +2536,24 @@ def auth_login():
     """
     Endpoint de login — valida token (admin ou tenant) e define cookie de sessão.
     Seta cookie httponly válido por 8h.
+    Rate limit: 10 tentativas por IP por janela de 60 segundos.
     """
+    import time as _time
     from flask import make_response
+
+    # ── Rate limiting (in-memory, sem dependências externas) ─────────
+    ip  = request.remote_addr or "unknown"
+    now = _time.time()
+    _rl = app.config.setdefault("_login_rl", {})
+    entry = _rl.get(ip, {"count": 0, "window_start": now})
+    if now - entry["window_start"] > 60:          # janela expirou — reseta
+        entry = {"count": 0, "window_start": now}
+    entry["count"] += 1
+    _rl[ip] = entry
+    if entry["count"] > 10:
+        logger.warning("Rate limit atingido | ip=%s | tentativas=%s", ip, entry["count"])
+        return jsonify({"valid": False, "error": "Muitas tentativas. Aguarde 60 segundos."}), 429
+
     data  = request.get_json(silent=True) or {}
     token = data.get("token", "").strip()
     if not token:
@@ -2532,8 +2561,11 @@ def auth_login():
 
     result = verify_any_token(token, repo)
     if not result["valid"]:
-        logger.warning("Login falhou | ip=%s | token=%s…", request.remote_addr, token[:8])
+        logger.warning("Login falhou | ip=%s | token=%s…", ip, token[:8])
         return jsonify({"valid": False, "error": "Token inválido"}), 401
+
+    # Login OK — limpa contador de tentativas
+    _rl.pop(ip, None)
 
     logger.info("Login OK | ip=%s | type=%s", request.remote_addr, result["type"])
     resp = make_response(jsonify({
