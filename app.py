@@ -714,6 +714,84 @@ def get_pid_name_cached(pid) -> str:
 def ip_ok(ip: str) -> bool:
     return ip.startswith(REDE_LOCAL) or ip in ("127.0.0.1","::1","0.0.0.0")
 
+# ── Input sanitization ────────────────────────────────────────────
+import html as _html
+_DANGEROUS_PATTERNS = re.compile(
+    r'(<\s*script|javascript\s*:|on\w+\s*=|data\s*:\s*text/html|'
+    r'union\s+select|drop\s+table|insert\s+into|delete\s+from|'
+    r'--\s|/\*|\*/|xp_cmdshell)',
+    re.IGNORECASE,
+)
+
+def sanitize(value, max_len: int = 512, label: str = "input") -> str:
+    """Sanitiza string de entrada: escapa HTML, bloqueia padrões perigosos."""
+    if value is None:
+        return ""
+    s = str(value)[:max_len]
+    if _DANGEROUS_PATTERNS.search(s):
+        logger.warning("sanitize: padrão suspeito em %s: %.80r", label, s)
+        s = _DANGEROUS_PATTERNS.sub("", s)
+    return _html.escape(s, quote=True)
+
+def sanitize_ip(value) -> str:
+    """Valida e retorna IP limpo ou '' se inválido."""
+    if not value:
+        return ""
+    s = str(value).strip()[:45]
+    try:
+        import ipaddress as _ip
+        return str(_ip.ip_address(s))
+    except ValueError:
+        return ""
+
+# ── Threat Intelligence Cache (TTL 1h) ───────────────────────────
+_TI_CACHE: dict = {}          # ip -> {"data": ..., "ts": float}
+_TI_CACHE_TTL = 3600          # segundos
+_TI_CACHE_MAX = 2000          # evita crescimento ilimitado
+_ti_cache_lock = threading.Lock()
+
+def ti_lookup(ip: str) -> dict:
+    """Consulta threat intel com cache TTL de 1h.
+    Evita chamadas repetidas a APIs externas (VirusTotal, AbuseIPDB).
+    """
+    now = time.time()
+    with _ti_cache_lock:
+        entry = _TI_CACHE.get(ip)
+        if entry and now - entry["ts"] < _TI_CACHE_TTL:
+            return entry["data"]   # cache hit
+
+    # cache miss — consulta a API
+    result = {"score": 0, "categoria": "ok"}
+    try:
+        from threat_intel import intel as _ti
+        result = _ti.analisar(ip) or result
+    except Exception:
+        pass
+
+    with _ti_cache_lock:
+        # evict entradas antigas se cache muito grande
+        if len(_TI_CACHE) >= _TI_CACHE_MAX:
+            oldest = sorted(_TI_CACHE, key=lambda k: _TI_CACHE[k]["ts"])
+            for k in oldest[:200]:
+                del _TI_CACHE[k]
+        _TI_CACHE[ip] = {"data": result, "ts": now}
+
+    return result
+
+@app.route("/api/threat-cache/stats")
+@auth
+def ti_cache_stats():
+    """Retorna estatísticas do cache de threat intelligence."""
+    with _ti_cache_lock:
+        n = len(_TI_CACHE)
+        oldest = min((_TI_CACHE[k]["ts"] for k in _TI_CACHE), default=0)
+    return jsonify({
+        "cached_ips": n,
+        "max_size":   _TI_CACHE_MAX,
+        "ttl_seconds": _TI_CACHE_TTL,
+        "oldest_entry_age": round(time.time() - oldest) if oldest else 0,
+    })
+
 def analisar(log: str, ip: str = None, field: str = "raw", origem: str = ""):
     ctx = {"field": field}
     if origem: ctx["origem"] = origem
@@ -1087,9 +1165,9 @@ def get_detections():
     rows = ids.get_detections(
         limit=min(request.args.get("limit",100,int),500),
         offset=request.args.get("offset",0,int),
-        severity=request.args.get("severity"),
-        status=request.args.get("status"),
-        source_ip=request.args.get("source_ip"),
+        severity=sanitize(request.args.get("severity"), max_len=20, label="severity"),
+        status=sanitize(request.args.get("status"), max_len=30, label="status"),
+        source_ip=sanitize_ip(request.args.get("source_ip")),
     )
     return jsonify({"total":ids.store.count_total(),"returned":len(rows),"detections":rows})
 
@@ -1104,10 +1182,11 @@ def get_detection(did):
 @auth
 def update_status(did):
     body = request.get_json(force=True) or {}
-    status = body.get("status")
+    status = sanitize(body.get("status"), max_len=30, label="status")
     if status not in {"active","investigating","resolved","false_positive"}:
         return jsonify({"error":"status invalido"}),400
-    ok = ids.update_status(did, status, body.get("analyst_note",""))
+    note = sanitize(body.get("analyst_note",""), max_len=1000, label="analyst_note")
+    ok = ids.update_status(did, status, note)
     return (jsonify({"success":True,"detection_id":did,"new_status":status})
             if ok else jsonify({"error":"not found"}),404)
 
@@ -1118,8 +1197,9 @@ def analyze():
     log  = body.get("log","").strip()
     if not log: return jsonify({"error":"log obrigatorio"}),400
     if len(log)>10000: return jsonify({"error":"log muito longo"}),413
-    field = body.get("field","raw")
-    events = ids.analyze(log, body.get("source_ip"), {"field": field})
+    field = sanitize(body.get("field","raw"), max_len=30, label="field")
+    src_ip = sanitize_ip(body.get("source_ip"))
+    events = ids.analyze(log, src_ip or None, {"field": field})
 
     # OWASP CRS analysis
     owasp_matches = []
@@ -1400,11 +1480,30 @@ from collections import deque
 _live_log: deque = deque(maxlen=200)
 _live_log_lock = threading.Lock()
 
+# SSE — fila de subscribers para streaming em tempo real
+import queue as _queue
+_sse_subscribers: list = []
+_sse_lock = threading.Lock()
+
+def _sse_broadcast(data: dict):
+    """Envia evento SSE para todos os clientes conectados."""
+    payload = json.dumps(data, ensure_ascii=False)
+    dead = []
+    with _sse_lock:
+        for q in _sse_subscribers:
+            try:
+                q.put_nowait(payload)
+            except _queue.Full:
+                dead.append(q)
+        for q in dead:
+            _sse_subscribers.remove(q)
+
 def log_ao_vivo(entry: dict):
-    """Adiciona entrada ao buffer de log ao vivo."""
+    """Adiciona entrada ao buffer de log ao vivo e transmite via SSE."""
     entry["ts"] = datetime.now().strftime('%H:%M:%S.%f')[:12]
     with _live_log_lock:
         _live_log.append(entry)
+    _sse_broadcast(entry)  # push em tempo real para clientes SSE
 
 # Integra analisar com o live log — wrapper sem redefinir o nome
 def _analisar_com_live_log(log: str, ip: str = None, field: str = "raw", origem: str = ""):
@@ -1432,6 +1531,55 @@ def live_log():
         "total":     len(entries),
         "timestamp": datetime.now().isoformat() + "Z",
     })
+
+@app.route("/api/events/stream")
+@auth
+def events_stream():
+    """Server-Sent Events — push de detecções em tempo real sem polling.
+
+    Uso no cliente:
+        const es = new EventSource('/api/events/stream');
+        es.onmessage = e => console.log(JSON.parse(e.data));
+    """
+    q: _queue.Queue = _queue.Queue(maxsize=100)
+    with _sse_lock:
+        _sse_subscribers.append(q)
+
+    # Envia snapshot inicial do buffer
+    with _live_log_lock:
+        snapshot = list(_live_log)
+
+    def generate():
+        try:
+            # Heartbeat inicial + snapshot
+            yield "event: connected\ndata: {\"status\":\"ok\"}\n\n"
+            for entry in snapshot[-20:]:  # últimas 20 entradas
+                yield f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+            # Stream contínuo
+            while True:
+                try:
+                    payload = q.get(timeout=25)
+                    yield f"data: {payload}\n\n"
+                except _queue.Empty:
+                    yield ": heartbeat\n\n"  # mantém conexão viva
+        except GeneratorExit:
+            pass
+        finally:
+            with _sse_lock:
+                try:
+                    _sse_subscribers.remove(q)
+                except ValueError:
+                    pass
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control":   "no-cache",
+            "X-Accel-Buffering": "no",   # desabilita buffer do nginx
+            "Connection":      "keep-alive",
+        },
+    )
 
 @app.route("/api/graph")
 @auth
@@ -1492,13 +1640,8 @@ def connection_graph():
             hn  = conn.get("hostname", ip)
             iid = f"ip:{ip}"
             if iid not in nodes:
-                i = {"ip": ip, "score": 0, "cat": "ok"}
-                try:
-                    from threat_intel import intel as ti
-                    r2 = ti.analisar(ip)
-                    i = r2
-                except Exception:
-                    pass
+                r2 = ti_lookup(ip)
+                i  = {"ip": ip, "score": r2.get("score", 0), "cat": r2.get("categoria", "ok")}
                 nodes[iid] = {
                     "id":      iid,
                     "label":   hn if hn != ip else ip,
