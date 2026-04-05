@@ -2587,8 +2587,8 @@ def health():
 
     # ── IDS Engine ─────────────────────────────────────────────────
     try:
-        ids_ok   = engine is not None
-        ids_info = f"ok | {len(getattr(engine, 'rules', []))} regras" if ids_ok else "não inicializado"
+        ids_ok   = ids is not None
+        ids_info = f"ok | {ids.store.count_total()} detecções" if ids_ok else "não inicializado"
     except Exception:
         ids_ok   = False
         ids_info = "erro"
