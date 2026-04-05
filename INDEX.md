@@ -8,6 +8,7 @@ projeto-ids/
 ├── 📄 MANUAL_TECNICO.md           # Documentação técnica aprofundada
 ├── 📄 GUIA_INSTALACAO.md          # Guia prático de instalação
 ├── 📄 ANALISE_ATAQUES.md          # 7 Casos de ataque analisados
+├── 📄 ALERTAS_NOTIFICACOES.md     # Telegram, WhatsApp, Slack, Discord, Teams
 ├── 📄 INDEX.md                    # Este arquivo
 │
 ├── 🐍 CÓDIGO PYTHON

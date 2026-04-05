@@ -299,6 +299,37 @@ engine.registry.register(rule_detect_mimikatz, tags=["process", "credential"])
 
 ---
 
+## Alertas & Notificações
+
+O NetGuard IDS envia alertas em tempo real para os canais abaixo. Configure via API — sem reiniciar o servidor.
+
+| Canal | Tipo | Como configurar |
+|-------|------|----------------|
+| 📱 Telegram | `telegram` | Token do Bot + Chat ID → [ver guia completo](ALERTAS_NOTIFICACOES.md#canal-telegram) |
+| 💬 WhatsApp (Z-API) | `whatsapp` | Instance ID + Token da Z-API → [ver guia](ALERTAS_NOTIFICACOES.md#canal-whatsapp-z-api) |
+| 💬 WhatsApp (Twilio) | `whatsapp` | Account SID + Auth Token → [ver guia](ALERTAS_NOTIFICACOES.md#canal-whatsapp-twilio) |
+| 🟩 Slack | `slack` | Incoming Webhook URL → [ver guia](ALERTAS_NOTIFICACOES.md#canal-slack) |
+| 🎮 Discord | `discord` | Webhook URL do canal → [ver guia](ALERTAS_NOTIFICACOES.md#canal-discord) |
+| 🔵 Microsoft Teams | `teams` | Incoming Webhook do Teams → [ver guia](ALERTAS_NOTIFICACOES.md#canal-microsoft-teams) |
+| 🌐 HTTP Genérico | `generic` | Qualquer endpoint POST JSON → [ver guia](ALERTAS_NOTIFICACOES.md#canal-http-genérico) |
+
+```bash
+# Cadastrar um webhook (exemplo Telegram)
+curl -X POST http://localhost:5000/api/webhooks \
+  -H "X-API-Key: SUA_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Telegram SOC","type":"telegram",
+       "url":"https://api.telegram.org/botTOKEN/sendMessage",
+       "secret":"CHAT_ID","min_severity":"high"}'
+
+# Testar imediatamente
+curl -X POST http://localhost:5000/api/webhooks/1/test -H "X-API-Key: SUA_KEY"
+```
+
+> 📖 **Guia completo:** [ALERTAS_NOTIFICACOES.md](ALERTAS_NOTIFICACOES.md)
+
+---
+
 ## Dashboard
 
 12 monitoring tabs:
