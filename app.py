@@ -568,7 +568,7 @@ def get_system_info() -> dict:
                         key=lambda x: x.info.get('cpu_percent') or 0, reverse=True)[:15]:
             try:
                 try:
-                    nconns = len(p.connections())
+                    nconns = len(p.net_connections())
                 except Exception:
                     nconns = 0
                 procs.append({
@@ -1347,7 +1347,7 @@ def list_processes():
                 trusted = any(b in name for b in [x.lower() for x in BROWSERS_E_APPS])
                 suspicious = any(s.lower() in name for s in PROCESSOS_SUSPEITOS)
                 try:
-                    nconns = len(p.connections())
+                    nconns = len(p.net_connections())
                 except Exception:
                     nconns = 0
                 procs.append({
@@ -2626,7 +2626,7 @@ def health():
 
     payload = {
         "status":    overall,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "version":   "3.0",
         "uptime_cycles": monitor_status.get("ciclo", 0),
         "demo_mode": is_demo,
@@ -3624,6 +3624,177 @@ def custom_rules_operators():
         ],
         "logic_options": ["AND", "OR"],
     })
+
+
+# ═══════════════════════════════════════════ TRIAL SYSTEM ══════════
+
+try:
+    from engine.trial_engine import get_trial_engine
+    TRIAL_AVAILABLE = True
+    logger.info("Trial Engine carregado")
+except Exception as _te:
+    TRIAL_AVAILABLE = False
+    logger.warning("Trial Engine indisponível: %s", _te)
+
+def _get_trial_engine():
+    db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+    return get_trial_engine(db)
+
+def _render_trial_dashboard(trial: dict, remaining_seconds: int) -> str:
+    """Serve o dashboard com metadados do trial injetados."""
+    p = pathlib.Path(__file__).parent / "dashboard.html"
+    html = p.read_text(encoding="utf-8")
+    # Injeta variáveis do trial logo após <body>
+    inject = f"""<script>
+window.__TRIAL__ = {{
+  token:     "{trial['token']}",
+  name:      "{trial.get('name','').replace('"','')}",
+  company:   "{trial.get('company','').replace('"','')}",
+  email:     "{trial.get('email','').replace('"','')}",
+  expiresAt: "{trial['expires_at']}",
+  remainingSeconds: {remaining_seconds},
+  durationH: {trial.get('duration_h', 72)}
+}};
+</script>"""
+    html = html.replace("<body>", f"<body>{inject}", 1)
+    return html
+
+def _render_trial_expired(trial: dict) -> str:
+    company = trial.get("company") or trial.get("name") or trial.get("email","")
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Trial Expirado — NetGuard IDS</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#e6edf3;
+     display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:2rem}}
+.card{{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:3rem 2.5rem;max-width:480px;width:100%}}
+.icon{{font-size:3rem;margin-bottom:1rem}}
+h1{{font-size:1.6rem;font-weight:700;margin-bottom:.5rem}}
+p{{color:#8b949e;line-height:1.7;margin-bottom:1.5rem}}
+.highlight{{color:#58a6ff;font-weight:600}}
+.btn{{display:inline-block;background:#1f6feb;color:#fff;padding:12px 28px;border-radius:8px;
+      text-decoration:none;font-weight:600;font-size:.95rem;transition:background .2s}}
+.btn:hover{{background:#388bfd}}
+.meta{{font-size:.78rem;color:#8b949e;margin-top:1.5rem;border-top:1px solid #30363d;padding-top:1rem}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">⏱</div>
+  <h1>Seu trial expirou</h1>
+  <p>O acesso de demonstração para <span class="highlight">{company}</span> chegou ao fim.
+     Você teve acesso completo ao NetGuard IDS — detecção em tempo real, ML Anomaly,
+     Compliance PDF e muito mais.</p>
+  <p>Assine agora e continue protegendo sua infraestrutura sem interrupção.</p>
+  <a href="/pricing" class="btn">Ver planos e assinar →</a>
+  <div class="meta">
+    Dúvidas? Entre em contato: <a href="mailto:vendas@netguard.io" style="color:#58a6ff">vendas@netguard.io</a>
+  </div>
+</div>
+</body>
+</html>"""
+
+@app.route("/trial/<token>")
+def trial_access(token):
+    """Acesso ao dashboard via link de trial com tempo limitado."""
+    if not TRIAL_AVAILABLE:
+        return redirect("/demo")
+
+    result = _get_trial_engine().validate_trial(token)
+
+    if result["expired"]:
+        return _render_trial_expired(result["trial"]), 200, {"Content-Type": "text/html; charset=utf-8"}
+
+    if not result["valid"]:
+        return redirect("/pricing")
+
+    # Seed de dados demo para este trial (tenant isolado por token hash)
+    trial    = result["trial"]
+    trial_tenant = "trial_" + token[-12:]
+    try:
+        from demo_seed import seed_demo
+        from storage.event_repository import EventRepository as _ER
+        _repo = _ER()
+        cnt = _repo.count(tenant_id=trial_tenant)
+        if cnt < 10:
+            seed_demo(_repo, n_events=300, verbose=False, tenant_override=trial_tenant)
+    except Exception as _se:
+        logger.warning("Trial seed parcial: %s", _se)
+        try:
+            from demo_seed import DEMO_TOKEN
+            trial_token_cookie = DEMO_TOKEN
+        except Exception:
+            trial_token_cookie = token
+    else:
+        trial_token_cookie = token
+
+    html = _render_trial_dashboard(trial, result["remaining_seconds"])
+    resp = make_response(html, 200)
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    resp.set_cookie("netguard_token", trial_token_cookie,
+                    httponly=True, samesite="Lax", max_age=result["remaining_seconds"],
+                    secure=_HTTPS_ONLY)
+    resp.set_cookie("netguard_trial", token,
+                    httponly=False, samesite="Lax", max_age=result["remaining_seconds"])
+    return resp
+
+
+# ── Admin: gestão de trials ───────────────────────────────────────
+@app.route("/api/admin/trials", methods=["GET"])
+@auth
+def admin_trials_list():
+    if not TRIAL_AVAILABLE:
+        return jsonify({"error": "Trial Engine indisponível"}), 503
+    trials = _get_trial_engine().list_trials()
+    stats  = _get_trial_engine().stats()
+    base   = request.host_url.rstrip("/")
+    for t in trials:
+        t["trial_url"] = f"{base}/trial/{t['token']}"
+    return jsonify({"trials": trials, "stats": stats})
+
+@app.route("/api/admin/trials", methods=["POST"])
+@auth
+@csrf_protect
+def admin_trials_create():
+    if not TRIAL_AVAILABLE:
+        return jsonify({"error": "Trial Engine indisponível"}), 503
+    data = request.get_json(force=True) or {}
+    try:
+        trial = _get_trial_engine().create_trial(
+            email      = data.get("email",""),
+            name       = data.get("name",""),
+            company    = data.get("company",""),
+            duration_h = int(data.get("duration_h", 72)),
+            notes      = data.get("notes",""),
+        )
+        base = request.host_url.rstrip("/")
+        trial["trial_url"] = f"{base}/trial/{trial['token']}"
+        return jsonify({"ok": True, "trial": trial}), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/admin/trials/<token>/revoke", methods=["POST"])
+@auth
+@csrf_protect
+def admin_trials_revoke(token):
+    if not TRIAL_AVAILABLE:
+        return jsonify({"error": "Trial Engine indisponível"}), 503
+    _get_trial_engine().revoke_trial(token)
+    return jsonify({"ok": True})
+
+@app.route("/api/admin/trials/<token>/extend", methods=["POST"])
+@auth
+@csrf_protect
+def admin_trials_extend(token):
+    if not TRIAL_AVAILABLE:
+        return jsonify({"error": "Trial Engine indisponível"}), 503
+    data  = request.get_json(force=True) or {}
+    trial = _get_trial_engine().extend_trial(token, int(data.get("hours", 24)))
+    return jsonify({"ok": True, "trial": trial})
 
 
 # ═══════════════════════════════════════ WEBHOOK ALERTS ════════════

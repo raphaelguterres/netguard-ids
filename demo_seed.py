@@ -158,41 +158,45 @@ def _weight_scenario(scenario: tuple) -> float:
     return {"CRITICAL": 0.05, "HIGH": 0.20, "MEDIUM": 0.40, "LOW": 0.35}.get(sev, 0.20)
 
 
-def seed_demo(repo, n_events: int = 350, verbose: bool = True) -> dict:
+def seed_demo(repo, n_events: int = 350, verbose: bool = True,
+              tenant_override: str = None) -> dict:
     """
     Cria o tenant de demo e insere N eventos realistas.
+    tenant_override: usa tenant_id alternativo (para trials isolados).
     Retorna dict com tenant_id e token.
     """
-    # Cria ou garante que o tenant existe
-    try:
-        existing = repo.get_tenant_by_token(DEMO_TOKEN)
-        if not existing:
-            repo.create_tenant(
-                tenant_id = DEMO_TENANT_ID,
-                name      = DEMO_NAME,
-                token     = DEMO_TOKEN,
-                plan      = DEMO_PLAN,
-                max_hosts = 50,
-            )
+    _TENANT_ID = tenant_override or DEMO_TENANT_ID
+
+    # Cria ou garante que o tenant existe (apenas para o tenant padrão de demo)
+    if not tenant_override:
+        try:
+            existing = repo.get_tenant_by_token(DEMO_TOKEN)
+            if not existing:
+                repo.create_tenant(
+                    tenant_id = DEMO_TENANT_ID,
+                    name      = DEMO_NAME,
+                    token     = DEMO_TOKEN,
+                    plan      = DEMO_PLAN,
+                    max_hosts = 50,
+                )
+                if verbose:
+                    print(f"[demo] Tenant criado: {_TENANT_ID}")
+            else:
+                if verbose:
+                    print(f"[demo] Tenant já existe: {_TENANT_ID}")
+        except Exception as e:
             if verbose:
-                print(f"[demo] Tenant criado: {DEMO_TENANT_ID}")
-        else:
-            if verbose:
-                print(f"[demo] Tenant já existe: {DEMO_TENANT_ID}")
-    except Exception as e:
-        if verbose:
-            print(f"[demo] Aviso ao criar tenant: {e}")
+                print(f"[demo] Aviso ao criar tenant: {e}")
 
     # Pesos para distribuição realista
     scenarios = THREAT_SCENARIOS
     weights   = [_weight_scenario(s) for s in scenarios]
 
     # Gera eventos com distribuição realista
-    # Usa _save_raw diretamente — o schema real não tem colunas threat_name/source_ip/message
     events_saved = 0
     for _ in range(n_events):
         scenario = random.choices(scenarios, weights=weights, k=1)[0]
-        event    = _build_event(scenario, DEMO_TENANT_ID)
+        event    = _build_event(scenario, _TENANT_ID)
         try:
             _save_raw(repo, event)
             events_saved += 1
@@ -201,12 +205,12 @@ def seed_demo(repo, n_events: int = 350, verbose: bool = True) -> dict:
                 print(f"[demo] Erro ao salvar evento: {e}")
 
     if verbose:
-        print(f"[demo] {events_saved} eventos inseridos para tenant {DEMO_TENANT_ID}")
+        print(f"[demo] {events_saved} eventos inseridos para tenant {_TENANT_ID}")
 
     _seed_new_modules(verbose=verbose)
 
     return {
-        "tenant_id": DEMO_TENANT_ID,
+        "tenant_id": _TENANT_ID,
         "token":     DEMO_TOKEN,
         "events":    events_saved,
     }

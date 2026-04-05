@@ -1676,7 +1676,13 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 <body>
 <div id="app">
 
-<!-- DEMO BANNER — visível apenas em modo demo -->
+<!-- TRIAL / DEMO BANNER -->
+<div id="trial-banner" style="display:none;background:linear-gradient(90deg,#1f6feb 0%,#388bfd 100%);color:#fff;font-size:.78rem;font-weight:600;padding:7px 16px;position:relative;z-index:200;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap">
+  <span>🔑 Trial NetGuard IDS</span>
+  <span id="trial-company" style="font-weight:800"></span>
+  <span style="background:rgba(255,255,255,.15);border-radius:4px;padding:2px 10px">⏱ <span id="trial-countdown">--:--:--</span> restantes</span>
+  <a href="/pricing" style="color:#fff;text-decoration:underline;font-size:.75rem">Assinar agora →</a>
+</div>
 <div id="demo-banner" style="display:none;background:linear-gradient(90deg,#d29922 0%,#f0883e 100%);color:#0d1117;font-size:.78rem;font-weight:600;text-align:center;padding:6px 16px;letter-spacing:.03em;position:relative;z-index:200">
   ⚡ Você está no <strong>modo demonstração</strong> — dados fictícios para avaliação.
   <a href="/pricing" style="color:#0d1117;text-decoration:underline;margin-left:12px">Ver planos →</a>
@@ -1741,6 +1747,7 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
     <div class="tab" onclick="goPage('compliance',this)" title="Conformidade">📋 Compliance</div>
     <div class="tab" onclick="goPage('custom-rules',this)" title="Regras Customizadas">⚙ My Rules</div>
     <div class="tab" onclick="goPage('webhooks',this)" title="Webhook Alerts">🔔 Webhooks</div>
+    <div class="tab" onclick="goPage('trials',this)" title="Trials de Clientes">🔗 Trials</div>
   </div>
   <button class="tab-scroll-btn" id="tab-scroll-right" onclick="scrollTabs(200)" title="Mais abas →">›</button>
 </div>
@@ -2762,6 +2769,7 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 <!-- ── CUSTOM RULES ──────────────────────────────────────────────── -->
 <div class="page" id="p-custom-rules"></div>
 <div class="page" id="p-webhooks"></div>
+<div class="page" id="p-trials"></div>
 
 <!-- ── STATS ───────────────────────────────────────────────────────── -->
 <div class="page" id="p-stats">
@@ -2801,16 +2809,55 @@ function scrollTabs(delta){
   }
 }
 // Also update on tab click scroll
-// ── Demo mode detection ───────────────────────────────────────────
-(async function detectDemo(){
-  try {
-    const r = await fetch('/api/health');
-    const d = await r.json();
-    if(d?.demo_mode || d?.tenant_id === 'demo-tenant-netguard'){
-      const b = document.getElementById('demo-banner');
-      if(b) b.style.display = 'block';
+// ── Trial / Demo mode detection ───────────────────────────────────
+(function initBanners(){
+  // Trial mode — injetado pelo servidor em /trial/<token>
+  if(window.__TRIAL__){
+    const t   = window.__TRIAL__;
+    const ban = document.getElementById('trial-banner');
+    const co  = document.getElementById('trial-company');
+    if(ban){ ban.style.display='flex'; }
+    if(co)  co.textContent = t.company || t.name || t.email;
+
+    // Countdown
+    let rem = t.remainingSeconds;
+    function tick(){
+      if(rem <= 0){
+        // Trial expirado em tempo real
+        document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0d1117;color:#e6edf3;text-align:center;flex-direction:column;gap:16px;font-family:system-ui">
+          <div style="font-size:3rem">⏱</div>
+          <h2>Seu trial expirou</h2>
+          <p style="color:#8b949e">Assine para continuar usando o NetGuard IDS.</p>
+          <a href="/pricing" style="background:#1f6feb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600">Ver planos →</a>
+        </div>`;
+        return;
+      }
+      const h  = Math.floor(rem/3600);
+      const m  = Math.floor((rem%3600)/60);
+      const s  = rem%60;
+      const el = document.getElementById('trial-countdown');
+      if(el) el.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      // Muda cor quando < 1h
+      const ban2 = document.getElementById('trial-banner');
+      if(ban2 && rem < 3600) ban2.style.background='linear-gradient(90deg,#b91c1c 0%,#f85149 100%)';
+      rem--;
+      setTimeout(tick, 1000);
     }
-  } catch{}
+    tick();
+    return; // não verifica demo mode se é trial
+  }
+
+  // Demo mode — detecta via API
+  (async function detectDemo(){
+    try {
+      const r = await fetch('/api/health');
+      const d = await r.json();
+      if(d?.demo_mode || d?.tenant_id === 'demo-tenant-netguard'){
+        const b = document.getElementById('demo-banner');
+        if(b) b.style.display = 'block';
+      }
+    } catch{}
+  })();
 })();
 async function resetDemo(){
   if(!confirm('Resetar todos os dados de demonstração?')) return;
@@ -2871,6 +2918,7 @@ function goPage(name,el){
   if(name==='compliance')  loadCompliance();
   if(name==='custom-rules') loadCustomRules();
   if(name==='webhooks')    loadWebhooks();
+  if(name==='trials')      loadTrials();
   if(name==='geomap'){
     loadGeo();
     if(liveInterval)clearInterval(liveInterval);
@@ -5627,6 +5675,161 @@ async function deleteWebhook(id){
   toast('Webhook removido','ok'); loadWebhooks();
 }
 
+// ══════════════════════════════════════════════ TRIALS ═══════════
+
+let trialFormOpen = false;
+
+async function loadTrials(){
+  const pg = document.getElementById('p-trials');
+  if(!pg) return;
+  pg.innerHTML = `
+  <div style="padding:20px;width:100%;max-width:960px;margin:0 auto;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div>
+        <div style="font-size:1.1rem;font-weight:700">🔗 Trial de Clientes</div>
+        <div style="font-size:.8rem;color:var(--txt3);margin-top:2px">Gere links de acesso com tempo limitado para clientes em potencial.</div>
+      </div>
+      <button class="fbtn" onclick="showNewTrial()" style="background:var(--blu);color:#fff;padding:6px 14px">+ Novo Trial</button>
+    </div>
+    <div id="trial-stats-row" style="display:flex;gap:10px;margin-bottom:16px"></div>
+    <div id="trial-form-area"></div>
+    <div id="trial-list"><div class="empty"><span>Carregando…</span></div></div>
+  </div>`;
+
+  const r = await api('/admin/trials');
+  if(!r){ document.getElementById('trial-list').innerHTML='<div class="empty"><span>Erro ao carregar trials</span></div>'; return; }
+
+  // Stats
+  const s = r.stats || {};
+  document.getElementById('trial-stats-row').innerHTML = [
+    ['Total',   s.total   || 0, 'var(--txt2)'],
+    ['Ativos',  s.active  || 0, 'var(--grn)'],
+    ['Expirados',s.expired|| 0, 'var(--ora)'],
+    ['Revogados',s.revoked|| 0, 'var(--red)'],
+  ].map(([l,v,c])=>`<div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:10px 16px;flex:1;text-align:center">
+    <div style="font-size:1.4rem;font-weight:800;color:${c}">${v}</div>
+    <div style="font-size:.72rem;color:var(--txt3)">${l}</div>
+  </div>`).join('');
+
+  const trials = r.trials || [];
+  const list = document.getElementById('trial-list');
+  if(!trials.length){
+    list.innerHTML='<div class="empty" style="height:120px"><span>Nenhum trial gerado ainda. Clique em "+ Novo Trial" para começar.</span></div>';
+    return;
+  }
+
+  const statusColor = {active:'var(--grn)', expired:'var(--ora)', revoked:'var(--red)'};
+  const statusLabel = {active:'● Ativo', expired:'○ Expirado', revoked:'✕ Revogado'};
+
+  list.innerHTML = trials.map(t => `
+  <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:14px 16px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-weight:700;flex:1;min-width:120px">${t.company||t.name||t.email}</span>
+      <span style="font-size:.72rem;color:var(--txt3)">${t.email}</span>
+      <span style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:rgba(0,0,0,.2);color:${statusColor[t.status]||'var(--txt3)'}">${statusLabel[t.status]||t.status}</span>
+      ${t.status==='active'?`<span style="font-size:.72rem;color:var(--txt3)">⏱ ${t.remaining_h}h restantes</span>`:''}
+      <span style="font-size:.72rem;color:var(--txt3)">${t.access_count} acessos</span>
+      <button class="fbtn" onclick="copyTrialLink('${t.trial_url}')" title="Copiar link">🔗 Copiar link</button>
+      ${t.status!=='revoked'?`<button class="fbtn" onclick="extendTrial('${t.token}')" title="Estender +24h">+24h</button>`:''}
+      ${t.status==='active'?`<button class="fbtn" style="color:var(--red)" onclick="revokeTrial('${t.token}')">Revogar</button>`:''}
+    </div>
+    <div style="font-size:.7rem;color:var(--txt3);margin-top:6px;display:flex;gap:16px;flex-wrap:wrap">
+      <span>Criado: ${t.created_at?.replace('T',' ').replace('Z','')}</span>
+      <span>Expira: ${t.expires_at?.replace('T',' ').replace('Z','')}</span>
+      ${t.first_access?`<span>1º acesso: ${t.first_access?.replace('T',' ').replace('Z','')}</span>`:''}
+    </div>
+    <div style="margin-top:8px;font-size:.7rem;font-family:var(--mono);background:var(--s1);border-radius:4px;padding:5px 8px;word-break:break-all;color:var(--blu)">${t.trial_url}</div>
+  </div>`).join('');
+}
+
+function showNewTrial(){
+  const area = document.getElementById('trial-form-area');
+  if(!area) return;
+  if(trialFormOpen){ area.innerHTML=''; trialFormOpen=false; return; }
+  trialFormOpen = true;
+  area.innerHTML = `
+  <div style="background:var(--s2);border:1px solid var(--blu);border-radius:8px;padding:16px;margin-bottom:16px">
+    <div style="font-weight:600;margin-bottom:12px">Novo Trial</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Nome do contato *</div>
+        <input id="tr-name" class="finput" placeholder="João Silva" style="width:100%">
+      </div>
+      <div>
+        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Empresa *</div>
+        <input id="tr-company" class="finput" placeholder="ACME Ltda" style="width:100%">
+      </div>
+      <div>
+        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">E-mail *</div>
+        <input id="tr-email" class="finput" placeholder="joao@acme.com" type="email" style="width:100%">
+      </div>
+      <div>
+        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Duração</div>
+        <select id="tr-hours" class="fsel" style="width:100%">
+          <option value="24">24 horas</option>
+          <option value="48">48 horas</option>
+          <option value="72" selected>72 horas (3 dias)</option>
+          <option value="168">7 dias</option>
+          <option value="336">14 dias</option>
+        </select>
+      </div>
+      <div style="grid-column:1/-1">
+        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Observações</div>
+        <input id="tr-notes" class="finput" placeholder="Prospect via LinkedIn, interesse em MSSP..." style="width:100%">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="fbtn" style="background:var(--blu);color:#fff" onclick="createTrial()">Gerar link de trial</button>
+      <button class="fbtn" onclick="document.getElementById('trial-form-area').innerHTML='';trialFormOpen=false">Cancelar</button>
+    </div>
+    <div id="tr-result" style="margin-top:12px;display:none"></div>
+  </div>`;
+}
+
+async function createTrial(){
+  const name    = document.getElementById('tr-name')?.value.trim();
+  const company = document.getElementById('tr-company')?.value.trim();
+  const email   = document.getElementById('tr-email')?.value.trim();
+  const hours   = document.getElementById('tr-hours')?.value;
+  const notes   = document.getElementById('tr-notes')?.value.trim();
+  if(!name||!email){ toast('Nome e e-mail obrigatórios','err'); return; }
+
+  const r = await api('/admin/trials',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name,company,email,duration_h:parseInt(hours),notes})});
+  if(!r?.ok){ toast(r?.error||'Erro ao criar trial','err'); return; }
+
+  const url = r.trial.trial_url;
+  const res = document.getElementById('tr-result');
+  if(res){
+    res.style.display='block';
+    res.innerHTML=`<div style="background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);border-radius:6px;padding:10px 12px">
+      <div style="font-size:.78rem;color:var(--grn);font-weight:600;margin-bottom:6px">✔ Trial criado! Link de acesso:</div>
+      <div style="font-family:var(--mono);font-size:.75rem;word-break:break-all;color:var(--blu)">${url}</div>
+      <button class="fbtn" style="margin-top:8px;background:var(--grn);color:#000" onclick="copyTrialLink('${url}')">📋 Copiar link</button>
+    </div>`;
+  }
+  loadTrials();
+}
+
+function copyTrialLink(url){
+  navigator.clipboard.writeText(url).then(()=>toast('Link copiado!','ok')).catch(()=>{
+    prompt('Copie o link abaixo:', url);
+  });
+}
+
+async function revokeTrial(token){
+  if(!confirm('Revogar este trial? O cliente perderá acesso imediatamente.')) return;
+  await api(`/admin/trials/${token}/revoke`,{method:'POST'});
+  toast('Trial revogado','ok'); loadTrials();
+}
+
+async function extendTrial(token){
+  const r = await api(`/admin/trials/${token}/extend`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hours:24})});
+  if(r?.ok) toast('+24h adicionadas','ok');
+  else toast('Erro ao estender','err');
+  loadTrials();
+}
+
 async function showWHLogs(id){
   const el = document.getElementById(`wh-logs-${id}`);
   if(!el) return;
@@ -5651,7 +5854,7 @@ async function showWHLogs(id){
 
 <!-- ── Páginas das novas abas ─────────────────────────────────── -->
 <style>
-#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules,#p-webhooks{
+#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules,#p-webhooks,#p-trials{
   flex-direction:column;overflow:hidden;
 }
 </style>
