@@ -239,14 +239,54 @@ except ImportError:
     def enrich_async(ip, cb=None): pass
 
 # ── Logging ───────────────────────────────────────────────────────
+import traceback as _tb_mod
+import uuid as _uuid_mod
+
+# Contexto de request local (thread-safe)
+_request_ctx = threading.local()
+
 class JSONFormatter(logging.Formatter):
-    def format(self, r):
-        return json.dumps({"ts":datetime.now().isoformat()+"Z",
-                           "level":r.levelname,"logger":r.name,"msg":r.getMessage()})
+    """Logs estruturados em JSON — compatível com Datadog, Loki, CloudWatch e ELK."""
+
+    STATIC_FIELDS = {
+        "service": "netguard-ids",
+        "version": "3.0",
+    }
+
+    def format(self, r: logging.LogRecord) -> str:
+        record: dict = {
+            "ts":      datetime.now().isoformat() + "Z",
+            "level":   r.levelname,
+            "logger":  r.name,
+            "msg":     r.getMessage(),
+        }
+        # Adiciona campos estáticos
+        record.update(self.STATIC_FIELDS)
+
+        # Contexto de request HTTP (se dentro de um request Flask)
+        req_id = getattr(_request_ctx, "request_id", None)
+        if req_id:
+            record["request_id"] = req_id
+        tenant = getattr(_request_ctx, "tenant_id", None)
+        if tenant:
+            record["tenant_id"] = tenant
+
+        # Campos extras passados via logger.xxx(msg, extra={...})
+        for key in ("event_type", "source_ip", "severity", "threat",
+                    "duration_ms", "status_code", "endpoint"):
+            val = r.__dict__.get(key)
+            if val is not None:
+                record[key] = val
+
+        # Traceback em caso de exceção
+        if r.exc_info:
+            record["exception"] = self.formatException(r.exc_info)
+
+        return json.dumps(record, ensure_ascii=False, default=str)
 
 h = logging.StreamHandler()
 h.setFormatter(JSONFormatter())
-logging.basicConfig(handlers=[h], level=logging.INFO)
+logging.basicConfig(handlers=[h], level=logging.INFO, force=True)
 logger = logging.getLogger("ids.api")
 
 # ── Hostname real da máquina ──────────────────────────────────────
@@ -270,21 +310,22 @@ def _get_real_hostname() -> str:
 REAL_HOSTNAME = get_hostname()
 logger.info("Hostname detectado: %s", REAL_HOSTNAME)
 
-# ── Audit log ─────────────────────────────────────────────────────
+# ── Audit log (JSON estruturado) ──────────────────────────────────
 _audit_logger = logging.getLogger("netguard.audit")
 _audit_file   = os.environ.get("IDS_AUDIT_LOG", "netguard_audit.log")
 if not _audit_logger.handlers:
     _ah = logging.FileHandler(_audit_file, encoding="utf-8")
-    _ah.setFormatter(logging.Formatter(
-        '%(asctime)s\t%(message)s', datefmt="%Y-%m-%dT%H:%M:%SZ"
-    ))
+    _ah.setFormatter(JSONFormatter())   # mesmo formato JSON estruturado
     _audit_logger.addHandler(_ah)
     _audit_logger.setLevel(logging.INFO)
     _audit_logger.propagate = False
 
 def audit(action: str, actor: str = "system", ip: str = "-", detail: str = ""):
-    """Registra evento no audit log. Formato TSV para fácil parsing."""
-    _audit_logger.info("%s\t%s\t%s\t%s", action, actor, ip, detail)
+    """Registra evento no audit log em JSON estruturado."""
+    _audit_logger.info(
+        action,
+        extra={"event_type": "audit", "actor": actor, "source_ip": ip, "detail": detail}
+    )
 
 
 def _resolve_tenant_id(fallback: str = None) -> str:
@@ -1149,12 +1190,32 @@ def loop_monitor(intervalo=30):
 
 # ── Middleware ────────────────────────────────────────────────────
 @app.before_request
-def before(): request._t = time.monotonic()
+def before():
+    request._t  = time.monotonic()
+    rid = request.headers.get("X-Request-ID") or _uuid_mod.uuid4().hex[:16]
+    request._rid = rid
+    _request_ctx.request_id = rid
+    _request_ctx.tenant_id  = _resolve_tenant_id()
 
 @app.after_request
 def after(resp):
-    ms = round((time.monotonic()-request._t)*1000,2)
+    ms  = round((time.monotonic() - request._t) * 1000, 2)
+    rid = getattr(request, "_rid", "-")
     resp.headers["X-Request-Time-ms"] = str(ms)
+    resp.headers["X-Request-ID"]      = rid
+    # Loga cada request com métricas estruturadas
+    if not request.path.startswith("/api/events/stream"):  # evita flood do SSE
+        logger.info(
+            "%s %s %s",
+            request.method, request.path, resp.status_code,
+            extra={
+                "endpoint":    request.path,
+                "method":      request.method,
+                "status_code": resp.status_code,
+                "duration_ms": ms,
+                "source_ip":   request.remote_addr,
+            }
+        )
     return resp
 
 # ── API routes ────────────────────────────────────────────────────
@@ -4030,6 +4091,14 @@ def webhooks_logs(wid):
         return jsonify({"error": "Webhook Engine indisponível"}), 503
     logs = _get_webhook_engine().recent_logs(wid, limit=30)
     return jsonify({"logs": logs})
+
+@app.route("/api/webhooks/types", methods=["GET"])
+@auth
+def webhooks_types():
+    """Lista os tipos de webhook suportados com instruções de configuração."""
+    if not WEBHOOK_AVAILABLE:
+        return jsonify({"error": "Webhook Engine indisponível"}), 503
+    return jsonify({"types": _get_webhook_engine().supported_types()})
 
 
 # ═══════════════════════════════════════════════════════════════════

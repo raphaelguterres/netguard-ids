@@ -1,6 +1,6 @@
 """
 NetGuard IDS — Webhook Alert Engine
-Envia alertas críticos para Slack, Teams, Discord ou qualquer HTTP endpoint.
+Envia alertas críticos para Slack, Teams, Discord, Telegram, WhatsApp ou qualquer HTTP endpoint.
 """
 from __future__ import annotations  # noqa: F401
 
@@ -133,11 +133,78 @@ def _fmt_generic(event: dict, webhook: dict) -> dict:
     }
 
 
+def _fmt_telegram(event: dict, webhook: dict) -> dict:
+    """Formata para a Bot API do Telegram (sendMessage com Markdown).
+
+    A URL do webhook deve ser:
+        https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}
+
+    O NetGuard monta o payload como JSON enviado via POST.
+    """
+    sev   = event.get("severity", "info")
+    icons = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢", "info": "🔵"}
+    icon  = icons.get(sev, "⚠️")
+    desc  = event.get("details", {}).get("description", event.get("msg", "sem descrição"))
+    ts    = event.get("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+    text = (
+        f"{icon} *\\[{sev.upper()}\\] {event.get('threat', 'Alerta de Segurança')}*\n\n"
+        f"📡 *IP Origem:* `{event.get('source_ip', '—')}`\n"
+        f"🖥️ *Host:* `{event.get('hostname', '—')}`\n"
+        f"🎯 *Tipo:* `{event.get('event_type', '—')}`\n"
+        f"🕐 *Horário:* `{ts}`\n\n"
+        f"📝 {desc}"
+    )
+    return {
+        "text":       text,
+        "parse_mode": "MarkdownV2",
+    }
+
+
+def _fmt_whatsapp(event: dict, webhook: dict) -> dict:
+    """Formata para a API do WhatsApp Business (Z-API / Twilio / Evolution API).
+
+    A URL e o campo de destino variam por provedor.
+    Formato genérico compatível com Z-API e Evolution:
+        POST {url}
+        Body: {"phone": "{PHONE}", "message": "{TEXT}"}
+
+    Para Twilio:
+        Body: {"To": "whatsapp:+55...", "From": "whatsapp:+1...", "Body": "{TEXT}"}
+
+    Escolha o subtipo via campo `secret` do webhook:
+        secret = "twilio"  → usa formato Twilio
+        secret = ""        → usa Z-API/Evolution (padrão)
+    """
+    sev     = event.get("severity", "info")
+    icons   = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢", "info": "🔵"}
+    icon    = icons.get(sev, "⚠️")
+    desc    = event.get("details", {}).get("description", event.get("msg", "sem descrição"))
+    ts      = event.get("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    subtype = (webhook.get("secret") or "").lower()
+
+    msg = (
+        f"{icon} *[{sev.upper()}] {event.get('threat', 'Alerta NetGuard')}*\n"
+        f"IP: {event.get('source_ip', '—')} | Host: {event.get('hostname', '—')}\n"
+        f"Tipo: {event.get('event_type', '—')} | {ts}\n\n"
+        f"{desc}"
+    )
+
+    if subtype == "twilio":
+        # Twilio WhatsApp — número configurado via URL query param ?To=whatsapp:+55...
+        return {"Body": msg}
+    else:
+        # Z-API / Evolution API — número no campo `phone` da URL
+        return {"message": msg}
+
+
 FORMATTERS = {
-    "slack":   _fmt_slack,
-    "teams":   _fmt_teams,
-    "discord": _fmt_discord,
-    "generic": _fmt_generic,
+    "slack":     _fmt_slack,
+    "teams":     _fmt_teams,
+    "discord":   _fmt_discord,
+    "telegram":  _fmt_telegram,
+    "whatsapp":  _fmt_whatsapp,
+    "generic":   _fmt_generic,
 }
 
 
@@ -279,13 +346,34 @@ class WebhookEngine:
         self._bump(wh["id"], hit=False)
 
     def _send(self, wh: dict, event: dict):
-        fmt     = FORMATTERS.get(wh.get("type", "generic"), _fmt_generic)
-        payload = json.dumps(fmt(event, wh)).encode("utf-8")
+        wtype   = wh.get("type", "generic")
+        fmt     = FORMATTERS.get(wtype, _fmt_generic)
+        body    = fmt(event, wh)
+        url     = wh["url"]
         headers = {"Content-Type": "application/json", "User-Agent": "NetGuard-IDS/3.0"}
-        if wh.get("secret"):
+
+        # Telegram: injeta chat_id na URL se ainda não estiver lá
+        if wtype == "telegram" and "chat_id=" not in url:
+            chat_id = wh.get("secret", "")   # secret = chat_id para Telegram
+            if chat_id:
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}chat_id={chat_id}"
+
+        # WhatsApp (Twilio): auth via Basic no header
+        if wtype == "whatsapp" and (wh.get("secret") or "").lower() == "twilio":
+            # secret deve ser "twilio:SID:AUTH_TOKEN"
+            parts = (wh.get("secret", "") + "::").split(":")
+            if len(parts) >= 3:
+                import base64 as _b64
+                creds = _b64.b64encode(f"{parts[1]}:{parts[2]}".encode()).decode()
+                headers["Authorization"] = f"Basic {creds}"
+
+        if wtype not in ("telegram", "whatsapp") and wh.get("secret"):
             headers["X-NetGuard-Secret"] = wh["secret"]
+
+        payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
         try:
-            req  = urllib.request.Request(wh["url"], data=payload, headers=headers, method="POST")
+            req  = urllib.request.Request(url, data=payload, headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
                 return True, resp.status, None
         except urllib.error.HTTPError as e:
@@ -326,12 +414,29 @@ class WebhookEngine:
             "event_type": "test",
             "source_ip":  "192.168.1.100",
             "hostname":   "netguard-host",
+            "msg":        "Evento de teste",
             "timestamp":  datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "details":    {"description": "Este é um evento de teste gerado manualmente pelo NetGuard IDS."},
+            "details":    {
+                "description": (
+                    "✅ Integração funcionando! Este é um evento de teste gerado pelo NetGuard IDS. "
+                    f"Canal: {wh.get('type','generic').upper()}"
+                )
+            },
         }
         ok, code, err = self._send(wh, test_event)
         self._log(wh, test_event, ok, code, err)
         return {"ok": ok, "status_code": code, "error": err}
+
+    def supported_types(self) -> list:
+        """Lista os tipos de webhook suportados com instruções de configuração."""
+        return [
+            {"type": "slack",    "label": "Slack",          "url_example": "https://hooks.slack.com/services/T.../B.../...", "secret_hint": ""},
+            {"type": "teams",    "label": "Microsoft Teams", "url_example": "https://outlook.office.com/webhook/...", "secret_hint": ""},
+            {"type": "discord",  "label": "Discord",        "url_example": "https://discord.com/api/webhooks/...", "secret_hint": ""},
+            {"type": "telegram", "label": "Telegram Bot",   "url_example": "https://api.telegram.org/bot{TOKEN}/sendMessage", "secret_hint": "chat_id (ex: -1001234567890)"},
+            {"type": "whatsapp", "label": "WhatsApp (Z-API/Evolution)", "url_example": "https://api.z-api.io/instances/{ID}/token/{TOKEN}/send-text", "secret_hint": "Deixe vazio para Z-API; 'twilio:SID:TOKEN' para Twilio"},
+            {"type": "generic",  "label": "HTTP Genérico",  "url_example": "https://seu-sistema.com/webhook", "secret_hint": "Enviado no header X-NetGuard-Secret"},
+        ]
 
     @staticmethod
     def _row(row) -> Optional[dict]:
