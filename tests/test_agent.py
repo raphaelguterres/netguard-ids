@@ -94,7 +94,7 @@ class TestCollect:
 
 class TestSend:
     def test_send_success_increments_sent(self, agent):
-        import urllib.request
+        import urllib.request  # noqa: F401
         mock_resp = MagicMock()
         mock_resp.read.return_value = json.dumps({"status":"ok"}).encode()
         mock_cm = MagicMock()

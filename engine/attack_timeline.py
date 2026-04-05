@@ -9,6 +9,12 @@ from models.attack_timeline_model import AttackTimeline, TimelineStep
 
 EVENT_PHASE_MAP = {
 
+    # RECONNAISSANCE
+    "port_scan_suspected": "Reconnaissance",
+    "port_scan": "Reconnaissance",
+    "network_scan": "Reconnaissance",
+    "recon": "Reconnaissance",
+
     # PROCESS
     "process_unknown": "Execution",
     "process_external_conn": "Command and Control",

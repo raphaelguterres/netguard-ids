@@ -7,7 +7,7 @@ Repositório oficial: https://github.com/SigmaHQ/sigma
 """
 
 import re
-import os
+import os  # noqa: F401
 import json  # noqa: F401
 import yaml
 import logging

@@ -4,7 +4,7 @@ Monitor de rede real + API REST + Dashboard executivo.
 Um único processo. Sem simulador. Sem dados falsos.
 """
 
-import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress
+import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress  # noqa: F401
 from platform_utils import (  # noqa: F401
     OS, IS_WINDOWS, IS_LINUX,
     get_processes, get_pid_name_map, get_listen_ports,
@@ -741,7 +741,7 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = ""):
             already = any(e.threat_name == rule.title for e in eventos)
             if not already:
                 # Injeta como detecção sintética
-                from ids_engine import Detection
+                from ids_engine import Detection  # noqa: F401
                 try:
                     fake_ctx = {"field": field, "sigma": True}
                     synthetic = ids.analyze(
@@ -2575,7 +2575,7 @@ def _health_inner():
     HTTP 200 = tudo OK | HTTP 503 = algum subsistema critico down.
     """
     from datetime import timezone as _tz
-    import time as _time
+    import time as _time  # noqa: F401
 
     # ── Banco de dados ─────────────────────────────────────────────
     try:
@@ -2926,7 +2926,7 @@ def stripe_webhook():
       customer.subscription.deleted  → desativa tenant
       customer.subscription.updated  → atualiza plano
     """
-    import uuid
+    import uuid  # noqa: F401
     payload    = request.get_data()
     sig_header = request.headers.get("Stripe-Signature", "")
 
@@ -3001,7 +3001,7 @@ def demo_access():
     Cria o tenant demo (se não existir), seta cookie e redireciona ao dashboard.
     Desative com IDS_DEMO_DISABLED=true em produção.
     """
-    from flask import make_response, redirect as _redir
+    from flask import make_response, redirect as _redir  # noqa: F401
     if os.environ.get("IDS_DEMO_DISABLED", "false").lower() == "true":
         return redirect("/pricing")
 
@@ -3051,7 +3051,7 @@ def demo_reset():
     if os.environ.get("IDS_DEMO_DISABLED", "false").lower() == "true":
         return jsonify({"error": "Demo desativado"}), 403
     try:
-        from demo_seed import seed_demo, clear_demo, DEMO_TOKEN
+        from demo_seed import seed_demo, clear_demo, DEMO_TOKEN  # noqa: F401
         clear_demo(repo, verbose=False)
         result = seed_demo(repo, n_events=350, verbose=False)
         audit("DEMO_RESET", ip=request.remote_addr or "-")
@@ -3076,7 +3076,7 @@ def alerts_test():
         ALERT_EMAIL_ENABLED=true
         SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
     """
-    from alerts.email_alert import get_alert_manager, ALERT_ENABLED, SMTP_USER
+    from alerts.email_alert import get_alert_manager, ALERT_ENABLED, SMTP_USER  # noqa: F401
 
     if not ALERT_ENABLED:
         return jsonify({

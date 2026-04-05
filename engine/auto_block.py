@@ -15,9 +15,9 @@ Compatível com:
   - macOS:   pfctl (básico)
 """
 
-import os
+import os  # noqa: F401
 import sys  # noqa: F401
-import time
+import time  # noqa: F401
 import logging
 import threading
 import subprocess

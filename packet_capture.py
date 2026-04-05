@@ -165,7 +165,7 @@ class PacketCapture:
         self._pacotes_capturados += 1
 
         try:
-            from scapy.all import IP, TCP, UDP, ARP, DNS, Raw, ICMP
+            from scapy.all import IP, TCP, UDP, ARP, DNS, Raw, ICMP  # noqa: F401
 
             # ── ARP Spoofing ──────────────────────────────────────
             if pkt.haslayer(ARP) and pkt[ARP].op == 2:  # ARP reply
@@ -281,7 +281,7 @@ class PacketCapture:
                 )
 
     def _checar_udp(self, pkt, src_ip, dst_ip):
-        from scapy.all import UDP, DNS, DNSQR
+        from scapy.all import UDP, DNS, DNSQR  # noqa: F401
 
         # ── DNS Tunneling / exfiltração via DNS ───────────────────
         if pkt.haslayer(DNS) and pkt[DNS].qr == 0:  # DNS query
@@ -358,7 +358,7 @@ class PacketCapture:
                         )
 
     def _checar_icmp(self, pkt, src_ip):
-        from scapy.all import ICMP
+        from scapy.all import ICMP  # noqa: F401
         # ICMP flood simples
         count = self._syn_counter.adicionar(f"icmp:{src_ip}")
         if count == 100:

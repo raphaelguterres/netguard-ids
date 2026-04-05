@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Optional, Callable, Any
 from dataclasses import dataclass, field  # noqa: F401
 
-from engine.rule_executor import RuleRegistry, ExecutionResult, Alert
+from engine.rule_executor import RuleRegistry, ExecutionResult, Alert  # noqa: F401
 from engine.severity_classifier import classify_severity, is_high_priority
 from engine.baseline_engine import BaselineEngine, get_default_baseline
 

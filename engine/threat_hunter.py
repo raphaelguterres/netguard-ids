@@ -23,7 +23,7 @@ Exemplos:
   conn_count>50 AND severity!="LOW"
 """
 
-import re
+import re  # noqa: F401
 import json
 import logging
 import sqlite3
