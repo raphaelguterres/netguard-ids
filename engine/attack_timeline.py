@@ -1,4 +1,4 @@
-from __future__ import annotations
+from __future__ import annotations  # noqa: F401
 
 from collections import defaultdict
 from typing import Any, Dict, List
