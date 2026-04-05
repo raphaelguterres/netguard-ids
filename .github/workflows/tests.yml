@@ -30,6 +30,7 @@ jobs:
         run: |
           pip install -r requirements.docker.txt
           pip install pytest pytest-cov
+          python -c "import pytest, pytest_cov; print('pytest', pytest.__version__, '| pytest-cov', pytest_cov.__version__)"
 
       - name: Run tests with coverage
         env:
@@ -40,7 +41,7 @@ jobs:
         run: |
           pytest tests/ -v --tb=short \
             --cov=. \
-            --cov-omit="tests/*,*/site-packages/*" \
+            --cov-omit=tests/*,*/site-packages/* \
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml \
             --cov-fail-under=20

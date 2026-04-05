@@ -23,3 +23,7 @@ reportlab==4.2.2
 
 # Banco de dados (PostgreSQL)
 psycopg2-binary==2.9.9
+
+# Testing
+pytest>=7.4
+pytest-cov>=4.1
