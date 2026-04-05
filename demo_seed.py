@@ -194,18 +194,23 @@ def seed_demo(repo, n_events: int = 350, verbose: bool = True,
 
     # Gera eventos com distribuição realista
     events_saved = 0
+    built_events = []
     for _ in range(n_events):
         scenario = random.choices(scenarios, weights=weights, k=1)[0]
         event    = _build_event(scenario, _TENANT_ID)
+        built_events.append(event)
         try:
             _save_raw(repo, event)
             events_saved += 1
         except Exception as e:
             if verbose:
-                print(f"[demo] Erro ao salvar evento: {e}")
+                print(f"[demo] Erro ao salvar evento (repo): {e}")
+
+    # Popula também o DetectionStore (ids_detections.db) — banco lido pelo dashboard
+    ids_saved = _seed_detection_store(built_events, verbose=verbose)
 
     if verbose:
-        print(f"[demo] {events_saved} eventos inseridos para tenant {_TENANT_ID}")
+        print(f"[demo] {events_saved} eventos no EventRepo | {ids_saved} no DetectionStore")
 
     _seed_new_modules(verbose=verbose)
 
@@ -214,6 +219,71 @@ def seed_demo(repo, n_events: int = 350, verbose: bool = True,
         "token":     DEMO_TOKEN,
         "events":    events_saved,
     }
+
+
+def _seed_detection_store(events: list, verbose: bool = False) -> int:
+    """
+    Insere eventos de demo diretamente no DetectionStore (ids_detections.db).
+    Este é o banco lido por /api/detections e /api/statistics no dashboard.
+    """
+    import sqlite3 as _sq
+    import os as _os
+
+    db_path = _os.environ.get("IDS_DB_PATH", "ids_detections.db")
+    SEV_MAP = {"CRITICAL": "critical", "HIGH": "high", "MEDIUM": "medium", "LOW": "low"}
+
+    schema = """
+    CREATE TABLE IF NOT EXISTS detections (
+        detection_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL,
+        threat_name TEXT NOT NULL, severity TEXT NOT NULL,
+        description TEXT, source_ip TEXT, log_entry TEXT,
+        method TEXT, mitre_tactic TEXT, mitre_technique TEXT,
+        status TEXT DEFAULT 'active', analyst_note TEXT DEFAULT '',
+        confidence REAL DEFAULT 1.0, count INTEGER DEFAULT 1,
+        updated_at TEXT
+    );
+    """
+    try:
+        conn = _sq.connect(db_path)
+        conn.executescript(schema)
+        conn.commit()
+        saved = 0
+        for ev in events:
+            sev = SEV_MAP.get(ev.get("severity", "LOW"), "low")
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO detections "
+                    "(detection_id,timestamp,threat_name,severity,description,"
+                    " source_ip,log_entry,method,mitre_tactic,mitre_technique,"
+                    " status,confidence,count,updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        ev["event_id"],
+                        ev["timestamp"],
+                        ev.get("threat_name", "Unknown"),
+                        sev,
+                        ev.get("message", ""),
+                        ev.get("source_ip", ""),
+                        ev.get("message", ""),
+                        ev.get("event_type", "ids"),
+                        "",   # mitre_tactic
+                        "",   # mitre_technique
+                        "active",
+                        round(random.uniform(0.65, 0.99), 2),
+                        1,
+                        ev["timestamp"],
+                    )
+                )
+                saved += 1
+            except Exception:
+                pass
+        conn.commit()
+        conn.close()
+        return saved
+    except Exception as exc:
+        if verbose:
+            print(f"[demo] Aviso DetectionStore: {exc}")
+        return 0
 
 
 def _save_raw(repo, ev: dict) -> None:
@@ -344,10 +414,20 @@ def _seed_new_modules(verbose: bool = False) -> None:
 
 
 def clear_demo(repo, verbose: bool = True) -> None:
-    """Remove todos os eventos do tenant demo."""
+    """Remove todos os eventos do tenant demo (EventRepo + DetectionStore)."""
+    import sqlite3 as _sq, os as _os
     ph  = repo._placeholder()
     sql = f"DELETE FROM events WHERE tenant_id = {ph}"
     repo._exec_sql(sql, (DEMO_TENANT_ID,))
+    # Limpa também o DetectionStore
+    db_path = _os.environ.get("IDS_DB_PATH", "ids_detections.db")
+    try:
+        conn = _sq.connect(db_path)
+        conn.execute("DELETE FROM detections")
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
     if verbose:
         print(f"[demo] Eventos do tenant {DEMO_TENANT_ID} removidos.")
 
