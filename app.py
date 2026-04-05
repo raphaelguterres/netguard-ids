@@ -3122,6 +3122,439 @@ def report_monthly_preview():
     )
 
 
+# ═══════════════════════════════════════════════════════════════════
+# ── IOC Manager API ────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+try:
+    from ioc_manager import get_ioc_manager
+    IOC_AVAILABLE = True
+except Exception as _ioc_err:
+    IOC_AVAILABLE = False
+    print(f"[WARN] IOC Manager: {_ioc_err}")
+
+
+def _get_ioc_mgr():
+    tid = _resolve_tenant_id()
+    db  = os.environ.get("IDS_DB_PATH", "netguard_events.db")
+    return get_ioc_manager(db_path=db, tenant_id=tid)
+
+
+@app.route("/api/ioc", methods=["GET"])
+@auth
+def ioc_list():
+    """Lista IOCs do tenant atual."""
+    if not IOC_AVAILABLE:
+        return jsonify({"error": "IOC Manager não disponível"}), 503
+    ioc_type   = request.args.get("type", "")
+    active_only = request.args.get("active", "true").lower() == "true"
+    limit  = min(int(request.args.get("limit", 500)), 2000)
+    offset = int(request.args.get("offset", 0))
+    mgr    = _get_ioc_mgr()
+    iocs   = mgr.list_iocs(ioc_type=ioc_type, active_only=active_only,
+                            limit=limit, offset=offset)
+    stats  = mgr.count_iocs()
+    return jsonify({"iocs": iocs, "stats": stats, "count": len(iocs)})
+
+
+@app.route("/api/ioc", methods=["POST"])
+@auth
+@csrf_protect
+def ioc_add():
+    """Adiciona um IOC manualmente."""
+    if not IOC_AVAILABLE:
+        return jsonify({"error": "IOC Manager não disponível"}), 503
+    data = request.get_json(force=True) or {}
+    value = (data.get("value") or "").strip()
+    if not value:
+        return jsonify({"error": "Campo 'value' é obrigatório"}), 400
+    try:
+        mgr = _get_ioc_mgr()
+        ioc = mgr.add_ioc(
+            value=value,
+            ioc_type=data.get("ioc_type", ""),
+            threat_name=data.get("threat_name", "Custom IOC"),
+            confidence=int(data.get("confidence", 80)),
+            source=data.get("source", "manual"),
+            tags=data.get("tags", []),
+            notes=data.get("notes", ""),
+        )
+        return jsonify({"ok": True, "ioc": ioc}), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error("IOC add error: %s", e)
+        return jsonify({"error": "Erro interno"}), 500
+
+
+@app.route("/api/ioc/<ioc_id>", methods=["DELETE"])
+@auth
+@csrf_protect
+def ioc_delete(ioc_id):
+    """Remove um IOC."""
+    if not IOC_AVAILABLE:
+        return jsonify({"error": "IOC Manager não disponível"}), 503
+    mgr = _get_ioc_mgr()
+    ok  = mgr.delete_ioc(ioc_id)
+    return jsonify({"ok": ok}), (200 if ok else 404)
+
+
+@app.route("/api/ioc/<ioc_id>/toggle", methods=["POST"])
+@auth
+@csrf_protect
+def ioc_toggle(ioc_id):
+    """Ativa ou desativa um IOC."""
+    if not IOC_AVAILABLE:
+        return jsonify({"error": "IOC Manager não disponível"}), 503
+    data   = request.get_json(force=True) or {}
+    active = bool(data.get("active", True))
+    mgr    = _get_ioc_mgr()
+    ok     = mgr.toggle_ioc(ioc_id, active)
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/ioc/import", methods=["POST"])
+@auth
+@csrf_protect
+def ioc_import():
+    """Importa IOCs via CSV (multipart/form-data ou raw bytes)."""
+    if not IOC_AVAILABLE:
+        return jsonify({"error": "IOC Manager não disponível"}), 503
+    if "file" in request.files:
+        csv_bytes = request.files["file"].read()
+    else:
+        csv_bytes = request.get_data()
+    if not csv_bytes:
+        return jsonify({"error": "Nenhum arquivo enviado"}), 400
+    threat   = request.args.get("threat_name", "Imported IOC")
+    conf     = int(request.args.get("confidence", 80))
+    mgr      = _get_ioc_mgr()
+    result   = mgr.import_csv(csv_bytes, default_threat=threat,
+                               default_confidence=conf)
+    return jsonify(result), 200
+
+
+@app.route("/api/ioc/export", methods=["GET"])
+@auth
+def ioc_export():
+    """Exporta IOCs como CSV."""
+    if not IOC_AVAILABLE:
+        return jsonify({"error": "IOC Manager não disponível"}), 503
+    mgr      = _get_ioc_mgr()
+    csv_data = mgr.export_csv()
+    return Response(
+        csv_data,
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=netguard_iocs.csv"}
+    )
+
+
+@app.route("/api/ioc/hits", methods=["GET"])
+@auth
+def ioc_hits():
+    """Lista hits recentes de IOCs."""
+    if not IOC_AVAILABLE:
+        return jsonify({"hits": []}), 200
+    limit = min(int(request.args.get("limit", 50)), 200)
+    mgr   = _get_ioc_mgr()
+    hits  = mgr.recent_hits(limit=limit)
+    return jsonify({"hits": hits, "count": len(hits)})
+
+
+@app.route("/api/ioc/check", methods=["POST"])
+@auth
+def ioc_check():
+    """Verifica um valor (IP/domínio/hash) contra a lista de IOCs."""
+    if not IOC_AVAILABLE:
+        return jsonify({"hits": []}), 200
+    data = request.get_json(force=True) or {}
+    mgr  = _get_ioc_mgr()
+    hits = mgr.check_all(
+        ip=data.get("ip", ""),
+        domain=data.get("domain", ""),
+        file_hash=data.get("hash", ""),
+    )
+    return jsonify({"hits": hits, "matched": len(hits) > 0})
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ── ML Anomaly API ─────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+try:
+    from engine.ml_anomaly import MLAnomalyEngine
+    _ml_anomaly_engines: dict = {}
+    ML_ANOMALY_AVAILABLE = True
+except Exception as _mla_err:
+    ML_ANOMALY_AVAILABLE = False
+    _ml_anomaly_engines  = {}
+    print(f"[WARN] ML Anomaly: {_mla_err}")
+
+
+def _get_ml_anomaly():
+    tid = _resolve_tenant_id()
+    if tid not in _ml_anomaly_engines:
+        repo = getattr(app, "_repo", None)
+        _ml_anomaly_engines[tid] = MLAnomalyEngine(repo=repo, tenant_id=tid)
+    return _ml_anomaly_engines[tid]
+
+
+@app.route("/api/ml/anomaly/status", methods=["GET"])
+@auth
+def ml_anomaly_status():
+    if not ML_ANOMALY_AVAILABLE:
+        return jsonify({"available": False, "message": "scikit-learn não instalado"}), 200
+    eng = _get_ml_anomaly()
+    return jsonify(eng.status())
+
+
+@app.route("/api/ml/anomaly/train", methods=["POST"])
+@auth
+@csrf_protect
+def ml_anomaly_train():
+    if not ML_ANOMALY_AVAILABLE:
+        return jsonify({"error": "scikit-learn não disponível"}), 503
+    data     = request.get_json(force=True) or {}
+    days_back = int(data.get("days_back", 30))
+    eng      = _get_ml_anomaly()
+    result   = eng.train(days_back=days_back)
+    return jsonify(result)
+
+
+@app.route("/api/ml/anomaly/detect", methods=["GET"])
+@auth
+def ml_anomaly_detect():
+    if not ML_ANOMALY_AVAILABLE:
+        return jsonify({"anomalies": []}), 200
+    eng       = _get_ml_anomaly()
+    anomalies = eng.get_anomalies(limit=50)
+    return jsonify({"anomalies": anomalies, "count": len(anomalies),
+                    "trained": eng._trained})
+
+
+@app.route("/api/ml/anomaly/reset", methods=["POST"])
+@auth
+@csrf_protect
+def ml_anomaly_reset():
+    if not ML_ANOMALY_AVAILABLE:
+        return jsonify({"ok": False}), 503
+    eng = _get_ml_anomaly()
+    eng.reset()
+    return jsonify({"ok": True, "message": "ML Anomaly Engine resetado"})
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ── Compliance Report API ──────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+@app.route("/api/report/compliance")
+@require_session
+def report_compliance():
+    """Gera relatório de conformidade (SOC 2 / PCI DSS / HIPAA) em PDF."""
+    try:
+        from reports.compliance_report import generate_compliance_report
+    except ImportError as e:
+        return jsonify({"error": f"reportlab não instalado: {e}"}), 503
+
+    framework  = request.args.get("framework", "soc2").lower()
+    month      = request.args.get("month", "")
+    org_name   = request.args.get("org", "Organização")
+    tenant_id  = _resolve_tenant_id(request.args.get("tenant_id"))
+    as_inline  = request.args.get("inline", "false").lower() == "true"
+
+    try:
+        repo = getattr(app, "_repo", None)
+        pdf_bytes = generate_compliance_report(
+            repo=repo,
+            tenant_id=tenant_id,
+            framework=framework,
+            month=month,
+            org_name=org_name,
+        )
+    except Exception as e:
+        logger.error("Compliance report error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+    fw_labels = {"soc2": "SOC2", "pci": "PCI-DSS", "hipaa": "HIPAA"}
+    fw_label  = fw_labels.get(framework, framework.upper())
+    if not month:
+        from datetime import datetime, timezone
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+    filename = f"NetGuard-{fw_label}-{month}.pdf"
+
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": (
+                "inline" if as_inline else f'attachment; filename="{filename}"'
+            )
+        },
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ── Custom Rules API ───────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+try:
+    from custom_rules import get_custom_rule_engine
+    CUSTOM_RULES_AVAILABLE = True
+except Exception as _cr_err:
+    CUSTOM_RULES_AVAILABLE = False
+    print(f"[WARN] Custom Rules: {_cr_err}")
+
+
+def _get_cr_engine():
+    tid = _resolve_tenant_id()
+    db  = os.environ.get("IDS_DB_PATH", "netguard_events.db")
+    return get_custom_rule_engine(db_path=db, tenant_id=tid)
+
+
+@app.route("/api/rules/custom", methods=["GET"])
+@auth
+def custom_rules_list():
+    if not CUSTOM_RULES_AVAILABLE:
+        return jsonify({"rules": [], "stats": {}}), 200
+    eng   = _get_cr_engine()
+    rules = eng.list_rules()
+    stats = eng.stats()
+    return jsonify({"rules": rules, "stats": stats, "count": len(rules)})
+
+
+@app.route("/api/rules/custom", methods=["POST"])
+@auth
+@csrf_protect
+def custom_rules_create():
+    if not CUSTOM_RULES_AVAILABLE:
+        return jsonify({"error": "Custom Rules não disponível"}), 503
+    data = request.get_json(force=True) or {}
+    try:
+        eng  = _get_cr_engine()
+        rule = eng.create_rule(
+            name=data.get("name", ""),
+            conditions=data.get("conditions", []),
+            logic=data.get("logic", "AND"),
+            severity=data.get("severity", "MEDIUM"),
+            description=data.get("description", ""),
+            tags=data.get("tags", []),
+        )
+        return jsonify({"ok": True, "rule": rule}), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error("Custom rule create error: %s", e)
+        return jsonify({"error": "Erro interno"}), 500
+
+
+@app.route("/api/rules/custom/<rule_id>", methods=["GET"])
+@auth
+def custom_rules_get(rule_id):
+    if not CUSTOM_RULES_AVAILABLE:
+        return jsonify({"error": "não disponível"}), 503
+    eng  = _get_cr_engine()
+    rule = eng.get_rule(rule_id)
+    if not rule:
+        return jsonify({"error": "Regra não encontrada"}), 404
+    return jsonify(rule)
+
+
+@app.route("/api/rules/custom/<rule_id>", methods=["PUT"])
+@auth
+@csrf_protect
+def custom_rules_update(rule_id):
+    if not CUSTOM_RULES_AVAILABLE:
+        return jsonify({"error": "não disponível"}), 503
+    data = request.get_json(force=True) or {}
+    try:
+        eng  = _get_cr_engine()
+        rule = eng.update_rule(rule_id, **data)
+        if not rule:
+            return jsonify({"error": "Regra não encontrada"}), 404
+        return jsonify({"ok": True, "rule": rule})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/rules/custom/<rule_id>", methods=["DELETE"])
+@auth
+@csrf_protect
+def custom_rules_delete(rule_id):
+    if not CUSTOM_RULES_AVAILABLE:
+        return jsonify({"error": "não disponível"}), 503
+    eng = _get_cr_engine()
+    ok  = eng.delete_rule(rule_id)
+    return jsonify({"ok": ok}), (200 if ok else 404)
+
+
+@app.route("/api/rules/custom/<rule_id>/toggle", methods=["POST"])
+@auth
+@csrf_protect
+def custom_rules_toggle(rule_id):
+    if not CUSTOM_RULES_AVAILABLE:
+        return jsonify({"error": "não disponível"}), 503
+    data    = request.get_json(force=True) or {}
+    enabled = bool(data.get("enabled", True))
+    eng     = _get_cr_engine()
+    rule    = eng.toggle_rule(rule_id, enabled)
+    return jsonify({"ok": rule is not None, "rule": rule})
+
+
+@app.route("/api/rules/custom/test", methods=["POST"])
+@auth
+def custom_rules_test():
+    """Testa uma regra (ainda não salva) contra eventos recentes."""
+    if not CUSTOM_RULES_AVAILABLE:
+        return jsonify({"results": []}), 200
+    data = request.get_json(force=True) or {}
+    rule = data.get("rule", {})
+    if not rule:
+        return jsonify({"error": "Campo 'rule' obrigatório"}), 400
+    # Carrega últimos 20 eventos para teste
+    try:
+        repo   = getattr(app, "_repo", None)
+        tid    = _resolve_tenant_id()
+        events = repo.query(tenant_id=tid, limit=20) if repo else []
+        sample = [e if isinstance(e, dict) else vars(e) for e in events]
+    except Exception:
+        sample = []
+    from custom_rules import evaluate_rule
+    results = [
+        {
+            "event_id":   ev.get("event_id", ""),
+            "event_type": ev.get("event_type", ""),
+            "severity":   ev.get("severity", ""),
+            "host_id":    ev.get("host_id", ""),
+            "matched":    evaluate_rule(rule, ev),
+        }
+        for ev in sample
+    ]
+    matched = sum(1 for r in results if r["matched"])
+    return jsonify({"results": results, "matched": matched, "total": len(results)})
+
+
+@app.route("/api/rules/operators", methods=["GET"])
+def custom_rules_operators():
+    """Retorna operadores e campos disponíveis para criação de regras."""
+    from custom_rules import OPERATORS, SEVERITY_LEVELS
+    return jsonify({
+        "operators": sorted(OPERATORS),
+        "severity_levels": list(SEVERITY_LEVELS),
+        "fields": [
+            {"field": "severity",   "type": "string",  "example": "HIGH"},
+            {"field": "event_type", "type": "string",  "example": "process_unknown"},
+            {"field": "source",     "type": "string",  "example": "SOC"},
+            {"field": "host_id",    "type": "string",  "example": "server-01"},
+            {"field": "rule_name",  "type": "string",  "example": "Unknown Process"},
+            {"field": "raw",        "type": "string",  "example": "powershell"},
+            {"field": "hour",       "type": "number",  "example": 3},
+            {"field": "weekday",    "type": "number",  "example": 6},
+            {"field": "details.process", "type": "string", "example": "cmd.exe"},
+            {"field": "details.cpu",     "type": "number", "example": 95},
+            {"field": "details.ip",      "type": "string", "example": "1.2.3.4"},
+        ],
+        "logic_options": ["AND", "OR"],
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════
+
 @app.route("/")
 @app.route("/dashboard")
 @require_session

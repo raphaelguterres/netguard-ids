@@ -395,6 +395,99 @@ footer p{font-size:.83rem;color:var(--muted);margin-bottom:.3rem}
   .mock-grid2{grid-template-columns:1fr}
   .report-inner{grid-template-columns:1fr}
   .form-row{grid-template-columns:1fr}
+  .novo-grid{grid-template-columns:1fr!important}
+  .novo-card{flex-direction:column!important;gap:1.2rem!important}
+  .novo-visual{width:100%!important;min-height:160px!important}
+}
+
+/* ── Novidades ────────────────────────────────────────────── */
+.novo-section{
+  padding:5rem 2rem;
+  background:linear-gradient(180deg,var(--bg) 0%,#0a0f17 100%);
+  border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);
+  position:relative;overflow:hidden;
+}
+.novo-section::before{
+  content:'';position:absolute;top:-200px;right:-200px;
+  width:600px;height:600px;border-radius:50%;
+  background:radial-gradient(circle,rgba(88,166,255,.06) 0%,transparent 70%);
+  pointer-events:none;
+}
+.novo-badge{
+  display:inline-flex;align-items:center;gap:.5rem;
+  background:linear-gradient(135deg,rgba(88,166,255,.15),rgba(188,140,255,.15));
+  border:1px solid rgba(88,166,255,.35);
+  border-radius:999px;padding:.35rem 1rem;
+  font-size:.75rem;font-weight:700;letter-spacing:.08em;
+  color:var(--blue);text-transform:uppercase;margin-bottom:1.2rem;
+}
+.novo-badge .spark{
+  width:8px;height:8px;border-radius:50%;
+  background:var(--blue);
+  animation:spark 1.2s ease-in-out infinite;
+}
+@keyframes spark{
+  0%,100%{transform:scale(1);opacity:1}
+  50%{transform:scale(1.6);opacity:.5}
+}
+.novo-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:1.5rem;margin-top:3rem;
+}
+.novo-card{
+  display:flex;gap:2rem;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:14px;padding:1.8rem;
+  transition:border-color .2s,transform .2s;
+  position:relative;overflow:hidden;
+}
+.novo-card::before{
+  content:'NOVO';
+  position:absolute;top:14px;right:14px;
+  font-size:.6rem;font-weight:800;letter-spacing:.12em;
+  padding:.2rem .55rem;border-radius:4px;
+}
+.novo-card:nth-child(1){border-color:rgba(248,81,73,.25)}
+.novo-card:nth-child(1)::before{background:rgba(248,81,73,.18);color:#f85149}
+.novo-card:nth-child(1):hover{border-color:rgba(248,81,73,.5);transform:translateY(-3px)}
+.novo-card:nth-child(2){border-color:rgba(88,166,255,.25)}
+.novo-card:nth-child(2)::before{background:rgba(88,166,255,.18);color:var(--blue)}
+.novo-card:nth-child(2):hover{border-color:rgba(88,166,255,.5);transform:translateY(-3px)}
+.novo-card:nth-child(3){border-color:rgba(63,185,80,.25)}
+.novo-card:nth-child(3)::before{background:rgba(63,185,80,.18);color:var(--green)}
+.novo-card:nth-child(3):hover{border-color:rgba(63,185,80,.5);transform:translateY(-3px)}
+.novo-card:nth-child(4){border-color:rgba(188,140,255,.25)}
+.novo-card:nth-child(4)::before{background:rgba(188,140,255,.18);color:#bc8cff}
+.novo-card:nth-child(4):hover{border-color:rgba(188,140,255,.5);transform:translateY(-3px)}
+.novo-visual{
+  width:200px;min-width:200px;
+  border-radius:8px;overflow:hidden;
+  display:flex;flex-direction:column;
+  font-size:.7rem;font-family:'Courier New',monospace;
+}
+.novo-visual-header{
+  padding:.4rem .7rem;
+  font-size:.65rem;font-weight:700;letter-spacing:.06em;
+}
+.novo-visual-body{padding:.6rem .7rem;display:flex;flex-direction:column;gap:.35rem;flex:1}
+.novo-visual-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:.25rem .4rem;border-radius:3px;
+}
+.novo-tag{
+  font-size:.6rem;font-weight:700;letter-spacing:.06em;
+  padding:.15rem .45rem;border-radius:3px;
+}
+.novo-info h3{font-size:1.1rem;font-weight:700;margin-bottom:.5rem}
+.novo-info p{color:var(--muted);font-size:.93rem;line-height:1.65;margin-bottom:.9rem}
+.novo-chips{display:flex;flex-wrap:wrap;gap:.4rem}
+.novo-chip{
+  font-size:.7rem;padding:.2rem .6rem;border-radius:4px;
+  background:rgba(255,255,255,.05);border:1px solid var(--border);
+  color:var(--muted);
 }
 </style>
 </head>
@@ -409,6 +502,7 @@ footer p{font-size:.83rem;color:var(--muted);margin-bottom:.3rem}
   <ul class="nav-links">
     <li><a href="#features">Funcionalidades</a></li>
     <li><a href="#relatorio">Relatórios</a></li>
+    <li><a href="#novidades" style="color:var(--blue);font-weight:600">✦ Novidades</a></li>
     <li><a href="#pricing">Planos</a></li>
     <li><a href="#demo">Contato</a></li>
   </ul>
@@ -571,6 +665,118 @@ footer p{font-size:.83rem;color:var(--muted);margin-bottom:.3rem}
         <p>HTTPS com Nginx + Let's Encrypt, headers de segurança (CSP, HSTS, X-Frame), CORS restrito, CSRF protection, rate limiting no login e audit log em TSV.</p>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════ NOVIDADES -->
+<section class="novo-section" id="novidades">
+  <div class="container">
+    <span class="novo-badge">✦ Novidades</span>
+    <h2 style="font-size:2rem;font-weight:700;margin:.6rem 0 .5rem">Recursos que chegaram agora</h2>
+    <p style="color:var(--muted);max-width:560px;margin:0 auto 2.5rem">Quatro módulos enterprise adicionados à plataforma, disponíveis nos planos Pro e Enterprise.</p>
+
+    <div class="novo-grid">
+
+      <!-- ── IOC Manager ── -->
+      <div class="novo-card" style="--c:var(--red)">
+        <div class="novo-visual">
+          <div class="novo-visual-header">☣ IOC Manager</div>
+          <div class="novo-visual-body">
+            <div class="novo-visual-row"><span style="color:var(--red)">●</span> 185.220.101.47 <span style="color:var(--muted);font-size:.7rem">TOR Exit Node</span></div>
+            <div class="novo-visual-row"><span style="color:var(--red)">●</span> evil-c2.ru <span style="color:var(--muted);font-size:.7rem">C2 Domain</span></div>
+            <div class="novo-visual-row"><span style="color:var(--yellow)">●</span> 44d88612fe… <span style="color:var(--muted);font-size:.7rem">Malware Hash</span></div>
+            <div class="novo-visual-row" style="margin-top:.5rem;border-top:1px solid #30363d;padding-top:.4rem;color:var(--red);font-size:.75rem">⚠ 3 hits nas últimas 24h</div>
+          </div>
+        </div>
+        <div class="novo-info">
+          <h3>☣ IOC Manager</h3>
+          <p>Gerencie listas negras de IPs, domínios e hashes maliciosos. Importe feeds de threat intelligence via CSV e detecte indicadores em tempo real.</p>
+          <div class="novo-chips">
+            <span class="novo-chip">IPv4 / IPv6</span>
+            <span class="novo-chip">Domínios</span>
+            <span class="novo-chip">MD5 / SHA256</span>
+            <span class="novo-chip">Import CSV</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── ML Anomaly ── -->
+      <div class="novo-card" style="--c:var(--blue)">
+        <div class="novo-visual">
+          <div class="novo-visual-header">🤖 ML Anomaly</div>
+          <div class="novo-visual-body">
+            <div class="novo-visual-row" style="font-size:.72rem;color:var(--muted)">Isolation Forest · 200 árvores</div>
+            <div class="novo-visual-row" style="margin:.3rem 0">
+              <span style="font-size:.72rem">Score: </span>
+              <span style="color:var(--red);font-weight:700">-0.42</span>
+              <span style="color:var(--red);font-size:.72rem"> ⚠ ANOMALIA</span>
+            </div>
+            <div class="novo-visual-row" style="font-size:.7rem;color:var(--muted)">↑ critical_count: 18 (usual: 2)</div>
+            <div class="novo-visual-row" style="font-size:.7rem;color:var(--muted)">↑ unique_ips: 47 (usual: 8)</div>
+            <div class="novo-visual-row" style="font-size:.7rem;color:var(--muted)">↑ network_alerts: 31 (usual: 5)</div>
+          </div>
+        </div>
+        <div class="novo-info">
+          <h3>🤖 ML Anomaly Detection</h3>
+          <p>Motor de machine learning baseado em Isolation Forest que aprende o comportamento normal da sua rede e dispara alertas quando detecta padrões anômalos.</p>
+          <div class="novo-chips">
+            <span class="novo-chip">Isolation Forest</span>
+            <span class="novo-chip">Auto-treino</span>
+            <span class="novo-chip">Explicabilidade</span>
+            <span class="novo-chip">Tempo real</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Compliance PDF ── -->
+      <div class="novo-card" style="--c:var(--green)">
+        <div class="novo-visual">
+          <div class="novo-visual-header">📋 Compliance Report</div>
+          <div class="novo-visual-body">
+            <div class="novo-visual-row" style="font-size:.72rem;display:flex;justify-content:space-between"><span>CC6.1 Acesso Lógico</span><span style="color:var(--green)">✔ CONFORME</span></div>
+            <div class="novo-visual-row" style="font-size:.72rem;display:flex;justify-content:space-between"><span>CC7.2 Monitoramento</span><span style="color:var(--green)">✔ CONFORME</span></div>
+            <div class="novo-visual-row" style="font-size:.72rem;display:flex;justify-content:space-between"><span>CC9.1 Gestão de Riscos</span><span style="color:var(--yellow)">~ PARCIAL</span></div>
+            <div class="novo-visual-row" style="font-size:.72rem;display:flex;justify-content:space-between"><span>A1.1 Disponibilidade</span><span style="color:var(--red)">✗ ATENÇÃO</span></div>
+            <div class="novo-visual-row" style="margin-top:.4rem;font-size:.7rem;color:var(--muted)">SOC 2 · PCI-DSS · HIPAA</div>
+          </div>
+        </div>
+        <div class="novo-info">
+          <h3>📋 Relatórios de Compliance</h3>
+          <p>Gere relatórios PDF executivos para SOC 2, PCI-DSS e HIPAA com evidências coletadas automaticamente dos seus eventos de segurança.</p>
+          <div class="novo-chips">
+            <span class="novo-chip">SOC 2</span>
+            <span class="novo-chip">PCI-DSS</span>
+            <span class="novo-chip">HIPAA</span>
+            <span class="novo-chip">PDF Automático</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Custom Rules ── -->
+      <div class="novo-card" style="--c:#a371f7">
+        <div class="novo-visual">
+          <div class="novo-visual-header">⚙ Custom Rules</div>
+          <div class="novo-visual-body">
+            <div class="novo-visual-row" style="font-size:.72rem"><span style="color:#a371f7">■</span> Acesso fora do horário <span style="color:var(--red);font-size:.68rem">HIGH</span></div>
+            <div class="novo-visual-row" style="font-size:.68rem;color:var(--muted);margin-left:.8rem">hour between [0,6] AND event_type contains login</div>
+            <div class="novo-visual-row" style="font-size:.72rem;margin-top:.3rem"><span style="color:#a371f7">■</span> Brute Force SSH <span style="color:var(--red);font-size:.68rem">CRITICAL</span></div>
+            <div class="novo-visual-row" style="font-size:.68rem;color:var(--muted);margin-left:.8rem">source eq 22 AND details.attempts gte 10</div>
+            <div class="novo-visual-row" style="margin-top:.4rem;font-size:.7rem;color:var(--muted)">14 operadores · lógica AND/OR</div>
+          </div>
+        </div>
+        <div class="novo-info">
+          <h3>⚙ Regras Customizadas</h3>
+          <p>Crie suas próprias regras de detecção sem código. Combine condições com lógica AND/OR, teste antes de ativar e acompanhe os hits em tempo real.</p>
+          <div class="novo-chips">
+            <span class="novo-chip">14 Operadores</span>
+            <span class="novo-chip">AND / OR</span>
+            <span class="novo-chip">Teste ao vivo</span>
+            <span class="novo-chip">Sem código</span>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /novo-grid -->
   </div>
 </section>
 

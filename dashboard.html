@@ -1729,6 +1729,10 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
     <div class="tab" onclick="goPage('yara',this)" title="YARA">🦠 YARA</div>
     <div class="tab" onclick="goPage('dns',this)" title="DNS Monitor">🌐 DNS</div>
     <div class="tab" onclick="goPage('honeypot',this)" title="Honeypot">🍯 HONEYPOT</div>
+    <div class="tab" onclick="goPage('ioc',this)" title="IOC Manager">☣ IOCs</div>
+    <div class="tab" onclick="goPage('ml-anomaly',this)" title="ML Anomalias">🤖 ML Anomaly</div>
+    <div class="tab" onclick="goPage('compliance',this)" title="Conformidade">📋 Compliance</div>
+    <div class="tab" onclick="goPage('custom-rules',this)" title="Regras Customizadas">⚙ My Rules</div>
   </div>
   <button class="tab-scroll-btn" id="tab-scroll-right" onclick="scrollTabs(200)" title="Mais abas →">›</button>
 </div>
@@ -2738,6 +2742,18 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
   </div>
 </div>
 
+<!-- ── IOC MANAGER ───────────────────────────────────────────────── -->
+<div class="page" id="p-ioc"></div>
+
+<!-- ── ML ANOMALY ────────────────────────────────────────────────── -->
+<div class="page" id="p-ml-anomaly"></div>
+
+<!-- ── COMPLIANCE ────────────────────────────────────────────────── -->
+<div class="page" id="p-compliance"></div>
+
+<!-- ── CUSTOM RULES ──────────────────────────────────────────────── -->
+<div class="page" id="p-custom-rules"></div>
+
 <!-- ── STATS ───────────────────────────────────────────────────────── -->
 <div class="page" id="p-stats">
   <div class="sp"><div class="ph"><span class="ph-t">Top Ameaças</span></div><div class="sp-body" id="st-thr"><div class="empty"><span>Sem dados</span></div></div></div>
@@ -2822,6 +2838,10 @@ function goPage(name,el){
   if(name==='yara')        loadYara();
   if(name==='dns')         loadDNS();
   if(name==='honeypot')    loadHoneypot();
+  if(name==='ioc')         loadIOC();
+  if(name==='ml-anomaly')  loadMLAnomaly();
+  if(name==='compliance')  loadCompliance();
+  if(name==='custom-rules') loadCustomRules();
   if(name==='geomap'){
     loadGeo();
     if(liveInterval)clearInterval(liveInterval);
@@ -5052,6 +5072,8 @@ setInterval(loadMiniGraph,15000);
 setInterval(loadMiniLogData,8000);
 setInterval(()=>{ if(document.getElementById("p-killchain").classList.contains("on")) loadKillChain(); },15000);
 setInterval(()=>{ if(document.getElementById("p-fail2ban").classList.contains("on")) loadFail2Ban(); },10000);
+setInterval(()=>{ if(document.getElementById("p-ioc")?.classList.contains("on")) loadIOC(); },20000);
+setInterval(()=>{ if(document.getElementById("p-ml-anomaly")?.classList.contains("on")) loadMLAnomaly(); },15000);
 
 // Sigma stats
 (async()=>{
@@ -5063,6 +5085,399 @@ setInterval(()=>{ if(document.getElementById("p-fail2ban").classList.contains("o
   const o=await api('/owasp/stats');
   if(o)$('intel-engine','Sigma+OWASP');
 })();
+
+// ═══════════════════════════════════════════════════════════════
+// ── IOC MANAGER ───────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+async function loadIOC(){
+  const d=await api('/ioc?active=false&limit=500');
+  const pg=document.getElementById('p-ioc');
+  if(!pg)return;
+  const iocs=d?.iocs||[], stats=d?.stats||{};
+  const total=stats.total||0, active=stats.active||0;
+  const byType=stats.by_type||{};
+  pg.innerHTML=`
+  <div style="padding:16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;height:100%">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <span style="font-family:var(--head);font-size:13px;color:var(--cyn)">☣ IOC Manager — Indicadores de Comprometimento</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <input id="ioc-file" type="file" accept=".csv,.txt" style="display:none" onchange="importIOC(this)">
+        <button class="fbtn" onclick="document.getElementById('ioc-file').click()" style="background:rgba(0,200,255,.12);border-color:rgba(0,200,255,.3)">⬆ Importar CSV</button>
+        <button class="fbtn" onclick="window.open('/api/ioc/export','_blank')" style="background:rgba(0,200,255,.08)">⬇ Exportar</button>
+        <button class="fbtn" onclick="showAddIOC()">+ Adicionar</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
+      ${[['Total',total,'var(--cyn)'],['Ativos',active,'#3fb950'],
+         ['IPs',(byType.ip?.active||0),'#f85149'],['Domínios',(byType.domain?.active||0),'#d29922'],
+         ['Hashes',(byType.hash?.active||0),'#bc8cff']].map(([l,n,c])=>`
+        <div style="background:#06101e;border:1px solid #102840;border-radius:4px;padding:10px;text-align:center">
+          <div style="font-family:var(--head);font-size:20px;color:${c}">${n}</div>
+          <div style="font-size:8px;color:var(--txt3);text-transform:uppercase">${l}</div>
+        </div>`).join('')}
+    </div>
+    <div id="add-ioc-form" style="display:none;background:#06101e;border:1px solid rgba(0,200,255,.3);border-radius:4px;padding:12px;gap:8px;flex-wrap:wrap">
+      <div style="font-size:9px;color:var(--cyn);font-weight:700;width:100%;margin-bottom:4px">ADICIONAR IOC</div>
+      <input id="ioc-val"     placeholder="IP, domínio ou hash" style="flex:1;min-width:180px;background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:6px 8px;color:var(--txt);font-size:9px">
+      <select id="ioc-type"   style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:6px 8px;color:var(--txt);font-size:9px">
+        <option value="">Auto-detectar</option><option value="ip">IP</option><option value="domain">Domínio</option><option value="hash">Hash</option>
+      </select>
+      <input id="ioc-threat"  placeholder="Nome da ameaça" style="flex:1;min-width:140px;background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:6px 8px;color:var(--txt);font-size:9px">
+      <input id="ioc-conf"    placeholder="Confiança (0-100)" type="number" min="0" max="100" value="80" style="width:120px;background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:6px 8px;color:var(--txt);font-size:9px">
+      <button class="fbtn" onclick="addIOC()" style="background:rgba(63,185,80,.15);border-color:#3fb950">✓ Salvar</button>
+      <button class="fbtn" onclick="document.getElementById('add-ioc-form').style.display='none'">✕</button>
+    </div>
+    <div style="background:#06101e;border:1px solid #102840;border-radius:4px;overflow:auto;flex:1">
+      <table style="width:100%;border-collapse:collapse;font-size:9px">
+        <thead><tr style="background:#0d1117;color:var(--txt3);text-transform:uppercase;font-size:8px">
+          <th style="padding:8px 10px;text-align:left">Valor</th>
+          <th style="padding:8px 10px">Tipo</th>
+          <th style="padding:8px 10px;text-align:left">Ameaça</th>
+          <th style="padding:8px 10px">Confiança</th>
+          <th style="padding:8px 10px">Hits</th>
+          <th style="padding:8px 10px">Status</th>
+          <th style="padding:8px 10px">Ações</th>
+        </tr></thead>
+        <tbody>
+        ${iocs.length===0?`<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--txt3)">Nenhum IOC cadastrado.<br><small>Importe um CSV ou adicione manualmente.</small></td></tr>`
+        :iocs.map(ioc=>{
+          const typeColor={ip:'#f85149',domain:'#d29922',hash:'#bc8cff',url:'#58a6ff'}[ioc.ioc_type]||'var(--cyn)';
+          const confColor=ioc.confidence>=80?'#3fb950':ioc.confidence>=60?'#d29922':'#f85149';
+          return`<tr style="border-top:1px solid #102840;${ioc.active?'':'opacity:.45'}">
+            <td style="padding:7px 10px;font-family:var(--mono);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${ioc.value_raw||ioc.value}">${ioc.value_raw||ioc.value}</td>
+            <td style="padding:7px 10px;text-align:center"><span style="background:rgba(0,0,0,.3);border:1px solid ${typeColor};color:${typeColor};border-radius:3px;padding:2px 6px;font-size:8px">${(ioc.ioc_type||'').toUpperCase()}</span></td>
+            <td style="padding:7px 10px;color:var(--txt2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ioc.threat_name||'—'}</td>
+            <td style="padding:7px 10px;text-align:center;color:${confColor};font-family:var(--head)">${ioc.confidence}%</td>
+            <td style="padding:7px 10px;text-align:center;color:${ioc.hit_count>0?'#f85149':'var(--txt3)'};font-family:var(--head)">${ioc.hit_count||0}</td>
+            <td style="padding:7px 10px;text-align:center">
+              <span style="color:${ioc.active?'#3fb950':'#f85149'}">${ioc.active?'●  Ativo':'○  Inativo'}</span>
+            </td>
+            <td style="padding:7px 10px;text-align:center;white-space:nowrap">
+              <button onclick="toggleIOC('${ioc.ioc_id}',${!ioc.active})" style="background:none;border:none;cursor:pointer;color:var(--txt3);font-size:10px" title="${ioc.active?'Desativar':'Ativar'}">${ioc.active?'⏸':'▶'}</button>
+              <button onclick="deleteIOC('${ioc.ioc_id}')" style="background:none;border:none;cursor:pointer;color:#f85149;font-size:10px" title="Remover">✕</button>
+            </td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+function showAddIOC(){
+  const f=document.getElementById('add-ioc-form');
+  f.style.display=f.style.display==='none'?'flex':'none';
+}
+async function addIOC(){
+  const val=document.getElementById('ioc-val')?.value?.trim();
+  if(!val){toast('Informe um valor','err');return;}
+  const r=await api('/ioc',{method:'POST',body:JSON.stringify({
+    value:val,
+    ioc_type:document.getElementById('ioc-type')?.value||'',
+    threat_name:document.getElementById('ioc-threat')?.value||'Custom IOC',
+    confidence:parseInt(document.getElementById('ioc-conf')?.value||80),
+  })});
+  if(r?.ok){toast('IOC adicionado!','ok');document.getElementById('add-ioc-form').style.display='none';loadIOC();}
+  else toast(r?.error||'Erro ao adicionar','err');
+}
+async function deleteIOC(id){
+  if(!confirm('Remover este IOC?'))return;
+  await api(`/ioc/${id}`,{method:'DELETE'});
+  toast('Removido','ok');loadIOC();
+}
+async function toggleIOC(id,active){
+  await api(`/ioc/${id}/toggle`,{method:'POST',body:JSON.stringify({active})});
+  loadIOC();
+}
+async function importIOC(input){
+  const file=input.files[0];if(!file)return;
+  const fd=new FormData();fd.append('file',file);
+  toast('Importando IOCs...','ok');
+  const r=await fetch('/api/ioc/import',{method:'POST',body:fd});
+  const d=await r.json();
+  toast(`✓ ${d.imported} importados, ${d.skipped} ignorados`,'ok');
+  input.value='';
+  loadIOC();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ── ML ANOMALY ────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+async function loadMLAnomaly(){
+  const [status,detect]=await Promise.all([api('/ml/anomaly/status'),api('/ml/anomaly/detect')]);
+  const pg=document.getElementById('p-ml-anomaly');
+  if(!pg)return;
+  const anomalies=detect?.anomalies||[];
+  const sevColor=s=>s==='CRITICAL'?'var(--red)':s==='HIGH'?'var(--ora)':'var(--yel)';
+  pg.innerHTML=`
+  <div style="padding:16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;height:100%">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <span style="font-family:var(--head);font-size:13px;color:var(--cyn)">🤖 ML Anomaly Detection — Isolation Forest</span>
+      <div style="display:flex;gap:6px">
+        <button class="fbtn" onclick="trainMLAnomaly()" style="background:rgba(0,200,255,.12);border-color:rgba(0,200,255,.3)">⚡ Treinar Modelo</button>
+        <button class="fbtn" onclick="loadMLAnomaly()">↻ Atualizar</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+      ${[
+        ['Disponível',status?.available?'Sim':'Não',status?.available?'#3fb950':'#f85149'],
+        ['Treinado',status?.trained?'Sim':'Não ('+((status?.train_size)||0)+' janelas)',status?.trained?'#3fb950':'var(--ora)'],
+        ['Anomalias',anomalies.length,'#f85149'],
+        ['Janelas Vivas',status?.live_windows||0,'var(--cyn)'],
+      ].map(([l,n,c])=>`
+        <div style="background:#06101e;border:1px solid #102840;border-radius:4px;padding:10px;text-align:center">
+          <div style="font-family:var(--head);font-size:16px;color:${c}">${n}</div>
+          <div style="font-size:8px;color:var(--txt3);text-transform:uppercase">${l}</div>
+        </div>`).join('')}
+    </div>
+    ${!status?.available?`<div style="background:#1a0d0d;border:1px solid rgba(248,81,73,.3);border-radius:4px;padding:14px;color:var(--txt2);font-size:9px">
+      ⚠ scikit-learn não está instalado. Execute: <code style="background:#0d1117;padding:2px 6px;border-radius:3px;color:var(--cyn)">pip install scikit-learn</code> e reinicie o servidor.
+    </div>`:''}
+    ${status?.available&&!status?.trained?`<div style="background:#0d1a0d;border:1px solid rgba(63,185,80,.3);border-radius:4px;padding:14px;color:var(--txt2);font-size:9px">
+      💡 Clique em <b>Treinar Modelo</b> para analisar os dados históricos e ativar a detecção de anomalias por IA.<br>
+      Mínimo de 24 horas de dados necessário. O modelo usa Isolation Forest (scikit-learn) com ${Math.round((status?.contamination||0.05)*100)}% de contaminação esperada.
+    </div>`:''}
+    ${anomalies.length===0?`<div style="background:#06101e;border:1px solid #102840;border-radius:4px;padding:30px;text-align:center;color:var(--txt3);font-size:9px">
+      ${status?.trained?'✓ Nenhuma anomalia detectada no período atual.':'Treine o modelo para iniciar a detecção.'}
+    </div>`:`
+    <div style="background:#06101e;border:1px solid #102840;border-radius:4px;overflow:auto;flex:1">
+      <div style="padding:8px 10px;font-size:8px;color:var(--txt3);border-bottom:1px solid #102840;text-transform:uppercase">
+        ${anomalies.length} anomalia(s) detectada(s) — quanto menor o score, mais anômalo
+      </div>
+      ${anomalies.map(a=>`
+        <div style="padding:10px 14px;border-bottom:1px solid #102840">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-family:var(--head);color:${sevColor(a.severity)};font-size:11px">${a.anomaly_id}</span>
+            <span style="font-size:8px;color:var(--txt3)">${a.hour}h UTC</span>
+            <span style="font-family:var(--mono);color:#f85149;font-size:10px">score: ${a.score}</span>
+            <span style="background:rgba(248,81,73,.15);border:1px solid rgba(248,81,73,.3);color:#f85149;border-radius:3px;padding:2px 6px;font-size:8px">${a.severity}</span>
+          </div>
+          <div style="font-size:8px;color:var(--txt2);margin-bottom:4px">
+            ${a.event_count} eventos na janela
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">
+            ${(a.factors||[]).map(f=>`<span style="background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.2);border-radius:3px;padding:2px 8px;font-size:8px;color:#f85149">${f}</span>`).join('')}
+          </div>
+        </div>`).join('')}
+    </div>`}
+  </div>`;
+}
+async function trainMLAnomaly(){
+  toast('Treinando modelo ML...','ok');
+  const r=await api('/ml/anomaly/train',{method:'POST',body:JSON.stringify({days_back:30})});
+  if(r?.trained){toast(`✓ Modelo treinado com ${r.windows} janelas!`,'ok');}
+  else toast(r?.message||'Dados insuficientes para treino','err');
+  loadMLAnomaly();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ── COMPLIANCE ────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+function loadCompliance(){
+  const pg=document.getElementById('p-compliance');
+  if(!pg)return;
+  pg.innerHTML=`
+  <div style="padding:20px;display:flex;flex-direction:column;gap:16px;overflow-y:auto;height:100%">
+    <div style="font-family:var(--head);font-size:13px;color:var(--cyn)">📋 Relatórios de Conformidade</div>
+    <div style="color:var(--txt2);font-size:9px;line-height:1.6">
+      Gere relatórios PDF detalhados de conformidade com os principais frameworks de segurança.
+      Cada relatório avalia controles específicos do framework com base nos eventos monitorados pelo NetGuard IDS.
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+      ${[
+        {key:'soc2',label:'SOC 2 Type II',color:'#58a6ff',icon:'🏛',desc:'7 controles | Trust Service Criteria | Segurança, Disponibilidade, Confidencialidade',controls:'CC6.1, CC6.6, CC7.1, CC7.2, CC7.3, A1.1'},
+        {key:'pci',label:'PCI DSS v4.0',color:'#3fb950',icon:'💳',desc:'7 requisitos | Proteção de dados de cartões | Logging, IDS, WAF, Anti-malware',controls:'Req 1, 5, 6, 10, 11'},
+        {key:'hipaa',label:'HIPAA Security Rule',color:'#bc8cff',icon:'🏥',desc:'6 salvaguardas | Proteção de ePHI | Controle de acesso, Auditoria, Transmissão',controls:'164.312(a)(1), 164.312(b), 164.308(a)'},
+      ].map(fw=>`
+        <div style="background:#06101e;border:1px solid ${fw.color}33;border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:20px">${fw.icon}</div>
+          <div style="font-family:var(--head);font-size:11px;color:${fw.color}">${fw.label}</div>
+          <div style="font-size:8px;color:var(--txt2);line-height:1.5">${fw.desc}</div>
+          <div style="font-size:7px;color:var(--txt3)">${fw.controls}</div>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+            <input id="org-${fw.key}" placeholder="Nome da organização" style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:5px 8px;color:var(--txt);font-size:9px;width:100%;box-sizing:border-box">
+            <input id="month-${fw.key}" type="month" style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:5px 8px;color:var(--txt);font-size:9px;width:100%;box-sizing:border-box">
+            <div style="display:flex;gap:6px">
+              <button onclick="downloadCompliance('${fw.key}')" style="flex:1;background:${fw.color}22;border:1px solid ${fw.color}55;border-radius:3px;padding:6px;color:${fw.color};font-size:9px;cursor:pointer;font-family:var(--head)">⬇ BAIXAR PDF</button>
+              <button onclick="previewCompliance('${fw.key}')" style="flex:1;background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:6px;color:var(--txt3);font-size:9px;cursor:pointer">🔍 Preview</button>
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>
+    <div style="background:#06101e;border:1px solid #102840;border-radius:4px;padding:12px;font-size:8px;color:var(--txt3);line-height:1.6">
+      ℹ️ Os relatórios são gerados com base nos eventos registrados pelo NetGuard IDS no período selecionado.
+      Para uma avaliação completa de conformidade, combine o relatório NetGuard com evidências adicionais (políticas, contratos BAA, etc.).
+    </div>
+  </div>`;
+}
+function _complianceUrl(fw){
+  const org=encodeURIComponent(document.getElementById(`org-${fw}`)?.value||'Minha Organização');
+  const month=document.getElementById(`month-${fw}`)?.value||'';
+  return `/api/report/compliance?framework=${fw}&org=${org}${month?'&month='+month:''}`;
+}
+function downloadCompliance(fw){
+  const org=document.getElementById(`org-${fw}`)?.value;
+  if(!org){toast('Informe o nome da organização','err');return;}
+  window.open(_complianceUrl(fw),'_blank');
+  toast(`Gerando relatório ${fw.toUpperCase()}...`,'ok');
+}
+function previewCompliance(fw){
+  const org=document.getElementById(`org-${fw}`)?.value;
+  if(!org){toast('Informe o nome da organização','err');return;}
+  window.open(_complianceUrl(fw)+'&inline=true','_blank');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ── CUSTOM RULES ──────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+let _crFields=[], _crOperators=[];
+async function loadCustomRules(){
+  const [d,meta]=await Promise.all([api('/rules/custom'),api('/rules/operators')]);
+  _crFields=meta?.fields||[];_crOperators=meta?.operators||[];
+  const pg=document.getElementById('p-custom-rules');
+  if(!pg)return;
+  const rules=d?.rules||[], stats=d?.stats||{};
+  const sevColor=s=>({CRITICAL:'var(--red)',HIGH:'var(--ora)',MEDIUM:'var(--yel)',LOW:'var(--cyn)'})[s]||'var(--cyn)';
+  pg.innerHTML=`
+  <div style="padding:16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;height:100%">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <span style="font-family:var(--head);font-size:13px;color:var(--cyn)">⚙ Regras de Detecção Customizadas</span>
+      <button class="fbtn" onclick="showCRForm()" style="background:rgba(0,200,255,.12);border-color:rgba(0,200,255,.3)">+ Nova Regra</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+      ${[['Total de Regras',stats.total_rules||0,'var(--cyn)'],['Regras Ativas',stats.active_rules||0,'#3fb950'],['Total de Hits',stats.total_hits||0,'var(--ora)']].map(([l,n,c])=>`
+        <div style="background:#06101e;border:1px solid #102840;border-radius:4px;padding:10px;text-align:center">
+          <div style="font-family:var(--head);font-size:22px;color:${c}">${n}</div>
+          <div style="font-size:8px;color:var(--txt3);text-transform:uppercase">${l}</div>
+        </div>`).join('')}
+    </div>
+    <div id="cr-form-area" style="display:none;background:#06101e;border:1px solid rgba(0,200,255,.3);border-radius:4px;padding:14px">
+      <div style="font-size:9px;color:var(--cyn);font-weight:700;margin-bottom:10px">NOVA REGRA DE DETECÇÃO</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <input id="cr-name" placeholder="Nome da regra*" style="flex:1;min-width:180px;background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:6px 8px;color:var(--txt);font-size:9px">
+        <select id="cr-sev" style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:6px 8px;color:var(--txt);font-size:9px">
+          <option value="LOW">LOW</option><option value="MEDIUM" selected>MEDIUM</option><option value="HIGH">HIGH</option><option value="CRITICAL">CRITICAL</option>
+        </select>
+        <select id="cr-logic" style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:6px 8px;color:var(--txt);font-size:9px">
+          <option value="AND">AND (todas as condições)</option><option value="OR">OR (qualquer condição)</option>
+        </select>
+      </div>
+      <input id="cr-desc" placeholder="Descrição (opcional)" style="width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:6px 8px;color:var(--txt);font-size:9px;margin-bottom:8px">
+      <div style="font-size:8px;color:var(--txt3);margin-bottom:6px">CONDIÇÕES:</div>
+      <div id="cr-conds"></div>
+      <button onclick="addCRCond()" style="background:rgba(0,200,255,.08);border:1px dashed rgba(0,200,255,.3);border-radius:3px;padding:5px 12px;color:var(--cyn);font-size:9px;cursor:pointer;margin-bottom:10px">+ Adicionar condição</button>
+      <div style="display:flex;gap:6px">
+        <button onclick="saveCRRule()" style="flex:1;background:rgba(63,185,80,.15);border:1px solid #3fb950;border-radius:3px;padding:7px;color:#3fb950;font-size:9px;cursor:pointer;font-family:var(--head)">✓ SALVAR REGRA</button>
+        <button onclick="testCRRule()" style="flex:1;background:rgba(0,200,255,.08);border:1px solid rgba(0,200,255,.3);border-radius:3px;padding:7px;color:var(--cyn);font-size:9px;cursor:pointer">⚡ Testar com eventos recentes</button>
+        <button onclick="document.getElementById('cr-form-area').style.display='none'" style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:7px 12px;color:var(--txt3);font-size:9px;cursor:pointer">✕</button>
+      </div>
+      <div id="cr-test-result" style="display:none;margin-top:8px;background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:8px;font-size:8px;color:var(--txt2)"></div>
+    </div>
+    <div style="background:#06101e;border:1px solid #102840;border-radius:4px;overflow:auto;flex:1">
+      ${rules.length===0?`<div style="text-align:center;padding:40px;color:var(--txt3);font-size:9px">Nenhuma regra customizada criada.<br><small>Clique em "+ Nova Regra" para começar.</small></div>`:`
+      <table style="width:100%;border-collapse:collapse;font-size:9px">
+        <thead><tr style="background:#0d1117;color:var(--txt3);text-transform:uppercase;font-size:8px">
+          <th style="padding:8px 10px;text-align:left">ID</th><th style="padding:8px 10px;text-align:left">Nome</th>
+          <th style="padding:8px 10px">Severidade</th><th style="padding:8px 10px">Lógica</th>
+          <th style="padding:8px 10px">Condições</th><th style="padding:8px 10px">Hits</th>
+          <th style="padding:8px 10px">Status</th><th style="padding:8px 10px">Ações</th>
+        </tr></thead>
+        <tbody>
+        ${rules.map(r=>`<tr style="border-top:1px solid #102840;${r.enabled?'':'opacity:.5'}">
+          <td style="padding:7px 10px;font-family:var(--mono);color:var(--cyn);font-size:8px">${r.rule_id}</td>
+          <td style="padding:7px 10px;max-width:200px">
+            <div style="font-weight:600">${r.name}</div>
+            ${r.description?`<div style="color:var(--txt3);font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px">${r.description}</div>`:''}
+          </td>
+          <td style="padding:7px 10px;text-align:center"><span style="color:${sevColor(r.severity)};font-family:var(--head)">${r.severity}</span></td>
+          <td style="padding:7px 10px;text-align:center;color:var(--txt2)">${r.logic}</td>
+          <td style="padding:7px 10px;text-align:center;color:var(--txt2)">${(r.conditions||[]).length}</td>
+          <td style="padding:7px 10px;text-align:center;color:${r.hit_count>0?'var(--ora)':'var(--txt3)'};font-family:var(--head)">${r.hit_count||0}</td>
+          <td style="padding:7px 10px;text-align:center"><span style="color:${r.enabled?'#3fb950':'#f85149'}">${r.enabled?'●  Ativo':'○  Inativo'}</span></td>
+          <td style="padding:7px 10px;text-align:center;white-space:nowrap">
+            <button onclick="toggleCR('${r.rule_id}',${!r.enabled})" title="${r.enabled?'Desativar':'Ativar'}" style="background:none;border:none;cursor:pointer;color:var(--txt3);font-size:10px">${r.enabled?'⏸':'▶'}</button>
+            <button onclick="deleteCR('${r.rule_id}')" title="Remover" style="background:none;border:none;cursor:pointer;color:#f85149;font-size:10px">✕</button>
+          </td>
+        </tr>`).join('')}
+        </tbody>
+      </table>`}
+    </div>
+  </div>`;
+  // Inicia form se já estava aberto
+  if(document.getElementById('cr-conds')&&document.getElementById('cr-conds').children.length===0) addCRCond();
+}
+let _crCondCount=0;
+function showCRForm(){
+  const f=document.getElementById('cr-form-area');
+  f.style.display=f.style.display==='none'?'block':'none';
+  if(document.getElementById('cr-conds').children.length===0) addCRCond();
+}
+function addCRCond(){
+  const i=_crCondCount++;
+  const fieldOpts=(_crFields.length?_crFields:[
+    {field:'severity'},{field:'event_type'},{field:'host_id'},{field:'raw'},{field:'hour'},{field:'details.process'}
+  ]).map(f=>`<option value="${f.field}">${f.field}</option>`).join('');
+  const opOpts=(_crOperators.length?_crOperators:['eq','ne','contains','gt','lt','regex','in']).map(o=>`<option value="${o}">${o}</option>`).join('');
+  const div=document.createElement('div');
+  div.id=`cr-cond-${i}`;
+  div.style.cssText='display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap;align-items:center';
+  div.innerHTML=`
+    <select id="cf-${i}" style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:5px 8px;color:var(--txt);font-size:9px;flex:1;min-width:120px">${fieldOpts}</select>
+    <select id="co-${i}" style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:5px 8px;color:var(--txt);font-size:9px;width:110px">${opOpts}</select>
+    <input  id="cv-${i}" placeholder="Valor" style="flex:1;min-width:100px;background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:5px 8px;color:var(--txt);font-size:9px">
+    <button onclick="document.getElementById('cr-cond-${i}').remove()" style="background:none;border:none;cursor:pointer;color:#f85149;font-size:12px">✕</button>`;
+  document.getElementById('cr-conds').appendChild(div);
+}
+function _collectCRConds(){
+  const conds=[];
+  document.querySelectorAll('[id^="cr-cond-"]').forEach(div=>{
+    const i=div.id.split('-')[2];
+    const f=document.getElementById(`cf-${i}`)?.value;
+    const o=document.getElementById(`co-${i}`)?.value;
+    const v=document.getElementById(`cv-${i}`)?.value;
+    if(f&&o) conds.push({field:f,op:o,value:v});
+  });
+  return conds;
+}
+async function saveCRRule(){
+  const name=document.getElementById('cr-name')?.value?.trim();
+  if(!name){toast('Informe o nome da regra','err');return;}
+  const conds=_collectCRConds();
+  if(!conds.length){toast('Adicione pelo menos uma condição','err');return;}
+  const r=await api('/rules/custom',{method:'POST',body:JSON.stringify({
+    name,description:document.getElementById('cr-desc')?.value||'',
+    severity:document.getElementById('cr-sev')?.value||'MEDIUM',
+    logic:document.getElementById('cr-logic')?.value||'AND',conditions:conds,
+  })});
+  if(r?.ok){toast('Regra criada!','ok');document.getElementById('cr-form-area').style.display='none';loadCustomRules();}
+  else toast(r?.error||'Erro ao criar regra','err');
+}
+async function testCRRule(){
+  const conds=_collectCRConds();
+  if(!conds.length){toast('Adicione condições primeiro','err');return;}
+  const rule={name:'_test',conditions:conds,logic:document.getElementById('cr-logic')?.value||'AND',severity:'MEDIUM'};
+  const r=await api('/rules/custom/test',{method:'POST',body:JSON.stringify({rule})});
+  const el=document.getElementById('cr-test-result');
+  if(!el)return;
+  el.style.display='block';
+  el.innerHTML=`✓ Testado contra ${r?.total||0} eventos recentes — <b style="color:var(--ora)">${r?.matched||0} matches</b>
+    <div style="margin-top:4px">${(r?.results||[]).slice(0,5).map(x=>`<span style="margin-right:6px;color:${x.matched?'#3fb950':'var(--txt3)'}">${x.matched?'●':'○'} ${x.event_type||'?'} [${x.severity||'?'}]</span>`).join('')}</div>`;
+}
+async function toggleCR(id,enabled){
+  await api(`/rules/custom/${id}/toggle`,{method:'POST',body:JSON.stringify({enabled})});
+  loadCustomRules();
+}
+async function deleteCR(id){
+  if(!confirm('Remover esta regra?'))return;
+  await api(`/rules/custom/${id}`,{method:'DELETE'});
+  toast('Regra removida','ok');loadCustomRules();
+}
 </script>
+
+<!-- ── Páginas das novas abas ─────────────────────────────────── -->
+<style>
+#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules{
+  flex-direction:column;overflow:hidden;
+}
+</style>
 </body>
 </html>
