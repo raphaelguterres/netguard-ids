@@ -4,7 +4,7 @@ Classifica severidade de eventos e alertas de forma determinística.
 Extensível via regras de mapeamento sem alterar lógica central.
 """
 
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 
 # ── Mapeamento por event_type ────────────────────────────────────

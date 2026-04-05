@@ -11,7 +11,7 @@ import time
 import logging
 from collections import defaultdict, deque
 from datetime import datetime
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List  # noqa: F401
 
 logger = logging.getLogger("ids.capture")
 

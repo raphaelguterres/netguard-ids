@@ -12,7 +12,6 @@ O tenant demo usa token fixo: ng_DEMO00000000000000000000000000
 from __future__ import annotations
 
 import os
-import sys
 import uuid
 import random
 import argparse
@@ -189,27 +188,13 @@ def seed_demo(repo, n_events: int = 350, verbose: bool = True) -> dict:
     weights   = [_weight_scenario(s) for s in scenarios]
 
     # Gera eventos com distribuição realista
+    # Usa _save_raw diretamente — o schema real não tem colunas threat_name/source_ip/message
     events_saved = 0
-    batch = []
     for _ in range(n_events):
         scenario = random.choices(scenarios, weights=weights, k=1)[0]
         event    = _build_event(scenario, DEMO_TENANT_ID)
-        batch.append(event)
-
-        if len(batch) >= 50:
-            for ev in batch:
-                try:
-                    repo.save(type("E", (), ev)())
-                except Exception:
-                    # Salva via SQL direto se o save() exigir objeto tipado
-                    _save_raw(repo, ev)
-                    events_saved += 1
-            events_saved += len(batch)
-            batch = []
-
-    for ev in batch:
         try:
-            _save_raw(repo, ev)
+            _save_raw(repo, event)
             events_saved += 1
         except Exception as e:
             if verbose:
@@ -226,28 +211,52 @@ def seed_demo(repo, n_events: int = 350, verbose: bool = True) -> dict:
 
 
 def _save_raw(repo, ev: dict) -> None:
-    """Insere evento diretamente via SQL — compatível com SQLite e PostgreSQL."""
+    """
+    Insere evento diretamente via SQL — mapeado para o schema real de events.
+
+    Mapeamento de campos do seed → colunas do schema:
+        source_ip   → source     (IP de origem)
+        threat_name → rule_name  (nome legível da ameaça)
+        message     → raw        (mensagem formatada)
+        details     → details    (JSON com metadados extras)
+    """
     import json
     ph = repo._placeholder()
-    sql = f"""
-        INSERT OR IGNORE INTO events
-            (event_id, tenant_id, timestamp, event_type, threat_name, severity,
-             source_ip, host_id, message, rule_id, acknowledged, details)
-        VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
-    """ if ph == "?" else f"""
-        INSERT INTO events
-            (event_id, tenant_id, timestamp, event_type, threat_name, severity,
-             source_ip, host_id, message, rule_id, acknowledged, details)
-        VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
-        ON CONFLICT (event_id) DO NOTHING
-    """
-    params = (
-        ev["event_id"], ev["tenant_id"], ev["timestamp"],
-        ev["event_type"], ev["threat_name"], ev["severity"],
-        ev["source_ip"], ev["host_id"], ev["message"], ev["rule_id"],
-        False, json.dumps(ev.get("details", {})),
+    details_json = json.dumps({
+        "threat_name": ev.get("threat_name", ""),
+        "message":     ev.get("message", ""),
+        "demo":        True,
+        **ev.get("details", {}),
+    })
+    sql_sqlite = (
+        f"INSERT OR IGNORE INTO events"
+        f" (event_id, tenant_id, timestamp, host_id, event_type, severity,"
+        f"  source, rule_id, rule_name, raw, details, acknowledged)"
+        f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})"
     )
-    repo._exec_sql(sql.strip(), params)
+    sql_pg = (
+        f"INSERT INTO events"
+        f" (event_id, tenant_id, timestamp, host_id, event_type, severity,"
+        f"  source, rule_id, rule_name, raw, details, acknowledged)"
+        f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})"
+        f" ON CONFLICT (event_id) DO NOTHING"
+    )
+    params = (
+        ev["event_id"],
+        ev["tenant_id"],
+        ev["timestamp"],
+        ev.get("host_id", "unknown"),
+        ev["event_type"],
+        ev["severity"],
+        ev.get("source_ip", ev.get("source", "-")),  # attacking IP → source
+        ev.get("rule_id", ""),
+        ev.get("threat_name", ""),                   # threat name → rule_name
+        ev.get("message", ""),                       # human message → raw
+        details_json,
+        0,                                           # acknowledged = False
+    )
+    sql = sql_sqlite if ph == "?" else sql_pg
+    repo._exec_sql(sql, params)
 
 
 def clear_demo(repo, verbose: bool = True) -> None:

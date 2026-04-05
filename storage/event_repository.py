@@ -15,7 +15,7 @@ import json
 import logging
 import threading
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any  # noqa: F401
 from pathlib import Path
 
 logger = logging.getLogger("netguard.storage")
@@ -305,6 +305,26 @@ class EventRepository:
                     DO UPDATE SET count = count + 1
                 """, (self.tenant_id, date, event.event_type, event.severity))
                 conn.commit()
+
+            # ── Dispara alerta de e-mail para eventos CRITICAL/HIGH ───
+            try:
+                sev = (getattr(event, "severity", None) or "").upper()
+                if sev in ("CRITICAL", "HIGH"):
+                    from alerts.email_alert import get_alert_manager
+                    event_dict = {
+                        "severity":   sev,
+                        "rule_name":  getattr(event, "rule_name", None),
+                        "event_type": getattr(event, "event_type", None),
+                        "source":     getattr(event, "source", None),
+                        "host_id":    getattr(event, "host_id", None),
+                        "timestamp":  getattr(event, "timestamp", None),
+                        "raw":        getattr(event, "raw", None),
+                    }
+                    tenant_dict = self.get_tenant_by_id(self.tenant_id) or {}
+                    get_alert_manager().trigger(event_dict, tenant_dict)
+            except Exception as _alert_err:
+                logger.debug("Alert trigger skipped: %s", _alert_err)
+
             return True
         except Exception as e:
             logger.error("Error saving event: %s", e)
@@ -499,6 +519,27 @@ class EventRepository:
             self.update_baseline(host_id, baseline_type, str(v))
 
     # ── Tenant management ─────────────────────────────────────────
+
+    def get_tenant_by_id(self, tenant_id: str) -> Optional[dict]:
+        """Retorna dados completos do tenant pelo tenant_id (inclui email para alertas)."""
+        ph = self._placeholder()
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"SELECT * FROM tenants WHERE tenant_id={ph} AND active=TRUE", (tenant_id,)
+                )
+                row = cur.fetchone()
+                cur.close()
+                return dict(row) if row else None
+            else:
+                row = self._conn().execute(
+                    f"SELECT * FROM tenants WHERE tenant_id={ph} AND active=1", (tenant_id,)
+                ).fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.debug("get_tenant_by_id error: %s", e)
+            return None
 
     def get_tenant_by_token(self, token: str) -> Optional[dict]:
         """Resolve um token de agente para seu tenant_id e configurações."""

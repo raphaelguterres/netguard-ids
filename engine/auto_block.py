@@ -16,7 +16,7 @@ Compatível com:
 """
 
 import os
-import sys
+import sys  # noqa: F401
 import time
 import logging
 import threading

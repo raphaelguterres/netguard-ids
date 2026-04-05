@@ -19,14 +19,13 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
     HRFlowable, PageBreak, KeepTogether,
 )
-from reportlab.graphics.shapes import Drawing, Rect, String
+from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.barcharts import VerticalBarChart
-from reportlab.graphics import renderPDF
 
 # ── Paleta NetGuard ───────────────────────────────────────────────
 C_BG       = colors.HexColor("#0d1117")
@@ -91,7 +90,8 @@ def _risk_label(events: list[dict]) -> tuple[str, colors.Color]:
 def _top_ips(events: list[dict], n: int = 10) -> list[tuple[str, int]]:
     counts: dict[str, int] = {}
     for e in events:
-        ip = e.get("source_ip") or e.get("host_id") or "desconhecido"
+        # Schema real: coluna 'source' armazena o IP atacante
+        ip = e.get("source_ip") or e.get("source") or e.get("host_id") or "desconhecido"
         if ip and ip not in ("-", "—", "127.0.0.1", "::1"):
             counts[ip] = counts.get(ip, 0) + 1
     return sorted(counts.items(), key=lambda x: x[1], reverse=True)[:n]
@@ -100,7 +100,8 @@ def _top_ips(events: list[dict], n: int = 10) -> list[tuple[str, int]]:
 def _top_threats(events: list[dict], n: int = 10) -> list[tuple[str, int, str]]:
     counts: dict[str, list] = {}
     for e in events:
-        name = e.get("threat_name") or e.get("event_type") or "Desconhecido"
+        # Schema real: 'rule_name' armazena o nome da ameaça (threat_name do seed)
+        name = e.get("threat_name") or e.get("rule_name") or e.get("event_type") or "Desconhecido"
         sev  = e.get("severity", "LOW").upper()
         if name not in counts:
             counts[name] = [0, sev]

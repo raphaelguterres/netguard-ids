@@ -4,7 +4,7 @@ Lookup por prefixo de IP com fallback em múltiplas granularidades.
 Cobre os principais ranges de IPs vistos em redes brasileiras.
 """
 
-from typing import Dict, Optional
+from typing import Dict, Optional  # noqa: F401
 
 # ── Base de dados embutida ────────────────────────────────────────
 # Ordenada do mais específico para o mais genérico

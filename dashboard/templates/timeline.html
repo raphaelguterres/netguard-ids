@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h3>Attack Timeline (SIEM View)</h3>
+
+{% if timelines|length == 0 %}
+
+<div class="card">
+nenhum ataque correlacionado ainda
+</div>
+
+{% endif %}
+
+{% for t in timelines %}
+
+<div class="card">
+
+<h3>
+
+Attack {{ t.attack_id }}
+
+</h3>
+
+<p>
+
+host: <strong>{{ t.host_id }}</strong>
+
+<br>
+
+risk score:
+
+<span class="badge critical">
+
+{{ t.risk_score }}
+
+</span>
+
+</p>
+
+<hr>
+
+{% set grouped = {} %}
+
+{% for step in t.steps %}
+
+{% set key = step.phase ~ "-" ~ step.event_type %}
+
+{% if key not in grouped %}
+
+{% set _ = grouped.update({
+
+key: {
+
+"count": 1,
+
+"phase": step.phase,
+
+"type": step.event_type,
+
+"severity": step.severity,
+
+"first": step.timestamp
+
+}
+
+}) %}
+
+{% else %}
+
+{% set _ = grouped[key].update({
+
+"count": grouped[key].count + 1
+
+}) %}
+
+{% endif %}
+
+{% endfor %}
+
+<table width="100%">
+
+<tr>
+
+<th>phase</th>
+
+<th>event</th>
+
+<th>count</th>
+
+<th>severity</th>
+
+<th>first seen</th>
+
+</tr>
+
+{% for g in grouped.values() %}
+
+<tr>
+
+<td>
+
+<strong>{{ g.phase }}</strong>
+
+</td>
+
+<td>
+
+{{ g.type }}
+
+</td>
+
+<td>
+
+{{ g.count }}
+
+</td>
+
+<td>
+
+<span class="badge {{ g.severity|lower }}">
+
+{{ g.severity }}
+
+</span>
+
+</td>
+
+<td>
+
+{{ g.first }}
+
+</td>
+
+</tr>
+
+{% endfor %}
+
+</table>
+
+</div>
+
+{% endfor %}
+
+{% endblock %}

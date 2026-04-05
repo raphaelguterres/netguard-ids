@@ -22,7 +22,7 @@ import json
 import socket
 import logging
 import argparse
-import threading
+import threading  # noqa: F401
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone

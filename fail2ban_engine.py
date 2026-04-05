@@ -14,13 +14,13 @@ Funcionalidades:
 
 import time
 import threading
-import subprocess
+import subprocess  # noqa: F401
 import logging
-import json
+import json  # noqa: F401
 import os
 from datetime import datetime, timedelta
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field  # noqa: F401
 from typing import Dict, List, Optional
 
 logger = logging.getLogger("ids.fail2ban")

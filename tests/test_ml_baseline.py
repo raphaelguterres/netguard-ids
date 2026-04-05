@@ -6,7 +6,7 @@ import pytest
 
 # Skip gracefully if scikit-learn not installed
 try:
-    import numpy as np
+    import numpy as np  # noqa: F401
     from engine.ml_baseline import MLBaseline
     SKLEARN_OK = True
 except ImportError:

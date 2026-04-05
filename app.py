@@ -5,7 +5,7 @@ Um único processo. Sem simulador. Sem dados falsos.
 """
 
 import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress
-from platform_utils import (
+from platform_utils import (  # noqa: F401
     OS, IS_WINDOWS, IS_LINUX,
     get_processes, get_pid_name_map, get_listen_ports,
     get_security_events, get_arp_table, ping as platform_ping, get_hostname,
@@ -98,7 +98,7 @@ except Exception as _yr_err:
 
 # Auto Block Engine
 try:
-    from engine.auto_block import auto_block, AutoBlockEngine, BLOCK_WHITELIST
+    from engine.auto_block import auto_block, AutoBlockEngine, BLOCK_WHITELIST  # noqa: F401
     AUTOBLOCK_AVAILABLE = True
 except Exception as _ab_err:
     auto_block = None
@@ -107,7 +107,7 @@ except Exception as _ab_err:
 
 # Billing (Stripe)
 try:
-    from billing import (
+    from billing import (  # noqa: F401
         PLANS, STRIPE_PUBLISHABLE_KEY, billing_active,
         create_checkout_session, create_portal_session,
         retrieve_checkout_session, handle_webhook,
@@ -120,7 +120,7 @@ except Exception as _bill_err:
 
 # Auth + HTTPS
 try:
-    from auth import (
+    from auth import (  # noqa: F401
         auth, AUTH_ENABLED, get_ssl_context, print_startup_info, HTTPS_PORT,
         verify_any_token, _extract_token, require_session, DASHBOARD_AUTH,
         csrf_protect,
@@ -207,7 +207,7 @@ except ImportError:
 
 # Kill Chain Correlator
 try:
-    from killchain import correlator as kc_correlator, TACTIC_LABELS, TACTIC_COLORS
+    from killchain import correlator as kc_correlator, TACTIC_LABELS, TACTIC_COLORS  # noqa: F401
     KC_AVAILABLE = True
 except ImportError:
     kc_correlator = None
@@ -231,7 +231,7 @@ except ImportError:
 
 # Threat Feeds (AbuseIPDB + ThreatFox)
 try:
-    from threat_feeds import enrich_ip, enrich_async, check_threatfox_ip, stats as feed_stats
+    from threat_feeds import enrich_ip, enrich_async, check_threatfox_ip, stats as feed_stats  # noqa: F401
     FEEDS_AVAILABLE = True
 except ImportError:
     FEEDS_AVAILABLE = False
@@ -2550,7 +2550,7 @@ def health():
 
     # ── Fail2Ban ───────────────────────────────────────────────────
     try:
-        from fail2ban_engine import Fail2BanEngine
+        from fail2ban_engine import Fail2BanEngine  # noqa: F401
         f2b_ok   = True
         f2b_info = "ok"
     except Exception:
@@ -2939,12 +2939,15 @@ def demo_access():
 
     try:
         from demo_seed import seed_demo, DEMO_TOKEN, DEMO_TENANT_ID
-        existing = repo.get_tenant_by_token(DEMO_TOKEN)
-        if not existing:
+        existing     = repo.get_tenant_by_token(DEMO_TOKEN)
+        event_count  = repo.count(tenant_id=DEMO_TENANT_ID) if existing else 0
+        # Seed se: tenant não existe OU banco vazio (seed anterior falhou)
+        if not existing or event_count < 50:
             seed_demo(repo, n_events=350, verbose=False)
-            logger.info("Demo seed criado via /demo | ip=%s", request.remote_addr)
+            logger.info("Demo seed criado/refeito via /demo | ip=%s events_before=%d",
+                        request.remote_addr, event_count)
         audit("DEMO_ACCESS", ip=request.remote_addr or "-",
-              detail=f"tenant={DEMO_TENANT_ID}")
+              detail=f"tenant={DEMO_TENANT_ID} events={event_count}")
     except Exception as exc:
         logger.warning("Demo seed falhou: %s", exc)
         return redirect("/login")
@@ -2973,6 +2976,62 @@ def demo_reset():
     except Exception as exc:
         logger.error("Demo reset falhou: %s", exc)
         return jsonify({"error": str(exc)}), 500
+
+
+# ── Alertas por e-mail ────────────────────────────────────────────
+
+@app.route("/api/alerts/test", methods=["POST"])
+@require_session
+def alerts_test():
+    """
+    Envia um e-mail de teste para verificar a configuração SMTP.
+
+    Body JSON:
+        { "email": "destino@empresa.com", "name": "Empresa Teste" }
+
+    Variáveis de ambiente necessárias:
+        ALERT_EMAIL_ENABLED=true
+        SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
+    """
+    from alerts.email_alert import get_alert_manager, ALERT_ENABLED, SMTP_USER
+
+    if not ALERT_ENABLED:
+        return jsonify({
+            "ok": False,
+            "error": "Alertas desativados. Defina ALERT_EMAIL_ENABLED=true e configure SMTP_USER/SMTP_PASS.",
+        }), 400
+
+    data    = request.get_json(silent=True) or {}
+    to_mail = data.get("email", "").strip()
+    name    = data.get("name", "Empresa Teste")
+
+    if not to_mail:
+        return jsonify({"ok": False, "error": "Campo 'email' obrigatório"}), 400
+
+    try:
+        get_alert_manager().send_test(to_mail, tenant_name=name)
+        audit("ALERT_TEST", actor=to_mail, ip=request.remote_addr or "-",
+              detail=f"to={to_mail}")
+        return jsonify({"ok": True, "message": f"E-mail de teste enviado para {to_mail}"})
+    except Exception as exc:
+        logger.error("Teste de alerta falhou: %s", exc)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/alerts/status")
+@require_session
+def alerts_status():
+    """Retorna status atual da configuração de alertas."""
+    from alerts.email_alert import ALERT_ENABLED, SMTP_HOST, SMTP_PORT, SMTP_USER, ALERT_SEVERITIES, RATE_LIMIT_SEC
+    return jsonify({
+        "enabled":       ALERT_ENABLED,
+        "smtp_host":     SMTP_HOST,
+        "smtp_port":     SMTP_PORT,
+        "smtp_user":     SMTP_USER if SMTP_USER else "(não configurado)",
+        "severities":    sorted(ALERT_SEVERITIES),
+        "rate_limit_s":  RATE_LIMIT_SEC,
+        "configured":    bool(SMTP_USER and ALERT_ENABLED),
+    })
 
 
 # ── Relatório PDF mensal ──────────────────────────────────────────

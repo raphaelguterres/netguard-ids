@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h3>Login</h3>
+
+<form method="post">
+
+<p>user/pass:</p>
+
+<input name="username">
+
+<input name="password">
+
+<br><br>
+
+<p>ou token:</p>
+
+<input name="token">
+
+<br><br>
+
+<button>entrar</button>
+
+</form>
+
+{% if error %}
+
+<p>{{ error }}</p>
+
+{% endif %}
+
+{% endblock %}

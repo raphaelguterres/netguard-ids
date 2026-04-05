@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<title>NetGuard</title>
+
+<style>
+
+body {
+
+background: #0b1220;
+color: #e6edf7;
+font-family: Arial;
+
+margin: 40px;
+
+}
+
+nav a {
+
+margin-right: 20px;
+
+color: #4ea1ff;
+
+text-decoration: none;
+
+font-weight: bold;
+
+}
+
+.card {
+
+background: #111a2b;
+
+padding: 20px;
+
+margin-bottom: 20px;
+
+border-radius: 10px;
+
+}
+
+.badge {
+
+padding: 4px 10px;
+
+border-radius: 6px;
+
+font-size: 12px;
+
+}
+
+.low { background:#1f6f4a }
+.medium { background:#9c6b00 }
+.high { background:#9c2f00 }
+.critical { background:#7a0017 }
+
+</style>
+
+</head>
+
+<body>
+
+<h2>NetGuard Dashboard</h2>
+
+<nav>
+
+<a href="/dashboard">Dashboard</a>
+
+<a href="/events">Events</a>
+
+<a href="/tickets">Tickets</a>
+
+<a href="/timeline">Timeline</a>
+
+<a href="/logout">Logout</a>
+
+</nav>
+
+<hr>
+
+{% block content %}
+
+{% endblock %}
+
+</body>
+
+</html>

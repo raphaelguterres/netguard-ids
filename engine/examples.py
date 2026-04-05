@@ -15,9 +15,9 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.event_engine   import EventEngine, normalize_event, validate_event, enrich_event
-from engine.rule_executor  import make_alert, Alert, RuleRegistry
+from engine.rule_executor  import make_alert, Alert, RuleRegistry  # noqa: F401
 from engine.severity_classifier import classify_severity
-from engine.baseline_engine     import BaselineEngine, BaselineType
+from engine.baseline_engine     import BaselineEngine, BaselineType  # noqa: F401
 from typing import Optional
 
 
@@ -302,7 +302,7 @@ def build_engine(alert_callback=None) -> EventEngine:
 # ═══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    import json
+    import json  # noqa: F401
 
     print("=" * 60)
     print("NetGuard Event Engine — Demo")

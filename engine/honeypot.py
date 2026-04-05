@@ -27,7 +27,7 @@ import logging
 import time
 import re
 from datetime import datetime, timezone
-from collections import defaultdict
+from collections import defaultdict  # noqa: F401
 from typing import List, Dict, Optional
 
 logger = logging.getLogger("netguard.honeypot")
@@ -334,7 +334,7 @@ class Honeypot:
 
     def inject_demo(self) -> List[dict]:
         """Inject demo captures for testing."""
-        import random
+        import random  # noqa: F401
         scenarios = [
             ("45.33.32.156",  22,  22,  "SSH",    b"SSH-2.0-libssh_0.9.6\r\nuser: root\r\n"),
             ("185.220.101.45", 54321, 3389, "RDP", b"\x03\x00\x00\x13\x0e\xd0\x00\x00\x12\x34Cookie: mstshash=admin"),

@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NetGuard IDS — Proteção de Rede Inteligente para Empresas</title>
+<meta name="description" content="Sistema de detecção de intrusão em tempo real com relatórios executivos mensais. Ideal para MSSPs, telecoms e empresas que levam segurança a sério."/>
+<style>
+/* ── Reset & Base ─────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:       #0d1117;
+  --surface:  #161b22;
+  --surface2: #1c2128;
+  --border:   #30363d;
+  --text:     #e6edf3;
+  --muted:    #8b949e;
+  --green:    #3fb950;
+  --yellow:   #d29922;
+  --orange:   #f0883e;
+  --red:      #f85149;
+  --blue:     #58a6ff;
+  --accent:   #1f6feb;
+  --accent2:  #388bfd;
+}
+html{scroll-behavior:smooth}
+body{
+  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  background:var(--bg);color:var(--text);
+  line-height:1.6;overflow-x:hidden;
+}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+img{max-width:100%}
+
+/* ── Nav ──────────────────────────────────────────────────── */
+nav{
+  position:sticky;top:0;z-index:100;
+  background:rgba(13,17,23,.92);
+  backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+  padding:0 2rem;
+  display:flex;align-items:center;justify-content:space-between;
+  height:60px;
+}
+.nav-logo{
+  display:flex;align-items:center;gap:.6rem;
+  font-weight:700;font-size:1.1rem;color:var(--text);
+}
+.nav-logo .dot{
+  width:10px;height:10px;border-radius:50%;
+  background:var(--accent);box-shadow:0 0 8px var(--accent);
+}
+.nav-links{display:flex;gap:2rem;list-style:none}
+.nav-links a{color:var(--muted);font-size:.9rem;transition:color .2s}
+.nav-links a:hover{color:var(--text);text-decoration:none}
+.nav-cta{
+  background:var(--accent);color:#fff;
+  padding:.45rem 1.1rem;border-radius:6px;
+  font-size:.87rem;font-weight:600;
+  transition:background .2s;white-space:nowrap;
+}
+.nav-cta:hover{background:var(--accent2);text-decoration:none}
+
+/* ── Hero ─────────────────────────────────────────────────── */
+.hero{
+  min-height:92vh;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:5rem 2rem 4rem;
+  position:relative;overflow:hidden;
+}
+.hero::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 80% 50% at 50% 0%,rgba(31,111,235,.18) 0%,transparent 70%);
+  pointer-events:none;
+}
+.hero-badge{
+  display:inline-flex;align-items:center;gap:.5rem;
+  background:rgba(31,111,235,.12);border:1px solid rgba(31,111,235,.3);
+  color:var(--blue);padding:.35rem .9rem;border-radius:20px;
+  font-size:.82rem;font-weight:600;margin-bottom:2rem;
+  letter-spacing:.04em;
+}
+.hero-badge .pulse{
+  width:8px;height:8px;border-radius:50%;background:var(--green);
+  animation:pulse 2s infinite;
+}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.hero h1{
+  font-size:clamp(2.4rem,6vw,4rem);
+  font-weight:800;line-height:1.1;
+  max-width:780px;margin-bottom:1.5rem;
+  letter-spacing:-.02em;
+}
+.hero h1 span{
+  background:linear-gradient(135deg,var(--blue),var(--accent2));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.hero-sub{
+  font-size:1.15rem;color:var(--muted);
+  max-width:580px;margin-bottom:2.5rem;line-height:1.7;
+}
+.hero-actions{display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;margin-bottom:3.5rem}
+.btn-primary{
+  background:var(--accent);color:#fff;
+  padding:.75rem 1.8rem;border-radius:8px;
+  font-size:1rem;font-weight:700;
+  transition:all .2s;border:none;cursor:pointer;
+  box-shadow:0 0 20px rgba(31,111,235,.35);
+}
+.btn-primary:hover{background:var(--accent2);transform:translateY(-1px);text-decoration:none;color:#fff}
+.btn-secondary{
+  background:transparent;color:var(--text);
+  padding:.75rem 1.8rem;border-radius:8px;
+  font-size:1rem;font-weight:600;
+  border:1px solid var(--border);transition:all .2s;
+}
+.btn-secondary:hover{border-color:var(--blue);color:var(--blue);text-decoration:none;transform:translateY(-1px)}
+
+/* ── Dashboard Mockup ─────────────────────────────────────── */
+.dashboard-mock{
+  width:100%;max-width:900px;margin:0 auto;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;overflow:hidden;
+  box-shadow:0 30px 80px rgba(0,0,0,.5);
+  font-size:.78rem;
+}
+.mock-topbar{
+  background:var(--surface2);border-bottom:1px solid var(--border);
+  padding:.55rem 1rem;display:flex;align-items:center;gap:.5rem;
+}
+.mock-dot{width:10px;height:10px;border-radius:50%}
+.mock-url{
+  flex:1;background:var(--bg);border-radius:4px;
+  padding:.2rem .7rem;color:var(--muted);font-size:.75rem;margin:0 .8rem;
+}
+.mock-body{padding:1rem;display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem}
+.mock-card{
+  background:var(--bg);border:1px solid var(--border);
+  border-radius:8px;padding:.9rem;text-align:center;
+}
+.mock-card .val{font-size:1.5rem;font-weight:800;margin-bottom:.2rem}
+.mock-card .lbl{font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.mock-grid2{
+  display:grid;grid-template-columns:1.4fr 1fr;gap:.7rem;
+  padding:0 1rem 1rem;
+}
+.mock-panel{
+  background:var(--bg);border:1px solid var(--border);
+  border-radius:8px;padding:.9rem;
+}
+.mock-panel-title{
+  font-size:.7rem;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.08em;
+  margin-bottom:.7rem;border-bottom:1px solid var(--border);padding-bottom:.5rem;
+}
+.mock-event{
+  display:flex;align-items:center;gap:.5rem;
+  padding:.4rem 0;border-bottom:1px solid rgba(48,54,61,.5);
+  font-size:.72rem;
+}
+.mock-event:last-child{border:none}
+.sev-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.mock-event .host{color:var(--muted);margin-left:auto;font-size:.65rem}
+.mock-bar-row{display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;font-size:.7rem}
+.mock-bar-bg{flex:1;background:var(--surface);border-radius:3px;height:6px;overflow:hidden}
+.mock-bar-fill{height:100%;border-radius:3px}
+
+/* ── Stats strip ──────────────────────────────────────────── */
+.stats-strip{
+  display:flex;justify-content:center;flex-wrap:wrap;gap:3rem;
+  padding:3rem 2rem;border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);
+}
+.stat{text-align:center}
+.stat .num{font-size:2.2rem;font-weight:800;color:var(--blue)}
+.stat .desc{font-size:.85rem;color:var(--muted);margin-top:.2rem}
+
+/* ── Section ──────────────────────────────────────────────── */
+section{padding:5rem 2rem}
+.container{max-width:1100px;margin:0 auto}
+.section-label{
+  font-size:.78rem;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--blue);margin-bottom:.8rem;
+}
+.section-title{
+  font-size:clamp(1.8rem,4vw,2.6rem);
+  font-weight:800;margin-bottom:1rem;line-height:1.15;
+}
+.section-sub{
+  font-size:1.05rem;color:var(--muted);
+  max-width:560px;line-height:1.7;margin-bottom:3rem;
+}
+
+/* ── Features ─────────────────────────────────────────────── */
+.features-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  gap:1.5rem;
+}
+.feature-card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:1.8rem;
+  transition:border-color .2s,transform .2s;
+}
+.feature-card:hover{border-color:var(--accent);transform:translateY(-3px)}
+.feature-icon{
+  width:44px;height:44px;border-radius:10px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:1.3rem;margin-bottom:1.2rem;
+}
+.feature-card h3{font-size:1.05rem;font-weight:700;margin-bottom:.6rem}
+.feature-card p{font-size:.9rem;color:var(--muted);line-height:1.6}
+
+/* ── Report mockup ────────────────────────────────────────── */
+.report-section{background:var(--surface2);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.report-inner{
+  display:grid;grid-template-columns:1fr 1fr;
+  gap:4rem;align-items:center;max-width:1100px;margin:0 auto;
+  padding:5rem 2rem;
+}
+.report-mock{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;overflow:hidden;
+  box-shadow:0 20px 60px rgba(0,0,0,.4);
+  font-size:.72rem;
+}
+.report-header{
+  background:var(--surface2);border-bottom:1px solid var(--border);
+  padding:.5rem .8rem;display:flex;align-items:center;justify-content:space-between;
+}
+.report-header .brand{font-weight:700;font-size:.75rem;color:var(--blue)}
+.report-header .month{color:var(--muted);font-size:.7rem}
+.report-cover{padding:1.2rem}
+.report-cover .rtitle{font-size:1.1rem;font-weight:800;margin-bottom:.1rem}
+.report-cover .rmonth{font-size:.95rem;color:var(--blue);font-weight:700;margin-bottom:.7rem}
+.report-cover .rprepared{font-size:.65rem;color:var(--muted);margin-bottom:1rem}
+.metric-row{display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem;margin-bottom:.8rem}
+.metric-box{
+  background:var(--bg);border:1px solid var(--border);
+  border-radius:6px;padding:.5rem;text-align:center;
+}
+.metric-box .mval{font-size:1.1rem;font-weight:800}
+.metric-box .mlbl{font-size:.55rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.risk-box{
+  background:var(--bg);border:1px solid var(--border);
+  border-radius:6px;padding:.5rem .8rem;
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:.8rem;
+}
+.risk-box .rlbl{font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.risk-box .rval{font-size:.95rem;font-weight:800;color:var(--red)}
+.threat-table{width:100%;border-collapse:collapse;font-size:.65rem}
+.threat-table th{
+  background:var(--accent);color:#fff;
+  padding:.3rem .4rem;text-align:left;font-size:.6rem;
+}
+.threat-table td{
+  padding:.28rem .4rem;border-bottom:1px solid var(--border);color:var(--muted);
+}
+.threat-table tr:nth-child(even) td{background:rgba(22,27,34,.6)}
+.page-footer{
+  border-top:1px solid var(--border);padding:.4rem .8rem;
+  font-size:.6rem;color:var(--muted);text-align:center;
+}
+
+/* ── Pricing ──────────────────────────────────────────────── */
+.pricing-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:1.5rem;max-width:960px;margin:0 auto;
+}
+.price-card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;padding:2rem;position:relative;
+  transition:transform .2s;
+}
+.price-card:hover{transform:translateY(-4px)}
+.price-card.featured{
+  border-color:var(--accent);
+  box-shadow:0 0 0 1px var(--accent),0 20px 40px rgba(31,111,235,.2);
+}
+.featured-badge{
+  position:absolute;top:-12px;left:50%;transform:translateX(-50%);
+  background:var(--accent);color:#fff;
+  padding:.2rem .8rem;border-radius:20px;font-size:.72rem;font-weight:700;
+  white-space:nowrap;
+}
+.plan-name{font-size:.8rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:.8rem}
+.plan-price{margin-bottom:.4rem}
+.plan-price .amount{font-size:2.5rem;font-weight:800;color:var(--text)}
+.plan-price .per{font-size:.85rem;color:var(--muted)}
+.plan-desc{font-size:.88rem;color:var(--muted);margin-bottom:1.5rem;line-height:1.5}
+.plan-features{list-style:none;margin-bottom:2rem}
+.plan-features li{
+  display:flex;align-items:center;gap:.6rem;
+  font-size:.88rem;padding:.4rem 0;border-bottom:1px solid rgba(48,54,61,.4);
+}
+.plan-features li:last-child{border:none}
+.plan-features li::before{content:'✓';color:var(--green);font-weight:700;flex-shrink:0}
+.plan-features li.na::before{content:'—';color:var(--border)}
+.plan-features li.na{color:var(--muted)}
+.plan-btn{
+  width:100%;padding:.75rem;border-radius:8px;
+  font-size:.95rem;font-weight:700;cursor:pointer;
+  transition:all .2s;border:none;
+}
+.plan-btn.primary{background:var(--accent);color:#fff}
+.plan-btn.primary:hover{background:var(--accent2)}
+.plan-btn.secondary{background:transparent;color:var(--text);border:1px solid var(--border)}
+.plan-btn.secondary:hover{border-color:var(--blue);color:var(--blue)}
+
+/* ── Demo form ────────────────────────────────────────────── */
+.demo-section{
+  background:linear-gradient(135deg,rgba(31,111,235,.1) 0%,transparent 60%);
+  border-top:1px solid var(--border);
+}
+.demo-inner{
+  max-width:680px;margin:0 auto;text-align:center;
+  padding:5rem 2rem;
+}
+.demo-form{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;padding:2.5rem;margin-top:2.5rem;text-align:left;
+}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem}
+.form-group{margin-bottom:1rem}
+.form-group label{
+  display:block;font-size:.82rem;font-weight:600;
+  color:var(--muted);margin-bottom:.4rem;letter-spacing:.03em;
+}
+.form-group input,
+.form-group select,
+.form-group textarea{
+  width:100%;background:var(--bg);
+  border:1px solid var(--border);border-radius:7px;
+  color:var(--text);padding:.7rem .9rem;
+  font-size:.93rem;font-family:inherit;
+  transition:border-color .2s;outline:none;
+}
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus{border-color:var(--accent)}
+.form-group textarea{resize:vertical;min-height:90px}
+.form-group select option{background:var(--surface)}
+.form-submit{
+  width:100%;padding:.85rem;border-radius:8px;
+  background:var(--accent);color:#fff;
+  font-size:1rem;font-weight:700;
+  border:none;cursor:pointer;transition:all .2s;
+  box-shadow:0 4px 20px rgba(31,111,235,.3);
+  margin-top:.5rem;
+}
+.form-submit:hover{background:var(--accent2);transform:translateY(-1px)}
+.form-note{
+  text-align:center;font-size:.78rem;color:var(--muted);margin-top:.8rem;
+}
+.success-msg{
+  display:none;text-align:center;padding:2rem;
+  color:var(--green);font-size:1.05rem;font-weight:600;
+}
+
+/* ── Testimonial / Social proof ───────────────────────────── */
+.proof-strip{
+  display:flex;flex-wrap:wrap;justify-content:center;gap:2rem;
+  padding:2rem;border-top:1px solid var(--border);
+}
+.proof-item{
+  display:flex;align-items:center;gap:.5rem;
+  font-size:.82rem;color:var(--muted);
+}
+.proof-item .icon{font-size:1rem}
+
+/* ── Footer ───────────────────────────────────────────────── */
+footer{
+  border-top:1px solid var(--border);
+  padding:2.5rem 2rem;text-align:center;
+}
+.footer-logo{
+  font-size:1.1rem;font-weight:800;margin-bottom:.5rem;
+  display:flex;align-items:center;gap:.5rem;justify-content:center;
+}
+.footer-logo .dot{width:9px;height:9px;border-radius:50%;background:var(--accent)}
+footer p{font-size:.83rem;color:var(--muted);margin-bottom:.3rem}
+.footer-links{
+  display:flex;gap:1.5rem;justify-content:center;
+  margin-top:1rem;list-style:none;flex-wrap:wrap;
+}
+.footer-links a{font-size:.82rem;color:var(--muted)}
+.footer-links a:hover{color:var(--blue)}
+
+/* ── Responsive ───────────────────────────────────────────── */
+@media(max-width:768px){
+  .nav-links{display:none}
+  .mock-body{grid-template-columns:repeat(2,1fr)}
+  .mock-grid2{grid-template-columns:1fr}
+  .report-inner{grid-template-columns:1fr}
+  .form-row{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════ NAV -->
+<nav>
+  <div class="nav-logo">
+    <div class="dot"></div>
+    NetGuard IDS
+  </div>
+  <ul class="nav-links">
+    <li><a href="#features">Funcionalidades</a></li>
+    <li><a href="#relatorio">Relatórios</a></li>
+    <li><a href="#pricing">Planos</a></li>
+    <li><a href="#demo">Contato</a></li>
+  </ul>
+  <a href="#demo" class="nav-cta">Quero uma demo →</a>
+</nav>
+
+<!-- ═══════════════════════════════════════════════ HERO -->
+<section class="hero">
+  <div class="hero-badge">
+    <div class="pulse"></div>
+    Monitoramento em tempo real · Multi-tenant · MSSP-ready
+  </div>
+
+  <h1>Segurança de rede que<br/><span>detecta antes de virar crise</span></h1>
+
+  <p class="hero-sub">
+    NetGuard IDS monitora sua rede 24/7, detecta ameaças em tempo real
+    e entrega relatórios executivos mensais prontos para o seu cliente.
+    Tudo em uma plataforma SaaS multi-tenant.
+  </p>
+
+  <div class="hero-actions">
+    <a href="#demo" class="btn-primary">Quero uma demonstração gratuita</a>
+    <a href="#features" class="btn-secondary">Ver funcionalidades</a>
+  </div>
+
+  <!-- Dashboard Mockup -->
+  <div class="dashboard-mock">
+    <div class="mock-topbar">
+      <div class="mock-dot" style="background:#f85149"></div>
+      <div class="mock-dot" style="background:#d29922;margin:0 4px"></div>
+      <div class="mock-dot" style="background:#3fb950"></div>
+      <div class="mock-url">localhost:5000/dashboard — NetGuard IDS</div>
+    </div>
+    <div class="mock-body">
+      <div class="mock-card">
+        <div class="val" style="color:var(--blue)">312</div>
+        <div class="lbl">Total de Eventos</div>
+      </div>
+      <div class="mock-card">
+        <div class="val" style="color:var(--red)">17</div>
+        <div class="lbl">Críticos</div>
+      </div>
+      <div class="mock-card">
+        <div class="val" style="color:var(--orange)">74</div>
+        <div class="lbl">Altos</div>
+      </div>
+      <div class="mock-card">
+        <div class="val" style="color:var(--green)">221</div>
+        <div class="lbl">Baixo / Médio</div>
+      </div>
+    </div>
+    <div class="mock-grid2">
+      <div class="mock-panel">
+        <div class="mock-panel-title">⚡ Eventos Recentes</div>
+        <div class="mock-event">
+          <div class="sev-dot" style="background:var(--red)"></div>
+          Malware Communication — C2 185.220.101.47
+          <span class="host">srv-web-01</span>
+        </div>
+        <div class="mock-event">
+          <div class="sev-dot" style="background:var(--red)"></div>
+          Remote Code Execution via /api/v1/auth
+          <span class="host">srv-db-01</span>
+        </div>
+        <div class="mock-event">
+          <div class="sev-dot" style="background:var(--orange)"></div>
+          Brute Force SSH — 94 tentativas/min
+          <span class="host">firewall-01</span>
+        </div>
+        <div class="mock-event">
+          <div class="sev-dot" style="background:var(--orange)"></div>
+          DNS Tunneling → c2.evil.ru
+          <span class="host">wks-admin</span>
+        </div>
+        <div class="mock-event">
+          <div class="sev-dot" style="background:var(--yellow)"></div>
+          SQL Injection em /admin/login
+          <span class="host">srv-web-01</span>
+        </div>
+      </div>
+      <div class="mock-panel">
+        <div class="mock-panel-title">📊 Por Severidade</div>
+        <div class="mock-bar-row">
+          <span style="color:var(--red);width:55px">CRITICAL</span>
+          <div class="mock-bar-bg"><div class="mock-bar-fill" style="width:28%;background:var(--red)"></div></div>
+          <span>17</span>
+        </div>
+        <div class="mock-bar-row">
+          <span style="color:var(--orange);width:55px">HIGH</span>
+          <div class="mock-bar-bg"><div class="mock-bar-fill" style="width:60%;background:var(--orange)"></div></div>
+          <span>74</span>
+        </div>
+        <div class="mock-bar-row">
+          <span style="color:var(--yellow);width:55px">MEDIUM</span>
+          <div class="mock-bar-bg"><div class="mock-bar-fill" style="width:85%;background:var(--yellow)"></div></div>
+          <span>142</span>
+        </div>
+        <div class="mock-bar-row">
+          <span style="color:var(--green);width:55px">LOW</span>
+          <div class="mock-bar-bg"><div class="mock-bar-fill" style="width:50%;background:var(--green)"></div></div>
+          <span>79</span>
+        </div>
+        <div style="margin-top:.8rem;padding-top:.6rem;border-top:1px solid var(--border)">
+          <div class="mock-panel-title">🌐 Top IPs Atacantes</div>
+          <div class="mock-event"><span style="color:var(--muted)">185.220.101.47</span><span class="host" style="color:var(--red)">36 eventos</span></div>
+          <div class="mock-event"><span style="color:var(--muted)">91.240.118.172</span><span class="host" style="color:var(--orange)">33 eventos</span></div>
+          <div class="mock-event"><span style="color:var(--muted)">45.142.212.100</span><span class="host" style="color:var(--yellow)">29 eventos</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════ STATS -->
+<div class="stats-strip">
+  <div class="stat"><div class="num">24/7</div><div class="desc">Monitoramento contínuo</div></div>
+  <div class="stat"><div class="num">&lt;1s</div><div class="desc">Latência de detecção</div></div>
+  <div class="stat"><div class="num">20+</div><div class="desc">Tipos de ameaça detectados</div></div>
+  <div class="stat"><div class="num">∞</div><div class="desc">Tenants por instância</div></div>
+  <div class="stat"><div class="num">1</div><div class="desc">Relatório mensal por cliente</div></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ FEATURES -->
+<section id="features">
+  <div class="container">
+    <div class="section-label">Funcionalidades</div>
+    <h2 class="section-title">Tudo que seu cliente precisa.<br/>Tudo que você precisa para escalar.</h2>
+    <p class="section-sub">Desenvolvido para MSSPs e telecoms que gerenciam múltiplos clientes e precisam de visibilidade, automação e entregáveis profissionais.</p>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(248,81,73,.12);color:var(--red)">🛡️</div>
+        <h3>Detecção em Tempo Real</h3>
+        <p>Motor de análise de tráfego detecta SQL Injection, XSS, Brute Force, Port Scan, DNS Tunneling, Ransomware e 14 outros tipos de ameaça com latência abaixo de 1 segundo.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(88,166,255,.12);color:var(--blue)">👥</div>
+        <h3>Multi-Tenant Nativo</h3>
+        <p>Cada cliente tem seu próprio espaço isolado de dados, token de acesso e painel independente. Gerencie dezenas de empresas numa única instalação sem conflito de dados.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(63,185,80,.12);color:var(--green)">📄</div>
+        <h3>Relatório PDF Mensal</h3>
+        <p>Relatório executivo gerado automaticamente com métricas, distribuição de ameaças, gráfico de timeline, top IPs atacantes e recomendações contextuais. Pronto para enviar ao cliente.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(240,136,62,.12);color:var(--orange)">⚡</div>
+        <h3>Threat Intelligence</h3>
+        <p>Enriquecimento de IPs com geolocalização e reputação. Correlação de ameaças, detecção de movimento lateral, honeypot integrado e análise de kill chain.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(210,153,34,.12);color:var(--yellow)">💳</div>
+        <h3>Billing com Stripe</h3>
+        <p>Planos Free, Pro e Enterprise integrados ao Stripe. Onboarding automático após pagamento — o cliente recebe o token e começa a usar sem intervenção manual.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(31,111,235,.12);color:var(--accent2)">🔒</div>
+        <h3>Segurança Enterprise</h3>
+        <p>HTTPS com Nginx + Let's Encrypt, headers de segurança (CSP, HSTS, X-Frame), CORS restrito, CSRF protection, rate limiting no login e audit log em TSV.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════ REPORT -->
+<div class="report-section" id="relatorio">
+  <div class="report-inner">
+    <!-- Report mock -->
+    <div class="report-mock">
+      <div class="report-header">
+        <span class="brand">NetGuard IDS</span>
+        <span class="month">Relatório de Segurança — Março 2026</span>
+        <span style="font-size:.65rem;color:var(--muted)">Cliente</span>
+      </div>
+      <div class="report-cover">
+        <div style="height:3px;background:var(--accent);border-radius:2px;margin-bottom:.8rem"></div>
+        <div class="rtitle">Relatório de Segurança</div>
+        <div class="rmonth">Março 2026</div>
+        <div class="rprepared">Preparado para: <b>Empresa XYZ</b> | Por: NetGuard IDS<br/>Gerado em: 04/04/2026 18:53 UTC</div>
+        <div class="metric-row">
+          <div class="metric-box"><div class="mval" style="color:var(--blue)">312</div><div class="mlbl">Total</div></div>
+          <div class="metric-box"><div class="mval" style="color:var(--red)">17</div><div class="mlbl">Críticos</div></div>
+          <div class="metric-box"><div class="mval" style="color:var(--orange)">74</div><div class="mlbl">Altos</div></div>
+          <div class="metric-box"><div class="mval" style="color:var(--green)">221</div><div class="mlbl">B/M</div></div>
+        </div>
+        <div class="risk-box">
+          <span class="rlbl">Nível de Risco Geral</span>
+          <span class="rval">CRÍTICO</span>
+        </div>
+        <div style="font-size:.65rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:.4rem">Principais Ameaças</div>
+        <table class="threat-table">
+          <tr><th>#</th><th>Ameaça</th><th>Sev.</th><th>Ocorr.</th></tr>
+          <tr><td>1</td><td>Cross-Site Scripting</td><td style="color:var(--yellow)">MED</td><td>33</td></tr>
+          <tr><td>2</td><td>Brute Force SSH</td><td style="color:var(--orange)">HIGH</td><td>24</td></tr>
+          <tr><td>3</td><td>DNS Tunneling</td><td style="color:var(--orange)">HIGH</td><td>20</td></tr>
+          <tr><td>4</td><td>Malware Communication</td><td style="color:var(--red)">CRIT</td><td>12</td></tr>
+          <tr><td>5</td><td>Remote Code Execution</td><td style="color:var(--red)">CRIT</td><td>9</td></tr>
+        </table>
+      </div>
+      <div class="page-footer">Página 1 | Documento confidencial | NetGuard IDS</div>
+    </div>
+
+    <!-- Copy -->
+    <div>
+      <div class="section-label">Relatório Executivo Mensal</div>
+      <h2 class="section-title">Seu cliente recebe isso todo mês</h2>
+      <p style="color:var(--muted);line-height:1.7;margin-bottom:1.5rem">
+        Um PDF executivo de 3 páginas gerado automaticamente com todos os eventos do mês: distribuição por severidade, top 10 ameaças, gráfico de timeline diária, IPs mais ativos com relevância visual e recomendações geradas a partir dos dados reais detectados.
+      </p>
+      <ul style="list-style:none;display:flex;flex-direction:column;gap:.7rem">
+        <li style="display:flex;align-items:flex-start;gap:.6rem;font-size:.93rem">
+          <span style="color:var(--green);font-weight:700;margin-top:.1rem">✓</span>
+          <span>Dados <b>reais</b> do cliente — não template genérico</span>
+        </li>
+        <li style="display:flex;align-items:flex-start;gap:.6rem;font-size:.93rem">
+          <span style="color:var(--green);font-weight:700;margin-top:.1rem">✓</span>
+          <span>Nível de risco calculado automaticamente (BAIXO → CRÍTICO)</span>
+        </li>
+        <li style="display:flex;align-items:flex-start;gap:.6rem;font-size:.93rem">
+          <span style="color:var(--green);font-weight:700;margin-top:.1rem">✓</span>
+          <span>Recomendações contextuais baseadas nos ataques detectados</span>
+        </li>
+        <li style="display:flex;align-items:flex-start;gap:.6rem;font-size:.93rem">
+          <span style="color:var(--green);font-weight:700;margin-top:.1rem">✓</span>
+          <span>Sua marca no cabeçalho — white-label para parceiros MSSP</span>
+        </li>
+        <li style="display:flex;align-items:flex-start;gap:.6rem;font-size:.93rem">
+          <span style="color:var(--green);font-weight:700;margin-top:.1rem">✓</span>
+          <span>Pronto para envio por e-mail direto para o cliente final</span>
+        </li>
+      </ul>
+      <div style="margin-top:2rem">
+        <a href="#demo" class="btn-primary" style="display:inline-block;padding:.7rem 1.5rem">Ver relatório de demonstração →</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ PRICING -->
+<section id="pricing">
+  <div class="container" style="text-align:center">
+    <div class="section-label">Planos</div>
+    <h2 class="section-title">Simples. Escalável. Sem surpresa.</h2>
+    <p class="section-sub" style="margin:0 auto 3rem">Comece grátis e escale conforme seu portfólio de clientes cresce. Plano MSSP com white-label incluso.</p>
+
+    <div class="pricing-grid">
+      <!-- Free -->
+      <div class="price-card">
+        <div class="plan-name">Free</div>
+        <div class="plan-price">
+          <span class="amount">R$0</span>
+          <span class="per">/mês</span>
+        </div>
+        <p class="plan-desc">Para testar e validar em ambiente próprio.</p>
+        <ul class="plan-features">
+          <li>1 host monitorado</li>
+          <li>Dashboard em tempo real</li>
+          <li>Histórico 7 dias</li>
+          <li>5 tipos de ameaça</li>
+          <li class="na">Relatório PDF mensal</li>
+          <li class="na">Multi-tenant</li>
+          <li class="na">White-label</li>
+          <li class="na">Suporte prioritário</li>
+        </ul>
+        <button class="plan-btn secondary" onclick="document.getElementById('demo').scrollIntoView({behavior:'smooth'})">Começar grátis</button>
+      </div>
+
+      <!-- Pro -->
+      <div class="price-card featured">
+        <div class="featured-badge">⭐ Mais popular</div>
+        <div class="plan-name">Pro</div>
+        <div class="plan-price">
+          <span class="amount">R$297</span>
+          <span class="per">/mês por cliente</span>
+        </div>
+        <p class="plan-desc">Para MSSPs e empresas com múltiplos ambientes.</p>
+        <ul class="plan-features">
+          <li>Hosts ilimitados</li>
+          <li>Dashboard em tempo real</li>
+          <li>Histórico 90 dias</li>
+          <li>20+ tipos de ameaça</li>
+          <li>Relatório PDF mensal</li>
+          <li>Multi-tenant</li>
+          <li>API REST completa</li>
+          <li class="na">White-label</li>
+        </ul>
+        <button class="plan-btn primary" onclick="document.getElementById('demo').scrollIntoView({behavior:'smooth'})">Solicitar demo</button>
+      </div>
+
+      <!-- Enterprise -->
+      <div class="price-card">
+        <div class="plan-name">Enterprise / MSSP</div>
+        <div class="plan-price">
+          <span class="amount">Sob consulta</span>
+        </div>
+        <p class="plan-desc">Para telecoms e parceiros com carteira de clientes.</p>
+        <ul class="plan-features">
+          <li>Tudo do Pro</li>
+          <li>White-label completo</li>
+          <li>Revenue share negociável</li>
+          <li>Envio automático de relatórios</li>
+          <li>Onboarding dedicado</li>
+          <li>SLA garantido</li>
+          <li>Integração com seu billing</li>
+          <li>Suporte 24/7</li>
+        </ul>
+        <button class="plan-btn secondary" onclick="document.getElementById('demo').scrollIntoView({behavior:'smooth'})">Falar com vendas</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════ DEMO FORM -->
+<section class="demo-section" id="demo">
+  <div class="demo-inner">
+    <div class="section-label">Demonstração Gratuita</div>
+    <h2 class="section-title">Veja o NetGuard na sua rede</h2>
+    <p style="color:var(--muted);font-size:1rem;line-height:1.7">
+      Preencha o formulário e entraremos em contato em até 24 horas para agendar uma demonstração ao vivo com dados reais da sua infraestrutura.
+    </p>
+
+    <div class="demo-form">
+      <!-- Troque ACTION pelo seu endpoint Formspree: https://formspree.io/f/SEU_ID -->
+      <form id="contactForm" action="https://formspree.io/f/SEU_FORMSPREE_ID" method="POST">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="nome">Nome completo *</label>
+            <input type="text" id="nome" name="nome" placeholder="João Silva" required/>
+          </div>
+          <div class="form-group">
+            <label for="empresa">Empresa *</label>
+            <input type="text" id="empresa" name="empresa" placeholder="Empresa Ltda" required/>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="email">E-mail corporativo *</label>
+            <input type="email" id="email" name="email" placeholder="joao@empresa.com" required/>
+          </div>
+          <div class="form-group">
+            <label for="telefone">Telefone / WhatsApp</label>
+            <input type="tel" id="telefone" name="telefone" placeholder="(11) 9 9999-9999"/>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="perfil">Perfil da empresa *</label>
+            <select id="perfil" name="perfil" required>
+              <option value="">Selecione...</option>
+              <option>MSSP / Revenda de segurança</option>
+              <option>Telecom / ISP</option>
+              <option>Empresa com TI própria</option>
+              <option>Integrador de sistemas</option>
+              <option>Outro</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="clientes">Quantos clientes/redes monitorar?</label>
+            <select id="clientes" name="clientes">
+              <option value="">Selecione...</option>
+              <option>Apenas minha empresa (1)</option>
+              <option>2 a 10 clientes</option>
+              <option>11 a 50 clientes</option>
+              <option>Mais de 50 clientes</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="mensagem">O que você quer resolver? (opcional)</label>
+          <textarea id="mensagem" name="mensagem" placeholder="Ex: Preciso monitorar a rede de 15 clientes e entregar relatório mensal sem trabalho manual..."></textarea>
+        </div>
+        <input type="hidden" name="_subject" value="NetGuard IDS — Novo lead de demo"/>
+        <input type="hidden" name="_next" value=""/>
+        <button type="submit" class="form-submit">Quero agendar minha demonstração →</button>
+        <p class="form-note">🔒 Seus dados são confidenciais. Sem spam, sem compartilhamento com terceiros.</p>
+      </form>
+      <div class="success-msg" id="successMsg">
+        ✅ Recebemos seu pedido! Entraremos em contato em até 24 horas.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════ PROOF STRIP -->
+<div class="proof-strip">
+  <div class="proof-item"><span class="icon">🔒</span> Dados isolados por tenant</div>
+  <div class="proof-item"><span class="icon">🇧🇷</span> Desenvolvido no Brasil</div>
+  <div class="proof-item"><span class="icon">⚡</span> Deploy em menos de 1h</div>
+  <div class="proof-item"><span class="icon">📄</span> Relatório mensal incluso</div>
+  <div class="proof-item"><span class="icon">🤝</span> Revenue share para parceiros</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ FOOTER -->
+<footer>
+  <div class="footer-logo">
+    <div class="dot"></div>
+    NetGuard IDS
+  </div>
+  <p>Proteção de rede inteligente para empresas que levam segurança a sério.</p>
+  <p style="margin-top:.3rem">contato@netguard.com.br</p>
+  <ul class="footer-links">
+    <li><a href="#features">Funcionalidades</a></li>
+    <li><a href="#relatorio">Relatórios</a></li>
+    <li><a href="#pricing">Planos</a></li>
+    <li><a href="#demo">Contato</a></li>
+    <li><a href="/dashboard">Dashboard</a></li>
+    <li><a href="/pricing">Assinar</a></li>
+  </ul>
+  <p style="margin-top:1.5rem;font-size:.75rem;color:rgba(139,148,158,.5)">
+    © 2026 NetGuard IDS. Todos os direitos reservados.
+  </p>
+</footer>
+
+<script>
+// Form submit handler
+document.getElementById('contactForm').addEventListener('submit', async function(e) {
+  const action = this.action;
+  // If Formspree not configured, show success anyway (dev mode)
+  if (action.includes('SEU_FORMSPREE_ID')) {
+    e.preventDefault();
+    this.style.display = 'none';
+    document.getElementById('successMsg').style.display = 'block';
+    return;
+  }
+  e.preventDefault();
+  const data = new FormData(this);
+  try {
+    const res = await fetch(action, {
+      method: 'POST', body: data,
+      headers: { 'Accept': 'application/json' }
+    });
+    if (res.ok) {
+      this.style.display = 'none';
+      document.getElementById('successMsg').style.display = 'block';
+    } else {
+      alert('Erro ao enviar. Tente novamente ou nos contate por e-mail.');
+    }
+  } catch {
+    alert('Erro de conexão. Tente novamente.');
+  }
+});
+
+// Smooth active nav
+const sections = document.querySelectorAll('section[id], div[id]');
+const navLinks = document.querySelectorAll('.nav-links a');
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      navLinks.forEach(l => {
+        l.style.color = l.getAttribute('href') === '#'+e.target.id ? 'var(--text)' : '';
+      });
+    }
+  });
+}, { threshold: 0.3 });
+sections.forEach(s => obs.observe(s));
+</script>
+</body>
+</html>

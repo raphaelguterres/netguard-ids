@@ -8,10 +8,10 @@ Repositório oficial: https://github.com/SigmaHQ/sigma
 
 import re
 import os
-import json
+import json  # noqa: F401
 import yaml
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional  # noqa: F401
 from dataclasses import dataclass, field
 from pathlib import Path
 
