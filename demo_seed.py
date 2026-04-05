@@ -203,6 +203,8 @@ def seed_demo(repo, n_events: int = 350, verbose: bool = True) -> dict:
     if verbose:
         print(f"[demo] {events_saved} eventos inseridos para tenant {DEMO_TENANT_ID}")
 
+    _seed_new_modules(verbose=verbose)
+
     return {
         "tenant_id": DEMO_TENANT_ID,
         "token":     DEMO_TOKEN,
@@ -257,6 +259,84 @@ def _save_raw(repo, ev: dict) -> None:
     )
     sql = sql_sqlite if ph == "?" else sql_pg
     repo._exec_sql(sql, params)
+
+
+def _seed_new_modules(verbose: bool = False) -> None:
+    """Popula IOC Manager e Custom Rules com dados de demonstração."""
+    import pathlib
+    db_path = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+
+    # ── IOC Manager demo ──────────────────────────────────────────
+    try:
+        from ioc_manager import get_ioc_manager
+        mgr = get_ioc_manager(db_path, DEMO_TENANT_ID)
+        demo_iocs = [
+            ("185.220.101.47",    "ip",     "TOR Exit Node — Feodo Tracker"),
+            ("91.108.4.0/22",     "ip",     "Telegram Infrastructure (known C2 abuse)"),
+            ("evil-c2-server.ru", "domain", "Known C2 Domain — abuse.ch"),
+            ("update-flash-cdn.net","domain","Phishing domain — OpenPhish"),
+            ("44d88612fea8a8f36de82e1278abb02f","hash","EICAR Test Hash (MD5)"),
+            ("275a021bbfb6489e54d471899f7db9d1693986da69f5304ab75c5","hash","Emotet dropper SHA256"),
+        ]
+        existing = {i["value"] for i in mgr.list_iocs()}
+        for value, itype, desc in demo_iocs:
+            if value not in existing:
+                mgr.add_ioc({"value": value, "ioc_type": itype, "description": desc, "tags": ["demo"]})
+        if verbose:
+            print(f"[demo] {len(demo_iocs)} IOCs inseridos")
+    except Exception as e:
+        if verbose:
+            print(f"[demo] IOC seed falhou: {e}")
+
+    # ── Custom Rules demo ──────────────────────────────────────────
+    try:
+        from custom_rules import get_custom_rule_engine
+        engine = get_custom_rule_engine(db_path, DEMO_TENANT_ID)
+        demo_rules = [
+            {
+                "name": "Acesso Fora do Horário Comercial",
+                "description": "Detecta logins entre 00h-06h (provável acesso não autorizado)",
+                "severity": "HIGH",
+                "logic": "AND",
+                "conditions": [
+                    {"field": "hour", "operator": "between", "value": [0, 6]},
+                    {"field": "event_type", "operator": "contains", "value": "login"},
+                ],
+                "enabled": True,
+            },
+            {
+                "name": "Brute Force SSH Detectado",
+                "description": "Mais de 10 tentativas de login SSH seguidas",
+                "severity": "CRITICAL",
+                "logic": "AND",
+                "conditions": [
+                    {"field": "source", "operator": "eq",  "value": "22"},
+                    {"field": "details.attempts", "operator": "gte", "value": 10},
+                ],
+                "enabled": True,
+            },
+            {
+                "name": "PowerShell Suspeito",
+                "description": "Execução de PowerShell com parâmetros de bypass",
+                "severity": "HIGH",
+                "logic": "OR",
+                "conditions": [
+                    {"field": "raw", "operator": "contains", "value": "-ExecutionPolicy Bypass"},
+                    {"field": "raw", "operator": "contains", "value": "-EncodedCommand"},
+                    {"field": "raw", "operator": "contains", "value": "DownloadString"},
+                ],
+                "enabled": True,
+            },
+        ]
+        existing_names = {r["name"] for r in engine.list_rules()}
+        for rule in demo_rules:
+            if rule["name"] not in existing_names:
+                engine.create_rule(rule)
+        if verbose:
+            print(f"[demo] {len(demo_rules)} regras customizadas inseridas")
+    except Exception as e:
+        if verbose:
+            print(f"[demo] Custom Rules seed falhou: {e}")
 
 
 def clear_demo(repo, verbose: bool = True) -> None:

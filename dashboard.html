@@ -1676,6 +1676,13 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 <body>
 <div id="app">
 
+<!-- DEMO BANNER — visível apenas em modo demo -->
+<div id="demo-banner" style="display:none;background:linear-gradient(90deg,#d29922 0%,#f0883e 100%);color:#0d1117;font-size:.78rem;font-weight:600;text-align:center;padding:6px 16px;letter-spacing:.03em;position:relative;z-index:200">
+  ⚡ Você está no <strong>modo demonstração</strong> — dados fictícios para avaliação.
+  <a href="/pricing" style="color:#0d1117;text-decoration:underline;margin-left:12px">Ver planos →</a>
+  <button onclick="resetDemo()" style="margin-left:16px;background:rgba(0,0,0,.15);border:none;border-radius:4px;color:#0d1117;padding:2px 10px;cursor:pointer;font-size:.75rem">↻ Resetar dados</button>
+</div>
+
 <!-- HEADER -->
 <div id="hdr">
   <div class="logo">
@@ -1733,6 +1740,7 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
     <div class="tab" onclick="goPage('ml-anomaly',this)" title="ML Anomalias">🤖 ML Anomaly</div>
     <div class="tab" onclick="goPage('compliance',this)" title="Conformidade">📋 Compliance</div>
     <div class="tab" onclick="goPage('custom-rules',this)" title="Regras Customizadas">⚙ My Rules</div>
+    <div class="tab" onclick="goPage('webhooks',this)" title="Webhook Alerts">🔔 Webhooks</div>
   </div>
   <button class="tab-scroll-btn" id="tab-scroll-right" onclick="scrollTabs(200)" title="Mais abas →">›</button>
 </div>
@@ -2753,6 +2761,7 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 
 <!-- ── CUSTOM RULES ──────────────────────────────────────────────── -->
 <div class="page" id="p-custom-rules"></div>
+<div class="page" id="p-webhooks"></div>
 
 <!-- ── STATS ───────────────────────────────────────────────────────── -->
 <div class="page" id="p-stats">
@@ -2792,6 +2801,25 @@ function scrollTabs(delta){
   }
 }
 // Also update on tab click scroll
+// ── Demo mode detection ───────────────────────────────────────────
+(async function detectDemo(){
+  try {
+    const r = await fetch('/api/health');
+    const d = await r.json();
+    if(d?.demo_mode || d?.tenant_id === 'demo-tenant-netguard'){
+      const b = document.getElementById('demo-banner');
+      if(b) b.style.display = 'block';
+    }
+  } catch{}
+})();
+async function resetDemo(){
+  if(!confirm('Resetar todos os dados de demonstração?')) return;
+  const r = await fetch('/demo/reset',{method:'POST'});
+  const d = await r.json();
+  if(d?.ok) { toast(`Demo resetado — ${d.events} eventos criados`,'ok'); loadFeed(); }
+  else toast('Erro ao resetar demo','err');
+}
+
 document.addEventListener('DOMContentLoaded',function(){
   const t=document.getElementById('main-tabs');
   if(t) t.addEventListener('scroll',function(){
@@ -2842,6 +2870,7 @@ function goPage(name,el){
   if(name==='ml-anomaly')  loadMLAnomaly();
   if(name==='compliance')  loadCompliance();
   if(name==='custom-rules') loadCustomRules();
+  if(name==='webhooks')    loadWebhooks();
   if(name==='geomap'){
     loadGeo();
     if(liveInterval)clearInterval(liveInterval);
@@ -5471,11 +5500,158 @@ async function deleteCR(id){
   await api(`/rules/custom/${id}`,{method:'DELETE'});
   toast('Regra removida','ok');loadCustomRules();
 }
+
+// ══════════════════════════════════════════════ WEBHOOKS ══════════
+
+const WH_TYPES = ['slack','teams','discord','generic'];
+const WH_SEVS  = ['critical','high','medium','low'];
+let whFormOpen = false;
+
+async function loadWebhooks(){
+  const pg = document.getElementById('p-webhooks');
+  if(!pg) return;
+  pg.innerHTML = `
+  <div style="padding:20px;width:100%;max-width:900px;margin:0 auto;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <div>
+        <div style="font-size:1.1rem;font-weight:700">🔔 Webhook Alerts</div>
+        <div style="font-size:.8rem;color:var(--txt3);margin-top:2px">Envie alertas críticos para Slack, Teams, Discord ou qualquer URL HTTP.</div>
+      </div>
+      <button class="fbtn" onclick="showAddWebhook()" style="background:var(--blu);color:#fff;padding:6px 14px">+ Novo Webhook</button>
+    </div>
+    <div id="wh-form-area"></div>
+    <div id="wh-list"><div class="empty"><span>Carregando…</span></div></div>
+  </div>`;
+
+  const r = await api('/webhooks');
+  const list = document.getElementById('wh-list');
+  if(!list) return;
+  const whs = r?.webhooks || [];
+  if(!whs.length){
+    list.innerHTML = `<div class="empty" style="height:120px"><span>Nenhum webhook configurado. Clique em "+ Novo Webhook" para começar.</span></div>`;
+    return;
+  }
+  const typeIcon = {slack:'<img src="https://slack.com/favicon.ico" style="width:14px;height:14px;border-radius:3px" onerror="this.outerHTML=\'💬\'">',teams:'<img src="https://teams.microsoft.com/favicon.ico" style="width:14px;height:14px;border-radius:3px" onerror="this.outerHTML=\'💼\'">',discord:'<img src="https://discord.com/assets/favicon.ico" style="width:14px;height:14px;border-radius:3px" onerror="this.outerHTML=\'🎮\'">',generic:'🌐'};
+  list.innerHTML = whs.map(w=>`
+  <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:14px 16px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-size:1.1rem">${typeIcon[w.type]||'🌐'}</span>
+      <span style="font-weight:600;flex:1">${w.name}</span>
+      <span style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:${w.enabled?'rgba(63,185,80,.15)':'rgba(139,148,158,.12)'};color:${w.enabled?'var(--grn)':'var(--txt3)'}">${w.enabled?'● Ativo':'○ Pausado'}</span>
+      <span style="font-size:.72rem;color:var(--txt3)">min: <b style="color:var(--ora)">${w.min_severity}</b></span>
+      <span style="font-size:.72rem;color:var(--txt3)">hits: ${w.hit_count||0} · falhas: ${w.fail_count||0}</span>
+      <button class="fbtn" onclick="testWebhook(${w.id})" title="Testar">⚡ Teste</button>
+      <button class="fbtn" onclick="toggleWebhook(${w.id})">${w.enabled?'Pausar':'Ativar'}</button>
+      <button class="fbtn" onclick="showWHLogs(${w.id})" title="Ver logs">📋</button>
+      <button class="fbtn" style="color:var(--red)" onclick="deleteWebhook(${w.id})">✕</button>
+    </div>
+    <div style="font-size:.72rem;color:var(--txt3);margin-top:6px;font-family:var(--mono);word-break:break-all">${w.url}</div>
+    <div id="wh-logs-${w.id}"></div>
+  </div>`).join('');
+}
+
+function showAddWebhook(){
+  const area = document.getElementById('wh-form-area');
+  if(!area) return;
+  if(whFormOpen){ area.innerHTML=''; whFormOpen=false; return; }
+  whFormOpen = true;
+  area.innerHTML = `
+  <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:16px;margin-bottom:16px">
+    <div style="font-weight:600;margin-bottom:12px">Novo Webhook</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Nome</div>
+        <input id="wh-name" class="finput" placeholder="ex: Slack #alertas" style="width:100%">
+      </div>
+      <div>
+        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Tipo</div>
+        <select id="wh-type" class="fsel" style="width:100%">
+          <option value="slack">Slack</option>
+          <option value="teams">Microsoft Teams</option>
+          <option value="discord">Discord</option>
+          <option value="generic">HTTP Genérico</option>
+        </select>
+      </div>
+      <div style="grid-column:1/-1">
+        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">URL do Webhook</div>
+        <input id="wh-url" class="finput" placeholder="https://hooks.slack.com/services/..." style="width:100%">
+      </div>
+      <div>
+        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Severidade mínima</div>
+        <select id="wh-sev" class="fsel" style="width:100%">
+          <option value="critical">CRITICAL</option>
+          <option value="high" selected>HIGH</option>
+          <option value="medium">MEDIUM</option>
+          <option value="low">LOW</option>
+        </select>
+      </div>
+      <div>
+        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Secret (opcional)</div>
+        <input id="wh-secret" class="finput" placeholder="token de validação" style="width:100%">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="fbtn" style="background:var(--blu);color:#fff" onclick="saveWebhook()">Salvar</button>
+      <button class="fbtn" onclick="document.getElementById('wh-form-area').innerHTML='';whFormOpen=false">Cancelar</button>
+    </div>
+  </div>`;
+}
+
+async function saveWebhook(){
+  const name   = document.getElementById('wh-name')?.value.trim();
+  const url    = document.getElementById('wh-url')?.value.trim();
+  const type   = document.getElementById('wh-type')?.value;
+  const sev    = document.getElementById('wh-sev')?.value;
+  const secret = document.getElementById('wh-secret')?.value.trim();
+  if(!name||!url){ toast('Nome e URL obrigatórios','err'); return; }
+  const r = await api('/webhooks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,url,type,min_severity:sev,secret})});
+  if(r?.ok){ toast('Webhook criado','ok'); whFormOpen=false; loadWebhooks(); }
+  else toast(r?.error||'Erro ao criar','err');
+}
+
+async function testWebhook(id){
+  toast('Enviando teste…','info');
+  const r = await api(`/webhooks/${id}/test`,{method:'POST'});
+  if(r?.ok) toast(`Teste enviado! (HTTP ${r.status_code||'ok'})`, 'ok');
+  else toast(`Falhou: ${r?.error||'erro desconhecido'}`, 'err');
+}
+
+async function toggleWebhook(id){
+  await api(`/webhooks/${id}/toggle`,{method:'POST'});
+  loadWebhooks();
+}
+
+async function deleteWebhook(id){
+  if(!confirm('Remover este webhook?')) return;
+  await api(`/webhooks/${id}`,{method:'DELETE'});
+  toast('Webhook removido','ok'); loadWebhooks();
+}
+
+async function showWHLogs(id){
+  const el = document.getElementById(`wh-logs-${id}`);
+  if(!el) return;
+  if(el.innerHTML){ el.innerHTML=''; return; }
+  const r = await api(`/webhooks/${id}/logs`);
+  const logs = r?.logs || [];
+  if(!logs.length){ el.innerHTML='<div style="font-size:.72rem;color:var(--txt3);margin-top:8px">Sem logs ainda.</div>'; return; }
+  el.innerHTML = `<div style="margin-top:10px;border-top:1px solid var(--b2);padding-top:8px">
+    <div style="font-size:.72rem;color:var(--txt3);margin-bottom:6px">Últimos ${logs.length} disparos</div>
+    ${logs.map(l=>`
+    <div style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--b1);font-size:.72rem">
+      <span style="color:${l.status==='ok'?'var(--grn)':'var(--red)'}">${l.status==='ok'?'✔':'✗'}</span>
+      <span style="color:var(--txt3)">${l.sent_at?.replace('T',' ').replace('Z','')}</span>
+      <span style="color:var(--ora)">${l.severity||'—'}</span>
+      <span style="flex:1;color:var(--txt2)">${l.event_type||'—'}</span>
+      <span style="color:${l.status_code&&l.status_code<300?'var(--grn)':'var(--red)'}">HTTP ${l.status_code||'—'}</span>
+      ${l.error?`<span style="color:var(--red)" title="${l.error}">⚠</span>`:''}
+    </div>`).join('')}
+  </div>`;
+}
 </script>
 
 <!-- ── Páginas das novas abas ─────────────────────────────────── -->
 <style>
-#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules{
+#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules,#p-webhooks{
   flex-direction:column;overflow:hidden;
 }
 </style>

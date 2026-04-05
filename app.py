@@ -348,6 +348,35 @@ except ImportError:
     logger.warning("flask-talisman não instalado — headers de segurança desativados. "
                    "Instale com: pip install flask-talisman")
 
+# ── Rate Limiting via Flask-Limiter (se disponível) ──────────────
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    limiter = Limiter(
+        app=app,
+        key_func=get_remote_address,
+        default_limits=["600 per minute"],  # limite global
+        storage_uri="memory://",
+        headers_enabled=True,                # X-RateLimit-* headers
+    )
+    # Atalhos de decorator reutilizáveis
+    _limit_login    = limiter.limit("10 per minute")     # brute force login
+    _limit_report   = limiter.limit("5 per minute")      # PDF pesado
+    _limit_ioc_check= limiter.limit("60 per minute")     # check de IOC em massa
+    _limit_train    = limiter.limit("2 per minute")      # treino ML
+    logger.info("Flask-Limiter ativo | default=600/min")
+except ImportError:
+    logger.warning("flask-limiter não instalado — rate limiting desativado. "
+                   "Instale com: pip install flask-limiter")
+    # Fallback: decorators que não fazem nada
+    class _NoopLimiter:
+        def limit(self, *a, **kw):
+            def decorator(f): return f
+            return decorator
+        def exempt(self, f): return f
+    limiter       = _NoopLimiter()
+    _limit_login  = _limit_report = _limit_ioc_check = _limit_train = limiter.limit("")
+
 # ── Whitelist ─────────────────────────────────────────────────────
 WHITELIST = ["127.0.0.1","::1","192.168.15.1","192.168.15.2"]
 extras = os.environ.get("IDS_WHITELIST_IPS","")
@@ -771,6 +800,22 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = ""):
                 })
             except Exception:
                 pass
+
+        # Webhook dispatch — envia alerta em background
+        if WEBHOOK_AVAILABLE:
+            try:
+                _get_webhook_engine().dispatch({
+                    "severity":   e.severity,
+                    "threat":     e.threat_name,
+                    "event_type": "detection",
+                    "source_ip":  ip or "—",
+                    "hostname":   os.environ.get("COMPUTERNAME", "netguard-host"),
+                    "timestamp":  datetime.now().isoformat() + "Z",
+                    "details":    {"raw": log[:300]},
+                })
+            except Exception:
+                pass
+
     return eventos
 
 # ── Monitor: Event Log ────────────────────────────────────────────
@@ -2572,11 +2617,20 @@ def health():
     critical_ok = db_ok and monitor_ok
     overall     = "healthy" if critical_ok else "degraded"
 
+    tid = _resolve_tenant_id()
+    try:
+        from demo_seed import DEMO_TENANT_ID
+        is_demo = (tid == DEMO_TENANT_ID)
+    except Exception:
+        is_demo = False
+
     payload = {
         "status":    overall,
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "version":   "3.0",
         "uptime_cycles": monitor_status.get("ciclo", 0),
+        "demo_mode": is_demo,
+        "tenant_id": tid,
         "subsystems": {
             "database":    db_info,
             "monitor":     monitor_info,
@@ -2608,6 +2662,7 @@ def login_page():
 
 
 @app.route("/api/auth/login", methods=["POST"])
+@_limit_login
 def auth_login():
     """
     Endpoint de login — valida token (admin ou tenant) e define cookie de sessão.
@@ -3262,6 +3317,7 @@ def ioc_hits():
 
 @app.route("/api/ioc/check", methods=["POST"])
 @auth
+@_limit_ioc_check
 def ioc_check():
     """Verifica um valor (IP/domínio/hash) contra a lista de IOCs."""
     if not IOC_AVAILABLE:
@@ -3309,6 +3365,7 @@ def ml_anomaly_status():
 @app.route("/api/ml/anomaly/train", methods=["POST"])
 @auth
 @csrf_protect
+@_limit_train
 def ml_anomaly_train():
     if not ML_ANOMALY_AVAILABLE:
         return jsonify({"error": "scikit-learn não disponível"}), 503
@@ -3346,6 +3403,7 @@ def ml_anomaly_reset():
 # ═══════════════════════════════════════════════════════════════════
 @app.route("/api/report/compliance")
 @require_session
+@_limit_report
 def report_compliance():
     """Gera relatório de conformidade (SOC 2 / PCI DSS / HIPAA) em PDF."""
     try:
@@ -3551,6 +3609,85 @@ def custom_rules_operators():
         ],
         "logic_options": ["AND", "OR"],
     })
+
+
+# ═══════════════════════════════════════ WEBHOOK ALERTS ════════════
+
+try:
+    from engine.webhook_engine import get_webhook_engine
+    WEBHOOK_AVAILABLE = True
+    logger.info("Webhook Engine carregado")
+except Exception as _we:
+    WEBHOOK_AVAILABLE = False
+    logger.warning("Webhook Engine indisponível: %s", _we)
+
+def _get_webhook_engine():
+    db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+    tid = _resolve_tenant_id()
+    return get_webhook_engine(db, tid)
+
+@app.route("/api/webhooks", methods=["GET"])
+@auth
+def webhooks_list():
+    if not WEBHOOK_AVAILABLE:
+        return jsonify({"error": "Webhook Engine indisponível"}), 503
+    return jsonify({"webhooks": _get_webhook_engine().list_webhooks()})
+
+@app.route("/api/webhooks", methods=["POST"])
+@auth
+@csrf_protect
+def webhooks_create():
+    if not WEBHOOK_AVAILABLE:
+        return jsonify({"error": "Webhook Engine indisponível"}), 503
+    try:
+        wh = _get_webhook_engine().create_webhook(request.get_json(force=True) or {})
+        return jsonify({"ok": True, "webhook": wh}), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/webhooks/<int:wid>", methods=["PUT"])
+@auth
+@csrf_protect
+def webhooks_update(wid):
+    if not WEBHOOK_AVAILABLE:
+        return jsonify({"error": "Webhook Engine indisponível"}), 503
+    wh = _get_webhook_engine().update_webhook(wid, request.get_json(force=True) or {})
+    return jsonify({"ok": True, "webhook": wh})
+
+@app.route("/api/webhooks/<int:wid>", methods=["DELETE"])
+@auth
+@csrf_protect
+def webhooks_delete(wid):
+    if not WEBHOOK_AVAILABLE:
+        return jsonify({"error": "Webhook Engine indisponível"}), 503
+    _get_webhook_engine().delete_webhook(wid)
+    return jsonify({"ok": True})
+
+@app.route("/api/webhooks/<int:wid>/toggle", methods=["POST"])
+@auth
+@csrf_protect
+def webhooks_toggle(wid):
+    if not WEBHOOK_AVAILABLE:
+        return jsonify({"error": "Webhook Engine indisponível"}), 503
+    wh = _get_webhook_engine().toggle_webhook(wid)
+    return jsonify({"ok": True, "webhook": wh})
+
+@app.route("/api/webhooks/<int:wid>/test", methods=["POST"])
+@auth
+@csrf_protect
+def webhooks_test(wid):
+    if not WEBHOOK_AVAILABLE:
+        return jsonify({"error": "Webhook Engine indisponível"}), 503
+    result = _get_webhook_engine().test_webhook(wid)
+    return jsonify(result)
+
+@app.route("/api/webhooks/<int:wid>/logs", methods=["GET"])
+@auth
+def webhooks_logs(wid):
+    if not WEBHOOK_AVAILABLE:
+        return jsonify({"error": "Webhook Engine indisponível"}), 503
+    logs = _get_webhook_engine().recent_logs(wid, limit=30)
+    return jsonify({"logs": logs})
 
 
 # ═══════════════════════════════════════════════════════════════════
