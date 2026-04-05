@@ -1493,10 +1493,10 @@ def connection_graph():
             iid = f"ip:{ip}"
             if iid not in nodes:
                 i = {"ip": ip, "score": 0, "cat": "ok"}
-                from threat_intel import intel as ti
                 try:
-                    r = ti.analisar(ip)
-                    i = r
+                    from threat_intel import intel as ti
+                    r2 = ti.analisar(ip)
+                    i = r2
                 except Exception:
                     pass
                 nodes[iid] = {
@@ -2559,8 +2559,20 @@ def prometheus_metrics():
 def health():
     """
     Health check completo — retorna status de todos os subsistemas.
-    Usado por Docker healthcheck, load balancers e make health.
-    HTTP 200 = tudo OK  |  HTTP 503 = algum subsistema crítico down.
+    Em caso de erro interno, retorna JSON com traceback em vez de 500 HTML.
+    """
+    import traceback as _tb
+    try:
+        return _health_inner()
+    except Exception as _ex:
+        logger.error("health error: %s\n%s", _ex, _tb.format_exc())
+        return jsonify({"status": "error", "error": str(_ex),
+                        "traceback": _tb.format_exc()}), 500
+
+
+def _health_inner():
+    """Usado por Docker healthcheck, load balancers e make health.
+    HTTP 200 = tudo OK | HTTP 503 = algum subsistema critico down.
     """
     import time as _time
 
