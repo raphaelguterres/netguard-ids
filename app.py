@@ -2574,6 +2574,7 @@ def _health_inner():
     """Usado por Docker healthcheck, load balancers e make health.
     HTTP 200 = tudo OK | HTTP 503 = algum subsistema critico down.
     """
+    from datetime import timezone as _tz
     import time as _time
 
     # ── Banco de dados ─────────────────────────────────────────────
@@ -2638,7 +2639,7 @@ def _health_inner():
 
     payload = {
         "status":    overall,
-        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "timestamp": datetime.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "version":   "3.0",
         "uptime_cycles": monitor_status.get("ciclo", 0),
         "demo_mode": is_demo,
