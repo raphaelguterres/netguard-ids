@@ -12,19 +12,19 @@ Uso:
     )
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: F401
 
 import io
 import calendar
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import datetime, timezone, timedelta  # noqa: F401
+from typing import Optional  # noqa: F401
 
 # ── ReportLab ────────────────────────────────────────────────────────────────
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT  # noqa: F401
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
     HRFlowable, PageBreak, KeepTogether,

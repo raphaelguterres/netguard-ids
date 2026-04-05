@@ -2,11 +2,9 @@
 NetGuard IDS — Trial Token Engine
 Gera links de demonstração com tempo limitado para clientes em potencial.
 """
-from __future__ import annotations
+from __future__ import annotations  # noqa: F401
 
-import hashlib
 import logging
-import os
 import secrets
 import sqlite3
 import threading

@@ -24,12 +24,12 @@ Uso:
     anomalies = engine.detect_current()
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: F401
 
-import json
+import json  # noqa: F401
 import logging
 import threading
-from collections import defaultdict
+from collections import defaultdict  # noqa: F401
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 

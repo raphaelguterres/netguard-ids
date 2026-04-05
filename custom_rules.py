@@ -26,7 +26,7 @@ Campos disponíveis:
     raw, details.<key>, tags, hour, weekday, timestamp
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: F401
 
 import json
 import logging

@@ -15,10 +15,10 @@ Uso:
     # hit = {"type": "ip", "value": "1.2.3.4", "threat": "C2 Server", ...}
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: F401
 
 import csv
-import hashlib
+import hashlib  # noqa: F401
 import io
 import ipaddress
 import json

@@ -2,7 +2,7 @@
 NetGuard IDS — Webhook Alert Engine
 Envia alertas críticos para Slack, Teams, Discord ou qualquer HTTP endpoint.
 """
-from __future__ import annotations
+from __future__ import annotations  # noqa: F401
 
 import json
 import logging
