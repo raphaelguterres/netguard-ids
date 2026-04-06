@@ -2817,6 +2817,17 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 
 <!-- ── STATS ───────────────────────────────────────────────────────── -->
 <div class="page" id="p-stats">
+  <!-- Barra de ações do relatório -->
+  <div style="width:100%;padding:10px 16px;background:var(--s2);border-bottom:1px solid var(--b1);display:flex;align-items:center;gap:10px;flex-shrink:0">
+    <span style="font-size:.8rem;color:var(--txt3)">Período:</span>
+    <input id="stats-month" type="month" class="finput" style="width:140px;height:28px;font-size:.8rem"
+           value="${new Date().toISOString().slice(0,7)}">
+    <button class="fbtn" style="background:var(--blu);color:#fff;padding:4px 14px;font-size:.8rem"
+            onclick="downloadReportPDF()">⬇ Baixar Relatório PDF</button>
+    <button class="fbtn" style="padding:4px 10px;font-size:.8rem"
+            onclick="downloadReportCSV()">⬇ CSV</button>
+    <span id="stats-dl-status" style="font-size:.75rem;color:var(--grn)"></span>
+  </div>
   <div class="sp"><div class="ph"><span class="ph-t">Top Ameaças</span></div><div class="sp-body" id="st-thr"><div class="empty"><span>Sem dados</span></div></div></div>
   <div class="sp"><div class="ph"><span class="ph-t">Top IPs Atacantes</span></div><div class="sp-body" id="st-ips"><div class="empty"><span>Sem dados</span></div></div></div>
   <div class="sp"><div class="ph"><span class="ph-t">Por Severidade</span></div><div class="sp-body" id="st-sev"><div class="empty"><span>Sem dados</span></div></div></div>
@@ -2826,6 +2837,116 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 </div><!-- /body -->
 </div><!-- /app -->
 <div id="toast"></div>
+
+<!-- ── Onboarding Wizard ──────────────────────────────────────────── -->
+<div id="onboard-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9000;align-items:center;justify-content:center">
+  <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;width:min(560px,95vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+
+    <!-- Header -->
+    <div style="background:linear-gradient(135deg,#1f6feb,#0d419d);border-radius:12px 12px 0 0;padding:24px 28px">
+      <div style="font-size:1.4rem;font-weight:700;color:#fff">🛡 Bem-vindo ao NetGuard IDS</div>
+      <div style="color:rgba(255,255,255,.75);font-size:.85rem;margin-top:4px">Configure em 3 passos para começar a monitorar sua rede</div>
+      <div style="display:flex;gap:6px;margin-top:16px" id="onboard-steps-bar">
+        <div class="ob-step on" data-step="1">1 — Visão Geral</div>
+        <div class="ob-step" data-step="2">2 — Notificações</div>
+        <div class="ob-step" data-step="3">3 — Pronto!</div>
+      </div>
+    </div>
+
+    <!-- Step 1 -->
+    <div class="ob-page" id="ob-p1" style="padding:24px 28px">
+      <div style="font-size:1rem;font-weight:600;margin-bottom:12px">O que o NetGuard monitora?</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">
+        <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+          <div style="font-size:1.2rem">🔍</div><div style="font-weight:600;font-size:.85rem;margin-top:4px">Detecção em tempo real</div>
+          <div style="font-size:.75rem;color:#8b949e;margin-top:4px">Port scans, brute force, ransomware e 200+ padrões MITRE ATT&CK</div>
+        </div>
+        <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+          <div style="font-size:1.2rem">📊</div><div style="font-weight:600;font-size:.85rem;margin-top:4px">Dashboard executivo</div>
+          <div style="font-size:.75rem;color:#8b949e;margin-top:4px">Kill Chain, Risk Score por host, correlação de eventos e gráfico de rede</div>
+        </div>
+        <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+          <div style="font-size:1.2rem">🚫</div><div style="font-weight:600;font-size:.85rem;margin-top:4px">Bloqueio automático</div>
+          <div style="font-size:.75rem;color:#8b949e;margin-top:4px">IPs maliciosos bloqueados via fail2ban sem intervenção manual</div>
+        </div>
+        <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+          <div style="font-size:1.2rem">📄</div><div style="font-weight:600;font-size:.85rem;margin-top:4px">Relatórios PDF</div>
+          <div style="font-size:.75rem;color:#8b949e;margin-top:4px">Relatório mensal pronto para enviar ao cliente ou CISO. Aba Stats → Baixar PDF</div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end">
+        <button class="fbtn" style="background:#1f6feb;color:#fff;padding:8px 20px" onclick="obNext(2)">Próximo →</button>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="ob-page" id="ob-p2" style="display:none;padding:24px 28px">
+      <div style="font-size:1rem;font-weight:600;margin-bottom:4px">Configure seu primeiro alerta</div>
+      <div style="font-size:.8rem;color:#8b949e;margin-bottom:16px">Receba notificações no Telegram, WhatsApp, Slack ou Discord quando uma ameaça for detectada.</div>
+      <div style="display:grid;gap:10px;margin-bottom:16px">
+        <div>
+          <div style="font-size:.75rem;color:#8b949e;margin-bottom:4px">Canal</div>
+          <select id="ob-wh-type" class="fsel" style="width:100%" onchange="obTypeChanged()">
+            <option value="telegram">📱 Telegram (recomendado)</option>
+            <option value="whatsapp">💬 WhatsApp</option>
+            <option value="slack">🟩 Slack</option>
+            <option value="discord">🎮 Discord</option>
+            <option value="teams">🔵 Microsoft Teams</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:.75rem;color:#8b949e;margin-bottom:4px">URL</div>
+          <input id="ob-wh-url" class="finput" style="width:100%" placeholder="https://api.telegram.org/bot{TOKEN}/sendMessage">
+        </div>
+        <div>
+          <div style="font-size:.75rem;color:#8b949e;margin-bottom:4px" id="ob-secret-lbl">Chat ID</div>
+          <input id="ob-wh-secret" class="finput" style="width:100%" placeholder="-1001234567890">
+        </div>
+        <div id="ob-wh-hint" style="font-size:.75rem;color:#58a6ff;background:#0d2044;border:1px solid #1f6feb44;border-radius:6px;padding:10px">
+          ① Crie um bot no @BotFather e copie o token<br>
+          ② Adicione o bot ao grupo e envie /start<br>
+          ③ Acesse api.telegram.org/bot{TOKEN}/getUpdates e copie o chat_id
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <button class="fbtn" onclick="obNext(1)">← Voltar</button>
+        <div style="display:flex;gap:8px">
+          <button class="fbtn" onclick="obSkip()" style="color:#8b949e">Pular por agora</button>
+          <button class="fbtn" style="background:#1f6feb;color:#fff;padding:8px 20px" onclick="obSaveWebhook()">Salvar e continuar →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="ob-page" id="ob-p3" style="display:none;padding:28px;text-align:center">
+      <div style="font-size:3rem;margin-bottom:12px">✅</div>
+      <div style="font-size:1.2rem;font-weight:700;margin-bottom:8px">NetGuard está ativo!</div>
+      <div style="font-size:.85rem;color:#8b949e;max-width:380px;margin:0 auto 24px">
+        O monitoramento já começou. Acesse as abas para explorar detecções, Kill Chain, Risk Score e muito mais.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:left;margin-bottom:24px">
+        <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:10px;font-size:.8rem">
+          <b style="color:#58a6ff">⛓ Kill Chain</b><br><span style="color:#8b949e">Timeline MITRE ATT&CK por IP</span>
+        </div>
+        <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:10px;font-size:.8rem">
+          <b style="color:#f0883e">🎯 Risk Score</b><br><span style="color:#8b949e">Risco por host em tempo real</span>
+        </div>
+        <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:10px;font-size:.8rem">
+          <b style="color:#3fb950">≋ Stats</b><br><span style="color:#8b949e">Baixe o relatório PDF mensal</span>
+        </div>
+        <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:10px;font-size:.8rem">
+          <b style="color:#d29922">🔔 Webhooks</b><br><span style="color:#8b949e">Gerencie seus canais de alerta</span>
+        </div>
+      </div>
+      <button class="fbtn" style="background:#1f6feb;color:#fff;padding:10px 32px;font-size:.95rem" onclick="obClose()">Entrar no Dashboard</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.ob-step { flex:1; text-align:center; padding:5px 8px; border-radius:20px; font-size:.72rem; color:rgba(255,255,255,.5); background:rgba(255,255,255,.08); cursor:default; }
+.ob-step.on { background:rgba(255,255,255,.2); color:#fff; font-weight:600; }
+</style>
 
 <script>
 // ── State ─────────────────────────────────────────────────────────
@@ -2920,6 +3041,8 @@ document.addEventListener('DOMContentLoaded',function(){
       else wrapper.classList.remove('scrolled');
     }
   });
+  // Mostra onboarding para novos usuários (apenas 1 vez por sessão)
+  setTimeout(obShowIfNeeded, 800);
 });
 
 function goPage(name,el){
@@ -5623,7 +5746,13 @@ async function loadWebhooks(){
     list.innerHTML = `<div class="empty" style="height:120px"><span>Nenhum webhook configurado. Clique em "+ Novo Webhook" para começar.</span></div>`;
     return;
   }
-  const typeIcon = {slack:'<img src="https://slack.com/favicon.ico" style="width:14px;height:14px;border-radius:3px" onerror="this.outerHTML=\'💬\'">',teams:'<img src="https://teams.microsoft.com/favicon.ico" style="width:14px;height:14px;border-radius:3px" onerror="this.outerHTML=\'💼\'">',discord:'<img src="https://discord.com/assets/favicon.ico" style="width:14px;height:14px;border-radius:3px" onerror="this.outerHTML=\'🎮\'">',generic:'🌐'};
+  const typeIcon = {
+    telegram: '📱', whatsapp: '💬',
+    slack: '<img src="https://slack.com/favicon.ico" style="width:14px;height:14px;border-radius:3px" onerror="this.outerHTML=\'🟩\'">',
+    teams: '<img src="https://teams.microsoft.com/favicon.ico" style="width:14px;height:14px;border-radius:3px" onerror="this.outerHTML=\'🔵\'">',
+    discord: '<img src="https://discord.com/assets/favicon.ico" style="width:14px;height:14px;border-radius:3px" onerror="this.outerHTML=\'🎮\'">',
+    generic: '🌐'
+  };
   list.innerHTML = whs.map(w=>`
   <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:14px 16px;margin-bottom:10px">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -5657,16 +5786,19 @@ function showAddWebhook(){
       </div>
       <div>
         <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Tipo</div>
-        <select id="wh-type" class="fsel" style="width:100%">
-          <option value="slack">Slack</option>
-          <option value="teams">Microsoft Teams</option>
-          <option value="discord">Discord</option>
-          <option value="generic">HTTP Genérico</option>
+        <select id="wh-type" class="fsel" style="width:100%" onchange="whTypeChanged()">
+          <option value="telegram">📱 Telegram</option>
+          <option value="whatsapp">💬 WhatsApp (Z-API / Twilio)</option>
+          <option value="slack">🟩 Slack</option>
+          <option value="teams">🔵 Microsoft Teams</option>
+          <option value="discord">🎮 Discord</option>
+          <option value="generic">🌐 HTTP Genérico</option>
         </select>
       </div>
       <div style="grid-column:1/-1">
         <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">URL do Webhook</div>
-        <input id="wh-url" class="finput" placeholder="https://hooks.slack.com/services/..." style="width:100%">
+        <input id="wh-url" class="finput" placeholder="https://api.telegram.org/bot{TOKEN}/sendMessage" style="width:100%">
+        <div id="wh-url-hint" style="font-size:.7rem;color:var(--acc);margin-top:3px"></div>
       </div>
       <div>
         <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Severidade mínima</div>
@@ -5678,15 +5810,41 @@ function showAddWebhook(){
         </select>
       </div>
       <div>
-        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Secret (opcional)</div>
-        <input id="wh-secret" class="finput" placeholder="token de validação" style="width:100%">
+        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px"><span id="wh-secret-label">Secret / Chat ID</span></div>
+        <input id="wh-secret" class="finput" placeholder="chat_id (ex: -1001234567890)" style="width:100%">
+        <div id="wh-secret-hint" style="font-size:.7rem;color:var(--txt3);margin-top:3px">Para Telegram: cole o chat_id do grupo ou usuário</div>
       </div>
     </div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="fbtn" style="background:var(--blu);color:#fff" onclick="saveWebhook()">Salvar</button>
       <button class="fbtn" onclick="document.getElementById('wh-form-area').innerHTML='';whFormOpen=false">Cancelar</button>
+      <a id="wh-doc-link" href="ALERTAS_NOTIFICACOES.md" target="_blank" style="font-size:.75rem;color:var(--acc);margin-left:auto;align-self:center">📖 Ver guia de configuração</a>
     </div>
   </div>`;
+}
+
+const WH_TYPE_META = {
+  telegram:  { url: 'https://api.telegram.org/bot{TOKEN}/sendMessage', urlHint: 'Substitua {TOKEN} pelo token do seu bot (obtido no @BotFather)', secretLabel: 'Chat ID', secretHint: 'ID do grupo/canal (ex: -1001234567890). Obtenha via /getUpdates', secretPH: '-1001234567890' },
+  whatsapp:  { url: 'https://api.z-api.io/instances/{ID}/token/{TOKEN}/send-text', urlHint: 'Z-API: substitua {ID} e {TOKEN}. Twilio: use URL completa da API Messages', secretLabel: 'Secret / Subtipo', secretHint: 'Vazio para Z-API. Para Twilio: "twilio:ACCOUNT_SID:AUTH_TOKEN"', secretPH: 'Deixe vazio para Z-API' },
+  slack:     { url: 'https://hooks.slack.com/services/T.../B.../...', urlHint: 'Incoming Webhook criado em api.slack.com/apps', secretLabel: 'Secret (opcional)', secretHint: '', secretPH: '' },
+  teams:     { url: 'https://outlook.office.com/webhook/.../IncomingWebhook/...', urlHint: 'Conector Incoming Webhook no canal do Teams', secretLabel: 'Secret (opcional)', secretHint: '', secretPH: '' },
+  discord:   { url: 'https://discord.com/api/webhooks/.../...', urlHint: 'Webhook criado em Editar Canal → Integrações → Webhooks', secretLabel: 'Secret (opcional)', secretHint: '', secretPH: '' },
+  generic:   { url: 'https://seu-sistema.com/api/webhook', urlHint: 'Qualquer endpoint POST JSON. O secret é enviado no header X-NetGuard-Secret', secretLabel: 'Secret (opcional)', secretHint: 'Enviado no header X-NetGuard-Secret para autenticação', secretPH: 'chave-secreta' },
+};
+
+function whTypeChanged(){
+  const type = document.getElementById('wh-type')?.value || 'telegram';
+  const meta = WH_TYPE_META[type] || WH_TYPE_META.generic;
+  const urlEl    = document.getElementById('wh-url');
+  const urlHint  = document.getElementById('wh-url-hint');
+  const secLabel = document.getElementById('wh-secret-label');
+  const secHint  = document.getElementById('wh-secret-hint');
+  const secEl    = document.getElementById('wh-secret');
+  if(urlEl)    urlEl.placeholder    = meta.url;
+  if(urlHint)  urlHint.textContent  = meta.urlHint;
+  if(secLabel) secLabel.textContent = meta.secretLabel;
+  if(secHint)  secHint.textContent  = meta.secretHint;
+  if(secEl)    secEl.placeholder    = meta.secretPH;
 }
 
 async function saveWebhook(){
@@ -5706,6 +5864,123 @@ async function testWebhook(id){
   const r = await api(`/webhooks/${id}/test`,{method:'POST'});
   if(r?.ok) toast(`Teste enviado! (HTTP ${r.status_code||'ok'})`, 'ok');
   else toast(`Falhou: ${r?.error||'erro desconhecido'}`, 'err');
+}
+
+// ── Download relatório PDF ────────────────────────────────────────
+async function downloadReportPDF(){
+  const month  = document.getElementById('stats-month')?.value || '';
+  const status = document.getElementById('stats-dl-status');
+  if(status) status.textContent = '⏳ Gerando PDF…';
+  try {
+    const params = new URLSearchParams({ month, name: 'Cliente', company: 'NetGuard IDS' });
+    const resp   = await fetch(`/api/report/monthly?${params}`, {
+      headers: { 'X-API-Key': window._apiKey || '' }
+    });
+    if(!resp.ok){
+      const err = await resp.json().catch(()=>({error:'Erro desconhecido'}));
+      toast(`Erro: ${err.error}`, 'err');
+      if(status) status.textContent = '';
+      return;
+    }
+    const blob = await resp.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `netguard-relatorio-${month||new Date().toISOString().slice(0,7)}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+    if(status) status.textContent = '✓ PDF baixado';
+    setTimeout(()=>{ if(status) status.textContent=''; }, 3000);
+  } catch(e) {
+    toast('Falha ao gerar PDF', 'err');
+    if(status) status.textContent = '';
+  }
+}
+
+// ── Onboarding Wizard ─────────────────────────────────────────────
+const OB_KEY = 'netguard_onboarded_v1';
+const OB_TYPE_HINTS = {
+  telegram:  { lbl:'Chat ID', ph:'-1001234567890', hint:'① Crie um bot no @BotFather e copie o token<br>② Adicione ao grupo e envie /start<br>③ Acesse api.telegram.org/bot{TOKEN}/getUpdates e copie o chat_id', url:'https://api.telegram.org/bot{TOKEN}/sendMessage' },
+  whatsapp:  { lbl:'Secret / Subtipo', ph:'Vazio para Z-API', hint:'Z-API: cole a URL da instância. Twilio: use "twilio:SID:TOKEN" no campo secret.', url:'https://api.z-api.io/instances/{ID}/token/{TOKEN}/send-text' },
+  slack:     { lbl:'Secret (opcional)', ph:'', hint:'Crie um Incoming Webhook em api.slack.com/apps → escolha o canal → copie a URL.', url:'https://hooks.slack.com/services/...' },
+  discord:   { lbl:'Secret (opcional)', ph:'', hint:'No canal Discord: Editar Canal → Integrações → Webhooks → Novo Webhook → Copiar URL.', url:'https://discord.com/api/webhooks/...' },
+  teams:     { lbl:'Secret (opcional)', ph:'', hint:'No canal Teams: ··· → Conectores → Incoming Webhook → Configurar → Copiar URL.', url:'https://outlook.office.com/webhook/...' },
+};
+
+function obShowIfNeeded(){
+  if(sessionStorage.getItem(OB_KEY)) return;
+  const el = document.getElementById('onboard-overlay');
+  if(el){ el.style.display='flex'; }
+}
+
+function obNext(step){
+  [1,2,3].forEach(s=>{
+    const p = document.getElementById(`ob-p${s}`);
+    if(p) p.style.display = s===step ? 'block' : 'none';
+    const b = document.querySelector(`.ob-step[data-step="${s}"]`);
+    if(b) b.classList.toggle('on', s===step);
+  });
+}
+
+function obTypeChanged(){
+  const type = document.getElementById('ob-wh-type')?.value || 'telegram';
+  const meta = OB_TYPE_HINTS[type] || OB_TYPE_HINTS.telegram;
+  const lbl  = document.getElementById('ob-secret-lbl');
+  const sec  = document.getElementById('ob-wh-secret');
+  const url  = document.getElementById('ob-wh-url');
+  const hint = document.getElementById('ob-wh-hint');
+  if(lbl)  lbl.textContent  = meta.lbl;
+  if(sec)  sec.placeholder  = meta.ph;
+  if(url)  url.placeholder  = meta.url;
+  if(hint) hint.innerHTML   = meta.hint;
+}
+
+async function obSaveWebhook(){
+  const type   = document.getElementById('ob-wh-type')?.value;
+  const url    = document.getElementById('ob-wh-url')?.value.trim();
+  const secret = document.getElementById('ob-wh-secret')?.value.trim();
+  if(!url){ toast('Cole a URL do webhook','err'); return; }
+  const r = await api('/webhooks',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:`${type} — NetGuard Alerts`,url,type,min_severity:'high',secret})});
+  if(r?.id || r?.ok !== false){
+    toast('Webhook salvo!','ok');
+    obNext(3);
+  } else {
+    toast(r?.error||'Erro ao salvar','err');
+  }
+}
+
+function obSkip(){ obNext(3); }
+
+function obClose(){
+  sessionStorage.setItem(OB_KEY,'1');
+  const el = document.getElementById('onboard-overlay');
+  if(el) el.style.display='none';
+}
+
+// ── Download CSV de detecções ─────────────────────────────────────
+async function downloadReportCSV(){
+  const status = document.getElementById('stats-dl-status');
+  if(status) status.textContent = '⏳ Gerando CSV…';
+  try {
+    const r = await api('/detections?limit=5000');
+    const rows = r?.detections || [];
+    if(!rows.length){ toast('Sem detecções para exportar','err'); if(status) status.textContent=''; return; }
+    const cols = ['detection_id','timestamp','threat_name','severity','source_ip','status','method','mitre_tactic','confidence'];
+    const csv  = [cols.join(','), ...rows.map(d => cols.map(c => `"${(d[c]||'').toString().replace(/"/g,'""')}"`).join(','))].join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `netguard-deteccoes-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    if(status) status.textContent = `✓ ${rows.length} detecções exportadas`;
+    setTimeout(()=>{ if(status) status.textContent=''; }, 3000);
+  } catch(e) {
+    toast('Falha ao exportar CSV','err');
+    if(status) status.textContent='';
+  }
 }
 
 async function toggleWebhook(id){

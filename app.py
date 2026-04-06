@@ -2790,6 +2790,14 @@ def _health_inner():
         db_ok = False
         db_info = f"erro: {_e}"
 
+    # ── DB Adapter backend ─────────────────────────────────────────
+    try:
+        from db_adapter import db_info as _db_info_fn
+        _dbi = _db_info_fn()
+        db_backend = _dbi.get("backend", "sqlite")
+    except Exception:
+        db_backend = "sqlite"
+
     # ── Monitor loop ───────────────────────────────────────────────
     monitor_ok  = monitor_status.get("rodando", False)
     monitor_info = (
@@ -2848,6 +2856,7 @@ def _health_inner():
         "uptime_cycles": monitor_status.get("ciclo", 0),
         "demo_mode": is_demo,
         "tenant_id": tid,
+        "db_backend": db_backend,
         "subsystems": {
             "database":    db_info,
             "monitor":     monitor_info,
