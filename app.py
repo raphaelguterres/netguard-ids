@@ -433,6 +433,32 @@ ids = IDSEngine(
 )
 log_proc = LogProcessor()
 
+# ── Per-tenant IDSEngine cache ────────────────────────────────────
+# Cada tenant recebe seu próprio banco ids_detections_<tid>.db
+# garantindo isolamento total de dados entre clientes.
+_ids_engines: dict = {}
+_ids_lock    = threading.Lock()
+_IDS_BASE_PATH = os.environ.get("IDS_DB_PATH", "ids_detections.db")
+
+def _get_ids(tid: str = None) -> "IDSEngine":
+    """
+    Retorna o IDSEngine do tenant `tid`.
+    - tid None / 'default' → instância global (retrocompatibilidade)
+    - qualquer outro tid   → instância isolada com DB próprio (criada sob demanda)
+    """
+    if not tid or tid == "default":
+        return ids
+    with _ids_lock:
+        if tid not in _ids_engines:
+            db_dir  = os.path.dirname(_IDS_BASE_PATH) or "."
+            db_name = f"ids_detections_{tid[:36].replace('-','')}.db"
+            _ids_engines[tid] = IDSEngine(
+                db_path      = os.path.join(db_dir, db_name),
+                whitelist_ips= WHITELIST,
+                auto_block   = AUTO_BLOCK,
+            )
+        return _ids_engines[tid]
+
 # ── Event Repository (multi-tenant storage) ───────────────────────
 from storage.event_repository import EventRepository
 repo = EventRepository()
@@ -833,10 +859,11 @@ def ti_cache_stats():
         "oldest_entry_age": round(time.time() - oldest) if oldest else 0,
     })
 
-def analisar(log: str, ip: str = None, field: str = "raw", origem: str = ""):
+def analisar(log: str, ip: str = None, field: str = "raw", origem: str = "", tenant_id: str = None):
     ctx = {"field": field}
     if origem: ctx["origem"] = origem
-    eventos = ids.analyze(log, ip, ctx)
+    _ids_inst = _get_ids(tenant_id or _resolve_tenant_id())
+    eventos = _ids_inst.analyze(log, ip, ctx)
 
     # OWASP CRS — análise de payload web
     if owasp_engine and field in ("url","body","query_string","raw","apache"):
@@ -863,7 +890,7 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = ""):
                 from ids_engine import Detection  # noqa: F401
                 try:
                     fake_ctx = {"field": field, "sigma": True}
-                    synthetic = ids.analyze(
+                    synthetic = _ids_inst.analyze(
                         f"SIGMA:{rule.id} {log[:200]}", ip,
                         {"field": field, "sigma_rule": rule.title}
                     )
@@ -1223,31 +1250,34 @@ def after(resp):
 @app.route("/api/detections")
 @auth
 def get_detections():
-    rows = ids.get_detections(
+    _ids = _get_ids(_resolve_tenant_id())
+    rows = _ids.get_detections(
         limit=min(request.args.get("limit",100,int),500),
         offset=request.args.get("offset",0,int),
         severity=sanitize(request.args.get("severity"), max_len=20, label="severity"),
         status=sanitize(request.args.get("status"), max_len=30, label="status"),
         source_ip=sanitize_ip(request.args.get("source_ip")),
     )
-    return jsonify({"total":ids.store.count_total(),"returned":len(rows),"detections":rows})
+    return jsonify({"total":_ids.store.count_total(),"returned":len(rows),"detections":rows})
 
 @app.route("/api/detections/<did>")
 @auth
 def get_detection(did):
-    for r in ids.store.query(limit=10000):
+    _ids = _get_ids(_resolve_tenant_id())
+    for r in _ids.store.query(limit=10000):
         if r["detection_id"]==did: return jsonify(r)
     return jsonify({"error":"not found"}),404
 
 @app.route("/api/detections/<did>/status",methods=["PATCH"])
 @auth
 def update_status(did):
+    _ids = _get_ids(_resolve_tenant_id())
     body = request.get_json(force=True) or {}
     status = sanitize(body.get("status"), max_len=30, label="status")
     if status not in {"active","investigating","resolved","false_positive"}:
         return jsonify({"error":"status invalido"}),400
     note = sanitize(body.get("analyst_note",""), max_len=1000, label="analyst_note")
-    ok = ids.update_status(did, status, note)
+    ok = _ids.update_status(did, status, note)
     return (jsonify({"success":True,"detection_id":did,"new_status":status})
             if ok else jsonify({"error":"not found"}),404)
 
@@ -1260,7 +1290,7 @@ def analyze():
     if len(log)>10000: return jsonify({"error":"log muito longo"}),413
     field = sanitize(body.get("field","raw"), max_len=30, label="field")
     src_ip = sanitize_ip(body.get("source_ip"))
-    events = ids.analyze(log, src_ip or None, {"field": field})
+    events = _get_ids(_resolve_tenant_id()).analyze(log, src_ip or None, {"field": field})
 
     # OWASP CRS analysis
     owasp_matches = []
@@ -1312,13 +1342,13 @@ def analyze():
 @app.route("/api/statistics")
 @auth
 def statistics():
-    return jsonify(ids.get_statistics())
+    return jsonify(_get_ids(_resolve_tenant_id()).get_statistics())
 
 @app.route("/api/export")
 @auth
 def export():
     fmt  = request.args.get("format","json")
-    data = ids.export(fmt)
+    data = _get_ids(_resolve_tenant_id()).export(fmt)
     ct   = "text/csv" if fmt=="csv" else "application/json"
     fn   = f"ids_export.{fmt}"
     return Response(data,mimetype=ct,headers={"Content-Disposition":f"attachment;filename={fn}"})
@@ -1326,25 +1356,26 @@ def export():
 @app.route("/api/block",methods=["POST"])
 @auth
 def block_ip():
+    _ids = _get_ids(_resolve_tenant_id())
     body   = request.get_json(force=True) or {}
     ip     = body.get("ip","").strip()
     reason = body.get("reason","Manual via API")
     if not ip: return jsonify({"error":"ip obrigatorio"}),400
-    if ip in ids.whitelist_ips:
+    if ip in _ids.whitelist_ips:
         return jsonify({"error":"IP esta na whitelist — nao pode bloquear"}),409
-    ok = ids.block_ip(ip, reason)
+    ok = _ids.block_ip(ip, reason)
     return jsonify({"success":ok,"ip":ip,"reason":reason,
                     "note":"Requer privilégio de Administrador" if not ok else ""})
 
 @app.route("/api/block",methods=["GET"])
 @auth
 def list_blocks():
-    return jsonify({"blocked_ips":ids.blocker.list_blocked()})
+    return jsonify({"blocked_ips":_get_ids(_resolve_tenant_id()).blocker.list_blocked()})
 
 @app.route("/api/block/<ip>",methods=["DELETE"])
 @auth
 def unblock_ip(ip):
-    ok = ids.unblock_ip(ip)
+    ok = _get_ids(_resolve_tenant_id()).unblock_ip(ip)
     return jsonify({"success":ok,"ip":ip})
 
 
@@ -2541,8 +2572,8 @@ def geo_ips():
                     "hostname": resolve_ip(ip),
                 }
 
-    # Also include IPs from detections
-    for det in ids.get_detections(limit=100):
+    # Also include IPs from detections (tenant-scoped)
+    for det in _get_ids(_resolve_tenant_id()).get_detections(limit=100):
         ip = det.get("source_ip","")
         if ip and not ip.startswith("127.") and not ip.startswith("192.168.") and ip not in seen:
             geo = lookup(ip)
