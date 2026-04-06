@@ -6,10 +6,13 @@ Variáveis de ambiente necessárias:
   STRIPE_SECRET_KEY       sk_live_... ou sk_test_...
   STRIPE_PUBLISHABLE_KEY  pk_live_... ou pk_test_...
   STRIPE_WEBHOOK_SECRET   whsec_...
-  STRIPE_PRICE_STARTER    price_...
-  STRIPE_PRICE_PRO        price_...
-  STRIPE_PRICE_ENTERPRISE price_...
+  STRIPE_PRICE_FREE       price_...  (R$ 0 — plano gratuito, pode ser omitido)
+  STRIPE_PRICE_PRO        price_...  (R$ 990/mês)
+  STRIPE_PRICE_ENTERPRISE price_...  (R$ 3.900/mês)
+  STRIPE_PRICE_MSSP       price_...  (R$ 300/cliente/mês)
   APP_URL                 https://seudominio.com (sem barra final)
+  TRIAL_DAYS              14 (dias de trial gratuito sem cartão, default 14)
+  CONTACT_EMAIL           contato@suaempresa.com (exibido na página de preços)
 """
 
 import os
@@ -24,52 +27,113 @@ STRIPE_SECRET_KEY      = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET  = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
 APP_URL                = os.environ.get("APP_URL", "http://localhost:5000")
+TRIAL_DAYS             = int(os.environ.get("TRIAL_DAYS", "14"))
+CONTACT_EMAIL          = os.environ.get("CONTACT_EMAIL", "contato@netguard.io")
 
-# ── Catálogo de planos ─────────────────────────────────────────────
+# ── Catálogo de planos (BRL) ───────────────────────────────────────
 PLANS: Dict[str, Dict] = {
-    "starter": {
-        "name": "Starter",
-        "price_usd": 29,
-        "price_id": os.environ.get("STRIPE_PRICE_STARTER", ""),
-        "max_hosts": 3,
-        "retention_days": 7,
+    "free": {
+        "name":           "Free",
+        "label":          "Gratuito",
+        "price_brl":      0,
+        "price_id":       os.environ.get("STRIPE_PRICE_FREE", ""),
+        "max_hosts":      1,
+        "retention_days": 3,
+        "trial_days":     0,
+        "badge":          None,
+        "cta":            "Começar grátis",
+        "cta_action":     "trial",   # vai para /trial sem cartão
         "features": [
-            "3 hosts monitorados",
-            "7 dias de retenção",
-            "Alertas por email",
-            "Dashboard web",
-            "API REST básica",
+            "1 host monitorado",
+            "500 eventos/dia",
+            "Dashboard básico",
+            "Alertas por e-mail",
+            "Suporte via GitHub Issues",
         ],
+        "limits": {
+            "webhooks": 1,
+            "api_calls_day": 500,
+            "pdf_reports": False,
+        },
     },
     "pro": {
-        "name": "Pro",
-        "price_usd": 99,
-        "price_id": os.environ.get("STRIPE_PRICE_PRO", ""),
-        "max_hosts": 20,
+        "name":           "Pro",
+        "label":          "Pro",
+        "price_brl":      990,
+        "price_id":       os.environ.get("STRIPE_PRICE_PRO", ""),
+        "max_hosts":      20,
         "retention_days": 30,
+        "trial_days":     TRIAL_DAYS,
+        "badge":          "MAIS POPULAR",
+        "cta":            f"Testar {TRIAL_DAYS} dias grátis",
+        "cta_action":     "trial",
         "features": [
-            "20 hosts monitorados",
-            "30 dias de retenção",
-            "Alertas Slack / Teams / PagerDuty",
-            "API completa + Webhooks",
-            "Prometheus + Grafana",
+            "Até 20 hosts monitorados",
+            "Eventos ilimitados",
+            "Todas as fases MITRE ATT&CK",
+            "Alertas Telegram / WhatsApp / Slack",
+            "Relatórios PDF/CSV",
+            "API REST completa + Webhooks",
             "Correlação de eventos",
+            "Suporte por chat em 24h",
         ],
+        "limits": {
+            "webhooks": 10,
+            "api_calls_day": 50_000,
+            "pdf_reports": True,
+        },
     },
     "enterprise": {
-        "name": "Enterprise",
-        "price_usd": 299,
-        "price_id": os.environ.get("STRIPE_PRICE_ENTERPRISE", ""),
-        "max_hosts": 9_999,
+        "name":           "Enterprise",
+        "label":          "Enterprise",
+        "price_brl":      3_900,
+        "price_id":       os.environ.get("STRIPE_PRICE_ENTERPRISE", ""),
+        "max_hosts":      9_999,
         "retention_days": 365,
+        "trial_days":     TRIAL_DAYS,
+        "badge":          None,
+        "cta":            "Falar com especialista",
+        "cta_action":     "contact",
         "features": [
             "Hosts ilimitados",
             "1 ano de retenção",
-            "SLA 99,9 %",
-            "Suporte dedicado 24/7",
-            "Deploy on-premise assistido",
-            "SSO / SAML",
+            "SSO / LDAP / Azure AD",
+            "SLA 99,9% — suporte 4h",
+            "White-label disponível",
+            "Relatórios de compliance (ISO 27001, NIST)",
+            "Onboarding dedicado",
+            "API GraphQL completa",
         ],
+        "limits": {
+            "webhooks": 999,
+            "api_calls_day": -1,   # ilimitado
+            "pdf_reports": True,
+        },
+    },
+    "mssp": {
+        "name":           "MSSP Partner",
+        "label":          "MSSP",
+        "price_brl":      300,       # por cliente/mês
+        "price_id":       os.environ.get("STRIPE_PRICE_MSSP", ""),
+        "max_hosts":      9_999,
+        "retention_days": 90,
+        "trial_days":     30,
+        "badge":          "REVENDEDORES",
+        "cta":            "Tornar-se parceiro",
+        "cta_action":     "contact",
+        "features": [
+            "Multi-tenant nativo",
+            "Painel de gerenciamento unificado",
+            "White-label total (logo, domínio, temas)",
+            "Comissão de 20% em novos clientes indicados",
+            "Suporte técnico prioritário",
+            "Treinamento e certificação",
+        ],
+        "limits": {
+            "webhooks": 999,
+            "api_calls_day": -1,
+            "pdf_reports": True,
+        },
     },
 }
 

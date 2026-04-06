@@ -108,7 +108,7 @@ except Exception as _ab_err:
 # Billing (Stripe)
 try:
     from billing import (  # noqa: F401
-        PLANS, STRIPE_PUBLISHABLE_KEY, billing_active,
+        PLANS, STRIPE_PUBLISHABLE_KEY, CONTACT_EMAIL, billing_active,
         create_checkout_session, create_portal_session,
         retrieve_checkout_session, handle_webhook,
         generate_api_token, get_plan,
@@ -2976,7 +2976,113 @@ def pricing():
     """Página pública de planos e preços."""
     from flask import render_template
     cancelled = request.args.get("cancelled") == "1"
-    return render_template("pricing.html", cancelled=cancelled)
+    contact_email = CONTACT_EMAIL if BILLING_OK else "contato@netguard.io"
+    return render_template("pricing.html", cancelled=cancelled,
+                           contact_email=contact_email, plans=PLANS if BILLING_OK else {})
+
+
+@app.route("/trial", methods=["POST"])
+def trial():
+    """
+    Registra um novo tenant no plano Free ou Pro sem exigir cartão.
+    Body (JSON ou form): name, email, company, plan (opcional, default 'pro').
+    Cria o tenant diretamente e redireciona para /welcome em modo demo.
+    """
+    from flask import redirect
+    import uuid
+
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+    else:
+        data = request.form
+
+    name    = sanitize(data.get("name", "").strip(),    100, "name")
+    email   = sanitize(data.get("email", "").strip(),   200, "email")
+    company = sanitize(data.get("company", "").strip(), 200, "company")
+    plan_key = data.get("plan", "pro")
+
+    if plan_key not in ("free", "pro"):
+        plan_key = "pro"
+
+    if not name or not email:
+        if request.is_json:
+            return jsonify({"error": "Nome e e-mail são obrigatórios"}), 400
+        return redirect(f"/pricing?error=missing_fields")
+
+    token     = generate_api_token()
+    plan_info = get_plan(plan_key)
+    tenant_id = str(uuid.uuid4())
+
+    try:
+        repo.create_tenant(
+            tenant_id = tenant_id,
+            name      = company or name,
+            token     = token,
+            plan      = plan_key,
+            max_hosts = plan_info["max_hosts"],
+        )
+        logger.info("Trial tenant criado: %s | plan=%s | email=%s", tenant_id, plan_key, email)
+        audit("TENANT_TRIAL", actor=email,
+              ip=request.remote_addr or "-",
+              detail=f"plan={plan_key} company={company} tenant_id={tenant_id}")
+    except Exception as exc:
+        logger.error("Erro ao criar trial tenant: %s", exc)
+        if request.is_json:
+            return jsonify({"error": "Falha ao criar conta"}), 500
+        return redirect("/pricing?error=server")
+
+    if request.is_json:
+        return jsonify({
+            "ok": True,
+            "token": token,
+            "tenant_id": tenant_id,
+            "plan": plan_key,
+            "welcome_url": f"{request.host_url.rstrip('/')}/welcome?demo=1&plan={plan_key}"
+                           f"&token={token}&name={name}&email={email}",
+        })
+
+    from urllib.parse import quote
+    return redirect(
+        f"/welcome?demo=1&plan={plan_key}&token={token}"
+        f"&name={quote(name)}&email={quote(email)}"
+    )
+
+
+@app.route("/contact", methods=["POST"])
+def contact():
+    """
+    Recebe formulário de contato para Enterprise/MSSP.
+    Registra o lead no audit log e retorna confirmação.
+    Opcionalmente envia e-mail se SMTP estiver configurado (futuro).
+    """
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+    else:
+        data = request.form
+
+    name    = sanitize(data.get("name", "").strip(),    100, "name")
+    email   = sanitize(data.get("email", "").strip(),   200, "email")
+    company = sanitize(data.get("company", "").strip(), 200, "company")
+    plan    = data.get("plan", "enterprise")
+    message = sanitize(data.get("message", "").strip(), 2000, "message")
+
+    if not name or not email:
+        if request.is_json:
+            return jsonify({"error": "Nome e e-mail são obrigatórios"}), 400
+        return redirect("/pricing?error=missing_fields")
+
+    logger.info("Contato Enterprise/MSSP: email=%s company=%s plan=%s", email, company, plan)
+    audit("CONTACT_LEAD", actor=email,
+          ip=request.remote_addr or "-",
+          detail=f"plan={plan} company={company} msg_len={len(message)}")
+
+    if request.is_json:
+        return jsonify({
+            "ok": True,
+            "message": "Recebemos seu contato! Nossa equipe retornará em até 1 dia útil.",
+        })
+
+    return redirect("/pricing?contact=ok")
 
 
 @app.route("/checkout", methods=["POST"])

@@ -6,191 +6,114 @@
   <title>NetGuard IDS — Planos e Preços</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-      background: #0d1117;
-      color: #e6edf3;
-      min-height: 100vh;
+    :root {
+      --bg:      #0d1117;
+      --s1:      #161b22;
+      --s2:      #21262d;
+      --border:  #30363d;
+      --txt:     #e6edf3;
+      --txt2:    #8b949e;
+      --blue:    #58a6ff;
+      --blue2:   #1f6feb;
+      --green:   #3fb950;
+      --orange:  #f0883e;
+      --red:     #f85149;
     }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--txt); min-height: 100vh; }
     a { color: inherit; text-decoration: none; }
 
     /* ── Header ── */
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 1.2rem 2.5rem;
-      border-bottom: 1px solid #21262d;
-    }
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      font-size: 1.1rem;
-      font-weight: 700;
-      color: #58a6ff;
-    }
-    .logo svg { width: 28px; height: 28px; }
-    header nav a {
-      color: #8b949e;
-      margin-left: 1.5rem;
-      font-size: 0.9rem;
-      transition: color .2s;
-    }
-    header nav a:hover { color: #e6edf3; }
+    header { display:flex; align-items:center; justify-content:space-between; padding:1.1rem 2.5rem; border-bottom:1px solid var(--border); position:sticky; top:0; background:rgba(13,17,23,.95); backdrop-filter:blur(8px); z-index:100; }
+    .logo { display:flex; align-items:center; gap:.6rem; font-size:1.05rem; font-weight:700; color:var(--blue); }
+    .logo svg { width:26px; height:26px; }
+    header nav a { color:var(--txt2); margin-left:1.5rem; font-size:.9rem; transition:color .2s; }
+    header nav a:hover { color:var(--txt); }
+    .btn-header { background:var(--blue2); color:#fff !important; padding:.45rem 1.1rem; border-radius:6px; font-weight:600; font-size:.85rem; }
+    .btn-header:hover { background:#388bfd !important; }
 
     /* ── Hero ── */
-    .hero {
-      text-align: center;
-      padding: 4rem 1rem 2.5rem;
-    }
-    .hero h1 { font-size: 2.4rem; font-weight: 800; margin-bottom: 0.8rem; }
-    .hero p  { color: #8b949e; font-size: 1.05rem; max-width: 520px; margin: 0 auto; }
-    .badge {
-      display: inline-block;
-      background: #1f3a4f;
-      color: #58a6ff;
-      font-size: 0.75rem;
-      font-weight: 600;
-      padding: 0.25rem 0.75rem;
-      border-radius: 999px;
-      margin-bottom: 1rem;
-      letter-spacing: 0.04em;
-    }
+    .hero { text-align:center; padding:4.5rem 1rem 3rem; }
+    .badge { display:inline-block; background:#1f3a4f; color:var(--blue); font-size:.72rem; font-weight:700; padding:.25rem .9rem; border-radius:999px; margin-bottom:1.2rem; letter-spacing:.06em; text-transform:uppercase; }
+    .hero h1 { font-size:clamp(2rem,5vw,3rem); font-weight:800; line-height:1.15; margin-bottom:1rem; }
+    .hero h1 span { color:var(--blue); }
+    .hero p { color:var(--txt2); font-size:1.05rem; max-width:560px; margin:0 auto 2rem; line-height:1.6; }
+    .trust-bar { display:flex; align-items:center; justify-content:center; gap:2rem; flex-wrap:wrap; margin-top:1.5rem; }
+    .trust-item { display:flex; align-items:center; gap:.4rem; font-size:.82rem; color:var(--txt2); }
+    .trust-item svg { width:16px; height:16px; color:var(--green); }
 
-    /* ── Alert ── */
-    .alert {
-      max-width: 680px;
-      margin: 0 auto 2rem;
-      background: #161b22;
-      border: 1px solid #f0883e55;
-      border-radius: 8px;
-      padding: 0.9rem 1.2rem;
-      color: #f0883e;
-      font-size: 0.9rem;
-    }
+    /* ── Alert cancelled ── */
+    .alert-cancelled { max-width:700px; margin:0 auto 2rem; background:#1c1212; border:1px solid #f8514955; border-radius:8px; padding:.9rem 1.2rem; color:var(--red); font-size:.9rem; text-align:center; }
 
     /* ── Plans grid ── */
-    .plans {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 1.5rem;
-      max-width: 1000px;
-      margin: 0 auto;
-      padding: 0 1.5rem 4rem;
-    }
-    .plan-card {
-      background: #161b22;
-      border: 1px solid #21262d;
-      border-radius: 12px;
-      padding: 2rem;
-      display: flex;
-      flex-direction: column;
-      transition: border-color .2s, transform .15s;
-    }
-    .plan-card:hover {
-      border-color: #388bfd44;
-      transform: translateY(-3px);
-    }
-    .plan-card.featured {
-      border-color: #388bfd;
-      position: relative;
-    }
-    .featured-badge {
-      position: absolute;
-      top: -12px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #388bfd;
-      color: #fff;
-      font-size: 0.7rem;
-      font-weight: 700;
-      padding: 0.2rem 0.9rem;
-      border-radius: 999px;
-      letter-spacing: 0.05em;
-    }
-    .plan-name {
-      font-size: 1rem;
-      font-weight: 700;
-      color: #8b949e;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 0.5rem;
-    }
-    .plan-price {
-      font-size: 2.8rem;
-      font-weight: 800;
-      margin-bottom: 0.2rem;
-      line-height: 1;
-    }
-    .plan-price sup { font-size: 1.2rem; vertical-align: super; }
-    .plan-period { color: #8b949e; font-size: 0.85rem; margin-bottom: 1.5rem; }
-    .plan-divider { border: none; border-top: 1px solid #21262d; margin-bottom: 1.5rem; }
-    .plan-features { list-style: none; flex: 1; margin-bottom: 2rem; }
-    .plan-features li {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.55rem;
-      font-size: 0.9rem;
-      color: #c9d1d9;
-      padding: 0.35rem 0;
-    }
-    .plan-features li::before {
-      content: "✓";
-      color: #3fb950;
-      font-weight: 700;
-      flex-shrink: 0;
-    }
+    .plans-wrap { max-width:1100px; margin:0 auto; padding:0 1.5rem 5rem; }
+    .plans { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px,1fr)); gap:1.25rem; }
 
-    /* ── CTA Button ── */
-    .btn-plan {
-      display: block;
-      text-align: center;
-      padding: 0.8rem;
-      border-radius: 8px;
-      font-weight: 700;
-      font-size: 0.95rem;
-      cursor: pointer;
-      border: none;
-      transition: opacity .2s, transform .1s;
-    }
-    .btn-plan:active { transform: scale(0.97); }
-    .btn-primary { background: #238636; color: #fff; }
-    .btn-primary:hover { opacity: 0.88; }
-    .btn-secondary { background: transparent; border: 1px solid #30363d; color: #e6edf3; }
-    .btn-secondary:hover { background: #21262d; }
-    .btn-featured { background: #388bfd; color: #fff; }
-    .btn-featured:hover { opacity: 0.88; }
+    .plan-card { background:var(--s1); border:1px solid var(--border); border-radius:12px; padding:2rem 1.75rem; position:relative; display:flex; flex-direction:column; transition:transform .2s, box-shadow .2s; }
+    .plan-card:hover { transform:translateY(-3px); box-shadow:0 12px 40px rgba(0,0,0,.4); }
+    .plan-card.featured { border-color:var(--blue2); box-shadow:0 0 0 1px var(--blue2), 0 8px 32px rgba(31,111,235,.2); }
+
+    .plan-badge { position:absolute; top:-1px; left:50%; transform:translateX(-50%); background:var(--blue2); color:#fff; font-size:.65rem; font-weight:700; padding:.25rem .9rem; border-radius:0 0 8px 8px; letter-spacing:.08em; white-space:nowrap; }
+    .plan-badge.mssp { background:#d47000; }
+
+    .plan-name { font-size:.75rem; font-weight:700; color:var(--txt2); text-transform:uppercase; letter-spacing:.1em; margin-bottom:.75rem; }
+    .plan-price { display:flex; align-items:flex-start; gap:.2rem; margin-bottom:.2rem; }
+    .plan-price .cur { font-size:.9rem; font-weight:700; margin-top:.4rem; color:var(--txt2); }
+    .plan-price .amount { font-size:2.6rem; font-weight:800; line-height:1; }
+    .plan-price .period { font-size:.75rem; color:var(--txt2); align-self:flex-end; margin-bottom:.3rem; }
+    .plan-subtext { font-size:.75rem; color:var(--txt2); margin-bottom:1.25rem; min-height:1.1rem; }
+    .trial-badge { display:inline-block; background:rgba(63,185,80,.12); color:var(--green); font-size:.72rem; font-weight:600; padding:.2rem .6rem; border-radius:4px; }
+
+    .plan-divider { border:none; border-top:1px solid var(--border); margin:1.25rem 0; }
+    .plan-features { list-style:none; display:flex; flex-direction:column; gap:.6rem; flex:1; margin-bottom:1.75rem; }
+    .plan-features li { display:flex; align-items:flex-start; gap:.5rem; font-size:.87rem; color:var(--txt2); line-height:1.4; }
+    .plan-features li::before { content:'✓'; color:var(--green); font-weight:700; flex-shrink:0; margin-top:.05rem; }
+
+    .btn-plan { width:100%; padding:.75rem; border:none; border-radius:8px; font-size:.9rem; font-weight:600; cursor:pointer; transition:background .2s, transform .1s; }
+    .btn-plan:active { transform:scale(.98); }
+    .btn-primary { background:var(--blue2); color:#fff; }
+    .btn-primary:hover { background:#388bfd; }
+    .btn-secondary { background:var(--s2); color:var(--txt); border:1px solid var(--border); }
+    .btn-secondary:hover { background:#2d333b; }
+    .btn-contact { background:transparent; color:var(--blue); border:1px solid var(--blue2); }
+    .btn-contact:hover { background:rgba(31,111,235,.1); }
 
     /* ── FAQ ── */
-    .faq {
-      max-width: 700px;
-      margin: 0 auto 4rem;
-      padding: 0 1.5rem;
-    }
-    .faq h2 { font-size: 1.4rem; margin-bottom: 1.5rem; text-align: center; }
-    .faq-item { border-bottom: 1px solid #21262d; padding: 1rem 0; }
-    .faq-item summary {
-      cursor: pointer;
-      font-weight: 600;
-      font-size: 0.95rem;
-      list-style: none;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .faq-item summary::-webkit-details-marker { display: none; }
-    .faq-item summary::after { content: "+"; font-size: 1.2rem; color: #8b949e; }
-    .faq-item[open] summary::after { content: "−"; }
-    .faq-item p { color: #8b949e; font-size: 0.9rem; padding-top: 0.8rem; line-height: 1.6; }
+    .faq-wrap { max-width:740px; margin:0 auto 5rem; padding:0 1.5rem; }
+    .faq-title { text-align:center; font-size:1.6rem; font-weight:700; margin-bottom:2rem; }
+    .faq-item { border:1px solid var(--border); border-radius:8px; margin-bottom:.75rem; overflow:hidden; }
+    .faq-q { display:flex; align-items:center; justify-content:space-between; padding:1rem 1.25rem; cursor:pointer; font-weight:600; font-size:.95rem; }
+    .faq-q:hover { background:var(--s1); }
+    .faq-a { display:none; padding:.75rem 1.25rem 1.1rem; color:var(--txt2); font-size:.9rem; line-height:1.6; border-top:1px solid var(--border); }
+    .faq-item.open .faq-a { display:block; }
+    .faq-item.open .faq-icon { transform:rotate(45deg); }
+    .faq-icon { transition:transform .2s; font-size:1.1rem; color:var(--txt2); }
 
-    /* ── Footer ── */
-    footer {
-      border-top: 1px solid #21262d;
-      padding: 1.5rem;
-      text-align: center;
-      color: #8b949e;
-      font-size: 0.8rem;
+    /* ── CTA final ── */
+    .cta-final { text-align:center; background:var(--s1); border-top:1px solid var(--border); padding:4rem 1.5rem; }
+    .cta-final h2 { font-size:1.8rem; font-weight:700; margin-bottom:.75rem; }
+    .cta-final p { color:var(--txt2); margin-bottom:2rem; }
+    .btn-big { display:inline-block; background:var(--blue2); color:#fff; padding:.9rem 2.5rem; border-radius:8px; font-size:1rem; font-weight:700; border:none; cursor:pointer; transition:background .2s; }
+    .btn-big:hover { background:#388bfd; }
+
+    /* ── Modal signup/trial ── */
+    .overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:200; align-items:center; justify-content:center; }
+    .overlay.open { display:flex; }
+    .modal { background:var(--s1); border:1px solid var(--border); border-radius:12px; padding:2.2rem; max-width:440px; width:90%; position:relative; }
+    .modal h2 { font-size:1.25rem; margin-bottom:.3rem; }
+    .modal-sub { color:var(--txt2); font-size:.85rem; margin-bottom:1.5rem; }
+    .modal label span { font-size:.75rem; color:var(--txt2); font-weight:600; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:.35rem; }
+    .modal label { display:block; margin-bottom:1rem; }
+    .modal input, .modal select { width:100%; padding:.65rem .9rem; background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--txt); font-size:.95rem; outline:none; }
+    .modal input:focus, .modal select:focus { border-color:var(--blue2); }
+    .modal-actions { display:flex; gap:.75rem; margin-top:1.25rem; }
+    .modal-actions button { flex:1; padding:.7rem; border-radius:6px; font-size:.9rem; font-weight:600; cursor:pointer; border:none; }
+    .close-btn { position:absolute; top:1rem; right:1rem; background:none; border:none; color:var(--txt2); font-size:1.3rem; cursor:pointer; }
+
+    @media(max-width:640px){
+      header { padding:.9rem 1.2rem; }
+      header nav { display:none; }
+      .hero { padding:3rem 1rem 2rem; }
+      .plans { grid-template-columns:1fr; }
     }
   </style>
 </head>
@@ -198,202 +121,295 @@
 
 <header>
   <a href="/" class="logo">
-    <svg viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-    </svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
     NetGuard IDS
   </a>
   <nav>
     <a href="/">Dashboard</a>
     <a href="/pricing">Preços</a>
-    <a href="https://github.com/seu-usuario/netguard" target="_blank">GitHub</a>
+    <a href="https://github.com/raphaelguterres/netguard-ids" target="_blank">GitHub ↗</a>
+    <a href="/login" class="btn-header">Entrar</a>
   </nav>
 </header>
 
+<!-- Hero -->
 <section class="hero">
-  <span class="badge">☁️ SaaS — nenhuma infra pra gerenciar</span>
-  <h1>Segurança que <span style="color:#58a6ff">escala</span> com você</h1>
-  <p>Monitoramento de intrusão em tempo real para sua infraestrutura. Comece grátis, cancele quando quiser.</p>
+  <span class="badge">🇧🇷 Feito no Brasil · IDS/IPS em tempo real</span>
+  <h1>Proteja sua rede.<br><span>Sem complicação.</span></h1>
+  <p>NetGuard IDS detecta ransomware, port scans, brute force e 200+ ameaças MITRE ATT&amp;CK em tempo real — com dashboard, alertas Telegram/WhatsApp e relatórios PDF em 1 clique.</p>
+  <div class="trust-bar">
+    <span class="trust-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      Sem cartão no trial
+    </span>
+    <span class="trust-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      Setup em 5 minutos
+    </span>
+    <span class="trust-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      Cancele quando quiser
+    </span>
+    <span class="trust-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      Open source + SaaS gerenciado
+    </span>
+  </div>
 </section>
 
 {% if cancelled %}
-<div class="alert" style="background:#1c1212; border-color:#f8514955; color:#f85149;">
-  ⚠️ Checkout cancelado. Nenhuma cobrança foi feita. Escolha um plano abaixo quando estiver pronto.
-</div>
+<div class="alert-cancelled">⚠️ Checkout cancelado. Nenhuma cobrança foi feita. Escolha um plano abaixo quando estiver pronto.</div>
 {% endif %}
 
+<!-- Plans -->
+<div class="plans-wrap">
 <div class="plans">
 
-  <!-- Starter -->
+  <!-- Free -->
   <div class="plan-card">
-    <div class="plan-name">Starter</div>
-    <div class="plan-price"><sup>$</sup>29</div>
-    <div class="plan-period">por mês, cobrado mensalmente</div>
+    <div class="plan-name">Gratuito</div>
+    <div class="plan-price">
+      <span class="cur">R$</span>
+      <span class="amount">0</span>
+      <span class="period">/mês</span>
+    </div>
+    <div class="plan-subtext">Para testar e projetos pessoais</div>
     <hr class="plan-divider">
     <ul class="plan-features">
-      <li>3 hosts monitorados</li>
-      <li>7 dias de retenção de eventos</li>
-      <li>Alertas por email</li>
+      <li>1 host monitorado</li>
+      <li>500 eventos/dia</li>
       <li>Dashboard web completo</li>
-      <li>API REST básica</li>
+      <li>Alertas por e-mail</li>
+      <li>Suporte via GitHub Issues</li>
     </ul>
-    <form method="POST" action="/checkout">
-      <input type="hidden" name="plan" value="starter">
-      <button type="button" class="btn-plan btn-secondary"
-              onclick="openSignup('starter')">Começar →</button>
-    </form>
+    <button class="btn-plan btn-secondary" onclick="openSignup('free')">Começar grátis →</button>
   </div>
 
   <!-- Pro (featured) -->
   <div class="plan-card featured">
-    <span class="featured-badge">MAIS POPULAR</span>
-    <div class="plan-name">Pro</div>
-    <div class="plan-price"><sup>$</sup>99</div>
-    <div class="plan-period">por mês, cobrado mensalmente</div>
+    <div class="plan-badge">MAIS POPULAR</div>
+    <div class="plan-name" style="margin-top:.5rem">Pro</div>
+    <div class="plan-price">
+      <span class="cur">R$</span>
+      <span class="amount">990</span>
+      <span class="period">/mês</span>
+    </div>
+    <div class="plan-subtext"><span class="trial-badge">✓ 14 dias grátis · sem cartão</span></div>
     <hr class="plan-divider">
     <ul class="plan-features">
-      <li>20 hosts monitorados</li>
-      <li>30 dias de retenção</li>
-      <li>Alertas Slack / Teams / PagerDuty</li>
-      <li>API completa + Webhooks</li>
-      <li>Prometheus + Grafana incluso</li>
-      <li>Correlação de eventos MITRE ATT&amp;CK</li>
+      <li>Até 20 hosts monitorados</li>
+      <li>Eventos ilimitados</li>
+      <li>Todas as fases MITRE ATT&amp;CK</li>
+      <li>Alertas Telegram / WhatsApp / Slack</li>
+      <li>Relatórios PDF/CSV mensais</li>
+      <li>API REST completa + Webhooks</li>
+      <li>Correlação de eventos</li>
+      <li>Suporte por chat em 24h</li>
     </ul>
-    <button type="button" class="btn-plan btn-featured"
-            onclick="openSignup('pro')">Começar agora →</button>
+    <button class="btn-plan btn-primary" onclick="openSignup('pro')">Testar 14 dias grátis →</button>
   </div>
 
   <!-- Enterprise -->
   <div class="plan-card">
     <div class="plan-name">Enterprise</div>
-    <div class="plan-price"><sup>$</sup>299</div>
-    <div class="plan-period">por mês, cobrado mensalmente</div>
+    <div class="plan-price">
+      <span class="cur">R$</span>
+      <span class="amount">3.900</span>
+      <span class="period">/mês</span>
+    </div>
+    <div class="plan-subtext">Para médias e grandes empresas</div>
     <hr class="plan-divider">
     <ul class="plan-features">
       <li>Hosts ilimitados</li>
       <li>1 ano de retenção</li>
-      <li>SLA 99,9 %</li>
-      <li>Suporte dedicado 24/7</li>
-      <li>Deploy on-premise assistido</li>
-      <li>SSO / SAML</li>
+      <li>SSO / LDAP / Azure AD</li>
+      <li>SLA 99,9% — suporte em 4h</li>
+      <li>White-label disponível</li>
+      <li>Relatórios ISO 27001 / NIST</li>
+      <li>Onboarding dedicado</li>
     </ul>
-    <button type="button" class="btn-plan btn-secondary"
-            onclick="openSignup('enterprise')">Falar com vendas →</button>
+    <button class="btn-plan btn-contact" onclick="openContact('enterprise')">Falar com especialista →</button>
+  </div>
+
+  <!-- MSSP -->
+  <div class="plan-card">
+    <div class="plan-badge mssp">REVENDEDORES</div>
+    <div class="plan-name" style="margin-top:.5rem">MSSP Partner</div>
+    <div class="plan-price">
+      <span class="cur">R$</span>
+      <span class="amount">300</span>
+      <span class="period">/cliente/mês</span>
+    </div>
+    <div class="plan-subtext">Gerencie múltiplos clientes</div>
+    <hr class="plan-divider">
+    <ul class="plan-features">
+      <li>Multi-tenant nativo</li>
+      <li>Painel de gerenciamento unificado</li>
+      <li>White-label total</li>
+      <li>Comissão de 20% por indicação</li>
+      <li>Suporte técnico prioritário</li>
+      <li>Treinamento e certificação</li>
+    </ul>
+    <button class="btn-plan btn-contact" onclick="openContact('mssp')">Tornar-se parceiro →</button>
   </div>
 
 </div>
 
-<!-- Modal de signup -->
-<div id="modal-overlay" style="display:none; position:fixed; inset:0; background:#000a; z-index:100; align-items:center; justify-content:center;">
-  <div style="background:#161b22; border:1px solid #30363d; border-radius:12px; padding:2.5rem; max-width:440px; width:90%; position:relative;">
-    <button onclick="closeSignup()" style="position:absolute; top:1rem; right:1rem; background:none; border:none; color:#8b949e; font-size:1.3rem; cursor:pointer;">✕</button>
-    <h2 style="margin-bottom:0.3rem; font-size:1.3rem;">Criar sua conta</h2>
-    <p style="color:#8b949e; font-size:0.85rem; margin-bottom:1.5rem;">Plano: <strong id="modal-plan-name">Pro</strong></p>
+<!-- ROI callout -->
+<div style="margin:3rem auto 0;max-width:700px;background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:1.5rem 2rem;display:flex;gap:2rem;align-items:center;flex-wrap:wrap">
+  <div style="flex:1;min-width:200px">
+    <div style="font-size:1.1rem;font-weight:700;margin-bottom:.4rem">💰 ROI em 1 mês</div>
+    <div style="color:var(--txt2);font-size:.9rem;line-height:1.6">Um incidente de ransomware custa em média <strong style="color:var(--txt)">R$ 1,5 milhão</strong> para PMEs brasileiras (downtime + recuperação + reputação). O plano Pro custa <strong style="color:var(--green)">R$ 990/mês</strong> — menos de 0,1% do custo de um incidente.</div>
+  </div>
+  <button class="btn-plan btn-primary" style="width:auto;padding:.75rem 1.5rem;white-space:nowrap" onclick="openSignup('pro')">Começar agora →</button>
+</div>
+</div>
 
-    <form id="signup-form" method="POST" action="/checkout">
-      <input type="hidden" name="plan" id="form-plan-input" value="pro">
+<!-- FAQ -->
+<div class="faq-wrap">
+  <h2 class="faq-title">Perguntas frequentes</h2>
 
-      <label style="display:block; margin-bottom:1rem;">
-        <span style="font-size:0.8rem; color:#8b949e; font-weight:600; text-transform:uppercase; letter-spacing:.05em;">Nome completo</span>
-        <input type="text" name="name" required placeholder="João Silva"
-               style="width:100%; margin-top:0.4rem; padding:0.65rem 0.9rem; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#e6edf3; font-size:0.95rem; outline:none;">
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)">
+      <span>O trial de 14 dias precisa de cartão de crédito?</span>
+      <span class="faq-icon">+</span>
+    </div>
+    <div class="faq-a">Não. Você começa a usar imediatamente, sem cadastrar nenhum dado de pagamento. Ao final do trial, se quiser continuar, aí sim cadastra o cartão — ou cancela sem custo algum.</div>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)">
+      <span>O que é um "host monitorado"?</span>
+      <span class="faq-icon">+</span>
+    </div>
+    <div class="faq-a">É cada servidor, VM, container ou endpoint de onde o NetGuard coleta e analisa logs e tráfego de rede. Um servidor Linux que roda o agente conta como 1 host.</div>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)">
+      <span>Posso instalar on-premise?</span>
+      <span class="faq-icon">+</span>
+    </div>
+    <div class="faq-a">Sim. O NetGuard IDS é open source e pode ser instalado via Docker em qualquer servidor. O plano SaaS gerenciado é para quem não quer cuidar de infraestrutura. Para Enterprise, oferecemos deploy on-premise assistido.</div>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)">
+      <span>Como funciona o plano MSSP?</span>
+      <span class="faq-icon">+</span>
+    </div>
+    <div class="faq-a">MSSPs pagam R$ 300 por cliente gerenciado por mês. Você recebe um painel multi-tenant para gerenciar todos os clientes, white-label total e 20% de comissão por novos clientes que indicar. Mínimo de 3 clientes ativos.</div>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)">
+      <span>Quais canais de alerta estão disponíveis?</span>
+      <span class="faq-icon">+</span>
+    </div>
+    <div class="faq-a">Telegram, WhatsApp (Z-API e Twilio), Slack, Discord, Microsoft Teams e qualquer endpoint HTTP genérico. Configure múltiplos canais em paralelo — por exemplo, Telegram para alertas críticos e Slack para o time inteiro.</div>
+  </div>
+
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)">
+      <span>Vocês oferecem suporte em português?</span>
+      <span class="faq-icon">+</span>
+    </div>
+    <div class="faq-a">Sim, todo o suporte é em português. Plano Pro via chat em até 24h. Enterprise via ticket com SLA de 4h. MSSP com canal de suporte prioritário dedicado.</div>
+  </div>
+
+</div>
+
+<!-- CTA final -->
+<div class="cta-final">
+  <h2>Pronto para proteger sua rede?</h2>
+  <p>Comece o trial de 14 dias grátis — sem cartão, sem compromisso.</p>
+  <button class="btn-big" onclick="openSignup('pro')">Começar agora →</button>
+  <div style="margin-top:1rem;font-size:.85rem;color:var(--txt2)">
+    Dúvidas? Fale conosco: <a href="mailto:{{ contact_email }}" style="color:var(--blue)">{{ contact_email }}</a>
+  </div>
+</div>
+
+<!-- Modal signup/trial -->
+<div class="overlay" id="modal-overlay">
+  <div class="modal">
+    <button class="close-btn" onclick="closeModal()">✕</button>
+    <h2 id="modal-title">Criar sua conta</h2>
+    <p class="modal-sub" id="modal-sub">Plano: <strong id="modal-plan-name">Pro</strong></p>
+
+    <form id="signup-form" method="POST" action="/trial">
+      <input type="hidden" name="plan" id="form-plan" value="pro">
+
+      <label>
+        <span>Nome completo</span>
+        <input type="text" name="name" required placeholder="João Silva">
+      </label>
+      <label>
+        <span>E-mail profissional</span>
+        <input type="email" name="email" required placeholder="joao@empresa.com.br">
+      </label>
+      <label>
+        <span>Empresa (opcional)</span>
+        <input type="text" name="company" placeholder="Empresa Ltda">
       </label>
 
-      <label style="display:block; margin-bottom:1rem;">
-        <span style="font-size:0.8rem; color:#8b949e; font-weight:600; text-transform:uppercase; letter-spacing:.05em;">Email corporativo</span>
-        <input type="email" name="email" required placeholder="joao@empresa.com"
-               style="width:100%; margin-top:0.4rem; padding:0.65rem 0.9rem; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#e6edf3; font-size:0.95rem; outline:none;">
-      </label>
-
-      <label style="display:block; margin-bottom:1.5rem;">
-        <span style="font-size:0.8rem; color:#8b949e; font-weight:600; text-transform:uppercase; letter-spacing:.05em;">Empresa (opcional)</span>
-        <input type="text" name="company" placeholder="Acme Corp"
-               style="width:100%; margin-top:0.4rem; padding:0.65rem 0.9rem; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#e6edf3; font-size:0.95rem; outline:none;">
-      </label>
-
-      <button type="submit" class="btn-plan btn-featured" style="width:100%; font-size:1rem; padding:0.9rem;">
-        Continuar para pagamento →
-      </button>
-      <p style="color:#8b949e; font-size:0.75rem; text-align:center; margin-top:0.8rem;">
-        Pagamento seguro via Stripe. Cancele a qualquer momento.
-      </p>
+      <div class="modal-actions">
+        <button type="submit" style="background:var(--blue2);color:#fff">Criar conta grátis →</button>
+        <button type="button" style="background:var(--s2);color:var(--txt);border:1px solid var(--border)" onclick="closeModal()">Cancelar</button>
+      </div>
+      <p style="font-size:.72rem;color:var(--txt2);margin-top:.9rem;text-align:center">Sem cartão de crédito · Cancele quando quiser · Dados protegidos pela LGPD</p>
     </form>
   </div>
 </div>
 
-<section class="faq">
-  <h2>Perguntas frequentes</h2>
-
-  <details class="faq-item">
-    <summary>Como instalo o agente nos meus servidores?</summary>
-    <p>Após criar a conta você recebe um token de API único. Rode <code>pip install netguard-agent</code> no servidor alvo e configure com seu token. O agente começa a enviar eventos imediatamente.</p>
-  </details>
-
-  <details class="faq-item">
-    <summary>Posso cancelar a qualquer momento?</summary>
-    <p>Sim. Acesse o portal de billing em <em>Configurações → Billing</em> e cancele com um clique. Você continua tendo acesso até o fim do período pago.</p>
-  </details>
-
-  <details class="faq-item">
-    <summary>Os dados ficam em qual região?</summary>
-    <p>Por padrão nos servidores da UE (Frankfurt). Enterprise pode escolher região ou fazer deploy on-premise.</p>
-  </details>
-
-  <details class="faq-item">
-    <summary>Existe trial gratuito?</summary>
-    <p>Sim — 14 dias gratuitos no plano Pro sem precisar de cartão. Basta criar uma conta e explorar.</p>
-  </details>
-
-  <details class="faq-item">
-    <summary>O que acontece se eu exceder o limite de hosts?</summary>
-    <p>Você recebe um email de aviso. Novos eventos de hosts acima do limite são descartados até você fazer upgrade.</p>
-  </details>
-</section>
-
-<footer>
-  © 2025 NetGuard IDS · <a href="/privacy" style="color:#58a6ff">Privacidade</a> · <a href="/terms" style="color:#58a6ff">Termos</a>
-</footer>
+<!-- Modal contato -->
+<div class="overlay" id="contact-overlay">
+  <div class="modal">
+    <button class="close-btn" onclick="closeContact()">✕</button>
+    <h2 id="contact-title">Falar com especialista</h2>
+    <p class="modal-sub">Nossa equipe entrará em contato em até 24h.</p>
+    <form id="contact-form" method="POST" action="/contact">
+      <input type="hidden" name="plan" id="contact-plan" value="enterprise">
+      <label><span>Nome completo</span><input type="text" name="name" required placeholder="João Silva"></label>
+      <label><span>E-mail</span><input type="email" name="email" required placeholder="joao@empresa.com.br"></label>
+      <label><span>Empresa</span><input type="text" name="company" required placeholder="Empresa Ltda"></label>
+      <label><span>Nº de hosts / clientes</span><input type="text" name="size" placeholder="ex: 50 hosts ou 10 clientes"></label>
+      <div class="modal-actions">
+        <button type="submit" style="background:var(--blue2);color:#fff">Enviar →</button>
+        <button type="button" style="background:var(--s2);color:var(--txt);border:1px solid var(--border)" onclick="closeContact()">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <script>
-  const planNames = { starter: 'Starter — $29/mês', pro: 'Pro — $99/mês', enterprise: 'Enterprise — $299/mês' };
+const PLAN_LABELS = { free:'Gratuito', pro:'Pro — R$ 990/mês', enterprise:'Enterprise — R$ 3.900/mês', mssp:'MSSP Partner — R$ 300/cliente/mês' };
 
-  function openSignup(plan) {
-    document.getElementById('form-plan-input').value = plan;
-    document.getElementById('modal-plan-name').textContent = planNames[plan] || plan;
-    const overlay = document.getElementById('modal-overlay');
-    overlay.style.display = 'flex';
-  }
+function openSignup(plan){
+  document.getElementById('form-plan').value = plan;
+  document.getElementById('modal-plan-name').textContent = PLAN_LABELS[plan] || plan;
+  document.getElementById('modal-title').textContent = plan==='free' ? 'Criar conta gratuita' : 'Iniciar trial de 14 dias';
+  document.getElementById('modal-sub').innerHTML = plan==='free'
+    ? 'Grátis para sempre. Sem cartão.'
+    : `Plano: <strong>${PLAN_LABELS[plan]}</strong> · Sem cartão por 14 dias`;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function closeModal(){ document.getElementById('modal-overlay').classList.remove('open'); }
 
-  function closeSignup() {
-    document.getElementById('modal-overlay').style.display = 'none';
-  }
+function openContact(plan){
+  document.getElementById('contact-plan').value = plan;
+  document.getElementById('contact-title').textContent = plan==='mssp' ? 'Tornar-se parceiro MSSP' : 'Falar com especialista';
+  document.getElementById('contact-overlay').classList.add('open');
+}
+function closeContact(){ document.getElementById('contact-overlay').classList.remove('open'); }
 
-  // Fechar ao clicar fora do modal
-  document.getElementById('modal-overlay').addEventListener('click', function(e) {
-    if (e.target === this) closeSignup();
-  });
+function toggleFaq(el){
+  el.closest('.faq-item').classList.toggle('open');
+}
 
-  // Highlight se voltou com ?plan=
-  const params = new URLSearchParams(location.search);
-  if (params.get('plan')) openSignup(params.get('plan'));
-
-  // CSRF — injeta token no submit do formulário (double-submit cookie)
-  function getCsrfToken() {
-    return document.cookie.split(';')
-      .map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
-  }
-
-  document.getElementById('signup-form').addEventListener('submit', function() {
-    let csrfInput = this.querySelector('input[name="csrf_token"]');
-    if (!csrfInput) {
-      csrfInput = document.createElement('input');
-      csrfInput.type = 'hidden';
-      csrfInput.name = 'csrf_token';
-      this.appendChild(csrfInput);
-    }
-    csrfInput.value = getCsrfToken();
-  });
+// Fecha modais ao clicar fora
+document.querySelectorAll('.overlay').forEach(o=>{
+  o.addEventListener('click', e=>{ if(e.target===o) o.classList.remove('open'); });
+});
 </script>
-
 </body>
 </html>
