@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NetGuard — Admin Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:     #0d1117; --s1: #161b22; --s2: #21262d; --s3: #2d333b;
+      --border: #30363d; --txt: #e6edf3; --txt2: #8b949e; --txt3: #6e7681;
+      --blue:   #58a6ff; --blue2: #1f6feb; --green: #3fb950; --green2: #238636;
+      --orange: #f0883e; --red: #f85149; --purple: #bc8cff; --yellow: #e3b341;
+    }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--txt); min-height: 100vh; }
+    a { color: inherit; text-decoration: none; }
+
+    /* ── Header ── */
+    header { display:flex; align-items:center; justify-content:space-between; padding:1rem 2rem; border-bottom:1px solid var(--border); background:rgba(13,17,23,.97); position:sticky; top:0; z-index:100; }
+    .logo { display:flex; align-items:center; gap:.6rem; font-size:1rem; font-weight:700; color:var(--blue); }
+    .logo svg { width:24px; height:24px; }
+    .badge-admin { background:rgba(248,81,73,.15); color:var(--red); border:1px solid rgba(248,81,73,.3); padding:.2rem .6rem; border-radius:999px; font-size:.7rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+    .header-right { display:flex; align-items:center; gap:1rem; font-size:.85rem; color:var(--txt2); }
+    .logout-btn { background:var(--s2); border:1px solid var(--border); color:var(--txt2); padding:.35rem .9rem; border-radius:6px; cursor:pointer; font-size:.82rem; transition:all .2s; }
+    .logout-btn:hover { color:var(--txt); border-color:var(--txt3); }
+
+    /* ── Layout ── */
+    .container { max-width:1400px; margin:0 auto; padding:2rem; }
+    h1 { font-size:1.4rem; font-weight:700; margin-bottom:.3rem; }
+    .subtitle { color:var(--txt2); font-size:.875rem; margin-bottom:2rem; }
+
+    /* ── Stats bar ── */
+    .stats-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:1rem; margin-bottom:2rem; }
+    .stat-card { background:var(--s1); border:1px solid var(--border); border-radius:10px; padding:1.2rem 1.4rem; }
+    .stat-label { font-size:.78rem; color:var(--txt2); text-transform:uppercase; letter-spacing:.06em; margin-bottom:.5rem; }
+    .stat-value { font-size:1.9rem; font-weight:700; line-height:1; }
+    .stat-sub { font-size:.78rem; color:var(--txt2); margin-top:.4rem; }
+    .stat-blue .stat-value { color:var(--blue); }
+    .stat-green .stat-value { color:var(--green); }
+    .stat-orange .stat-value { color:var(--orange); }
+    .stat-purple .stat-value { color:var(--purple); }
+    .stat-red .stat-value { color:var(--red); }
+
+    /* ── Section ── */
+    .section { margin-bottom:2.5rem; }
+    .section-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; }
+    .section-title { font-size:1rem; font-weight:600; display:flex; align-items:center; gap:.5rem; }
+    .section-title svg { opacity:.7; }
+
+    /* ── Table ── */
+    .table-wrap { background:var(--s1); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    table { width:100%; border-collapse:collapse; font-size:.85rem; }
+    thead tr { background:var(--s2); }
+    th { padding:.75rem 1rem; text-align:left; color:var(--txt2); font-weight:600; font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--border); white-space:nowrap; }
+    td { padding:.75rem 1rem; border-bottom:1px solid var(--border); color:var(--txt); vertical-align:middle; }
+    tbody tr:last-child td { border-bottom:none; }
+    tbody tr:hover { background:rgba(255,255,255,.02); }
+
+    /* ── Badges ── */
+    .badge { display:inline-flex; align-items:center; gap:.3rem; padding:.2rem .6rem; border-radius:999px; font-size:.73rem; font-weight:600; white-space:nowrap; }
+    .badge-green  { background:rgba(63,185,80,.15);  color:var(--green);  border:1px solid rgba(63,185,80,.25); }
+    .badge-blue   { background:rgba(88,166,255,.15); color:var(--blue);   border:1px solid rgba(88,166,255,.25); }
+    .badge-orange { background:rgba(240,136,62,.15); color:var(--orange); border:1px solid rgba(240,136,62,.25); }
+    .badge-red    { background:rgba(248,81,73,.15);  color:var(--red);    border:1px solid rgba(248,81,73,.25); }
+    .badge-purple { background:rgba(188,140,255,.15);color:var(--purple); border:1px solid rgba(188,140,255,.25); }
+    .badge-gray   { background:rgba(139,148,158,.1); color:var(--txt2);   border:1px solid rgba(139,148,158,.2); }
+
+    /* ── Buttons ── */
+    .btn { display:inline-flex; align-items:center; gap:.35rem; padding:.38rem .9rem; border-radius:6px; font-size:.8rem; font-weight:600; cursor:pointer; border:1px solid transparent; transition:all .2s; }
+    .btn-sm { padding:.25rem .65rem; font-size:.75rem; }
+    .btn-primary  { background:var(--blue2); color:#fff; border-color:var(--blue2); }
+    .btn-primary:hover { background:#388bfd; }
+    .btn-danger   { background:rgba(248,81,73,.15); color:var(--red); border-color:rgba(248,81,73,.3); }
+    .btn-danger:hover { background:rgba(248,81,73,.25); }
+    .btn-success  { background:rgba(63,185,80,.15); color:var(--green); border-color:rgba(63,185,80,.3); }
+    .btn-success:hover { background:rgba(63,185,80,.25); }
+    .btn-ghost { background:transparent; color:var(--txt2); border-color:var(--border); }
+    .btn-ghost:hover { color:var(--txt); border-color:var(--txt3); background:var(--s2); }
+
+    /* ── Monospace ── */
+    .mono { font-family: 'Consolas', 'Courier New', monospace; font-size:.8rem; color:var(--txt2); }
+    .token-cell { display:flex; align-items:center; gap:.5rem; }
+    .token-mask { font-family:monospace; font-size:.8rem; color:var(--txt2); }
+
+    /* ── Plan pill colors ── */
+    .plan-free     { --pc: var(--txt2); --pb: rgba(139,148,158,.1); --pborder: rgba(139,148,158,.2); }
+    .plan-pro      { --pc: var(--blue); --pb: rgba(88,166,255,.12); --pborder: rgba(88,166,255,.25); }
+    .plan-business { --pc: var(--purple); --pb: rgba(188,140,255,.12); --pborder: rgba(188,140,255,.25); }
+    .plan-enterprise { --pc: var(--orange); --pb: rgba(240,136,62,.12); --pborder: rgba(240,136,62,.25); }
+    .plan-pill { background:var(--pb); color:var(--pc); border:1px solid var(--pborder); display:inline-block; padding:.18rem .55rem; border-radius:5px; font-size:.75rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+
+    /* ── Progress bar ── */
+    .progress-wrap { background:var(--s3); border-radius:999px; height:6px; width:100%; overflow:hidden; }
+    .progress-bar  { height:100%; border-radius:999px; transition:width .5s ease; }
+    .progress-ok   { background:var(--green); }
+    .progress-warn { background:var(--orange); }
+    .progress-crit { background:var(--red); }
+
+    /* ── Audit log ── */
+    .audit-log { background:var(--s1); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    .audit-toolbar { display:flex; align-items:center; gap:.75rem; padding:.8rem 1rem; border-bottom:1px solid var(--border); background:var(--s2); flex-wrap:wrap; }
+    .audit-filter-btn { background:transparent; border:1px solid var(--border); color:var(--txt2); padding:.25rem .7rem; border-radius:5px; font-size:.78rem; cursor:pointer; transition:all .2s; }
+    .audit-filter-btn.active, .audit-filter-btn:hover { background:var(--s3); color:var(--txt); border-color:var(--txt3); }
+    .audit-search { background:var(--s3); border:1px solid var(--border); color:var(--txt); padding:.3rem .75rem; border-radius:5px; font-size:.8rem; flex:1; min-width:200px; outline:none; }
+    .audit-search:focus { border-color:var(--blue); }
+    .audit-entries { max-height:420px; overflow-y:auto; }
+    .audit-row { display:grid; grid-template-columns:140px 100px 1fr 120px; gap:.75rem; padding:.65rem 1rem; border-bottom:1px solid var(--border); align-items:center; font-size:.8rem; }
+    .audit-row:last-child { border-bottom:none; }
+    .audit-row:hover { background:rgba(255,255,255,.02); }
+    .audit-ts { color:var(--txt2); font-family:monospace; font-size:.75rem; }
+    .audit-action { font-weight:600; }
+    .audit-detail { color:var(--txt2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .audit-ip { color:var(--txt3); font-family:monospace; font-size:.75rem; text-align:right; }
+
+    /* ── Modal ── */
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:200; justify-content:center; align-items:center; }
+    .modal-overlay.open { display:flex; }
+    .modal { background:var(--s1); border:1px solid var(--border); border-radius:12px; padding:1.75rem; width:100%; max-width:480px; position:relative; }
+    .modal-title { font-size:1rem; font-weight:700; margin-bottom:1rem; }
+    .modal-close { position:absolute; top:1rem; right:1rem; background:none; border:none; color:var(--txt2); font-size:1.2rem; cursor:pointer; }
+    .form-group { margin-bottom:1rem; }
+    .form-label { display:block; font-size:.82rem; color:var(--txt2); margin-bottom:.4rem; font-weight:600; }
+    .form-input { width:100%; background:var(--s2); border:1px solid var(--border); color:var(--txt); padding:.55rem .85rem; border-radius:7px; font-size:.875rem; outline:none; transition:border-color .2s; }
+    .form-input:focus { border-color:var(--blue); }
+    .form-actions { display:flex; gap:.75rem; justify-content:flex-end; margin-top:1.25rem; }
+
+    /* ── Tenant actions dropdown ── */
+    .actions-cell { display:flex; gap:.4rem; flex-wrap:wrap; }
+
+    /* ── Empty state ── */
+    .empty-state { padding:3rem; text-align:center; color:var(--txt2); }
+    .empty-state svg { opacity:.3; margin-bottom:1rem; }
+
+    /* ── Toast ── */
+    #toast { position:fixed; bottom:1.5rem; right:1.5rem; background:var(--s2); border:1px solid var(--border); border-radius:8px; padding:.75rem 1.25rem; font-size:.85rem; z-index:999; opacity:0; transform:translateY(10px); transition:all .3s; pointer-events:none; max-width:320px; }
+    #toast.show { opacity:1; transform:translateY(0); }
+    #toast.toast-ok  { border-color:rgba(63,185,80,.5); color:var(--green); }
+    #toast.toast-err { border-color:rgba(248,81,73,.5); color:var(--red); }
+
+    /* ── Tabs ── */
+    .tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:1.5rem; }
+    .tab-btn { background:none; border:none; color:var(--txt2); padding:.6rem 1.2rem; font-size:.875rem; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; transition:all .2s; font-weight:500; }
+    .tab-btn.active { color:var(--blue); border-bottom-color:var(--blue); }
+    .tab-btn:hover:not(.active) { color:var(--txt); }
+    .tab-pane { display:none; }
+    .tab-pane.active { display:block; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width:6px; } ::-webkit-scrollbar-track { background:transparent; } ::-webkit-scrollbar-thumb { background:var(--s3); border-radius:3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+    NetGuard IDS
+  </div>
+  <div class="header-right">
+    <span class="badge-admin">⚡ Admin</span>
+    <span id="hdr-time" style="font-family:monospace;font-size:.8rem;"></span>
+    <button class="logout-btn" onclick="location.href='/logout'">Sair</button>
+  </div>
+</header>
+
+<div class="container">
+  <h1>Painel de Administração</h1>
+  <p class="subtitle" id="last-refresh">Carregando dados...</p>
+
+  <!-- Stats -->
+  <div class="stats-grid" id="stats-grid">
+    <div class="stat-card stat-blue">
+      <div class="stat-label">Tenants Ativos</div>
+      <div class="stat-value" id="s-tenants">—</div>
+      <div class="stat-sub">total cadastrados</div>
+    </div>
+    <div class="stat-card stat-green">
+      <div class="stat-label">Trials Ativos</div>
+      <div class="stat-value" id="s-trials">—</div>
+      <div class="stat-sub">em uso agora</div>
+    </div>
+    <div class="stat-card stat-orange">
+      <div class="stat-label">Trials Expirados</div>
+      <div class="stat-value" id="s-expired">—</div>
+      <div class="stat-sub">últimas 24h</div>
+    </div>
+    <div class="stat-card stat-purple">
+      <div class="stat-label">Receita Mensal</div>
+      <div class="stat-value" id="s-mrr">—</div>
+      <div class="stat-sub">planos pagos</div>
+    </div>
+    <div class="stat-card stat-red">
+      <div class="stat-label">Tentativas Bloqueadas</div>
+      <div class="stat-value" id="s-blocked">—</div>
+      <div class="stat-sub">BruteForce hoje</div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="tenants">Tenants</button>
+    <button class="tab-btn" data-tab="trials">Trials</button>
+    <button class="tab-btn" data-tab="audit">Auditoria</button>
+  </div>
+
+  <!-- ── Tab: Tenants ── -->
+  <div class="tab-pane active" id="tab-tenants">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+          Tenants Cadastrados
+        </span>
+        <button class="btn btn-primary btn-sm" onclick="openModal('create-tenant')">
+          + Novo Tenant
+        </button>
+      </div>
+      <div class="table-wrap">
+        <table id="tenants-table">
+          <thead>
+            <tr>
+              <th>Tenant</th>
+              <th>Plano</th>
+              <th>Role</th>
+              <th>Token (prefixo)</th>
+              <th>Hosts</th>
+              <th>Criado em</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tenants-tbody">
+            <tr><td colspan="7" class="empty-state">Carregando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Tab: Trials ── -->
+  <div class="tab-pane" id="tab-trials">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          Trials em Andamento
+        </span>
+        <button class="btn btn-primary btn-sm" onclick="openModal('create-trial')">
+          + Criar Trial
+        </button>
+      </div>
+      <div class="table-wrap">
+        <table id="trials-table">
+          <thead>
+            <tr>
+              <th>Nome / Empresa</th>
+              <th>E-mail</th>
+              <th>Status</th>
+              <th>Expira em</th>
+              <th>Progresso</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="trials-tbody">
+            <tr><td colspan="6" class="empty-state">Carregando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Tab: Auditoria ── -->
+  <div class="tab-pane" id="tab-audit">
+    <div class="section">
+      <div class="section-title" style="margin-bottom:1rem">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        Log de Auditoria
+      </div>
+      <div class="audit-log">
+        <div class="audit-toolbar">
+          <button class="audit-filter-btn active" data-filter="">Tudo</button>
+          <button class="audit-filter-btn" data-filter="LOGIN_OK">Login</button>
+          <button class="audit-filter-btn" data-filter="LOGIN_FAIL">Falhas</button>
+          <button class="audit-filter-btn" data-filter="LOGIN_BLOCKED">Bloqueios</button>
+          <button class="audit-filter-btn" data-filter="TOKEN_ROTATED">Rotações</button>
+          <button class="audit-filter-btn" data-filter="TENANT_TRIAL">Trials</button>
+          <input class="audit-search" id="audit-search" placeholder="Buscar ação, IP, actor…" />
+          <button class="btn btn-ghost btn-sm" onclick="loadAudit()">↺ Atualizar</button>
+        </div>
+        <div class="audit-entries" id="audit-entries">
+          <div class="empty-state">Carregando audit log...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Criar Tenant ── -->
+<div class="modal-overlay" id="modal-create-tenant">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('create-tenant')">✕</button>
+    <div class="modal-title">Criar Novo Tenant</div>
+    <form id="form-create-tenant" onsubmit="submitCreateTenant(event)">
+      <div class="form-group">
+        <label class="form-label">Nome / Empresa</label>
+        <input class="form-input" name="name" placeholder="Acme Corp" required />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Plano</label>
+        <select class="form-input" name="plan">
+          <option value="free">Free</option>
+          <option value="pro" selected>Pro</option>
+          <option value="business">Business</option>
+          <option value="enterprise">Enterprise</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Máx. Hosts</label>
+        <input class="form-input" name="max_hosts" type="number" value="10" min="1" max="9999" />
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('create-tenant')">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Criar Tenant</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Modal: Criar Trial ── -->
+<div class="modal-overlay" id="modal-create-trial">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('create-trial')">✕</button>
+    <div class="modal-title">Criar Trial Manual</div>
+    <form id="form-create-trial" onsubmit="submitCreateTrial(event)">
+      <div class="form-group">
+        <label class="form-label">Nome</label>
+        <input class="form-input" name="name" placeholder="João Silva" required />
+      </div>
+      <div class="form-group">
+        <label class="form-label">E-mail</label>
+        <input class="form-input" name="email" type="email" placeholder="joao@empresa.com" required />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Empresa</label>
+        <input class="form-input" name="company" placeholder="Acme Corp" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Duração (horas)</label>
+        <input class="form-input" name="duration_h" type="number" value="72" min="1" max="720" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notas internas</label>
+        <input class="form-input" name="notes" placeholder="Origem: LinkedIn outbound" />
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('create-trial')">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Criar Trial</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Helpers ──────────────────────────────────────────────────────
+function toast(msg, ok=true) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + (ok ? 'toast-ok' : 'toast-err');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = ''; }, 3500);
+}
+
+function fmt_date(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
+}
+
+function time_remaining(iso) {
+  if (!iso) return '—';
+  const diff = new Date(iso) - new Date();
+  if (diff <= 0) return '<span style="color:var(--red)">Expirado</span>';
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  const color = h < 6 ? 'var(--orange)' : 'var(--green)';
+  return `<span style="color:${color}">${h}h ${m}m</span>`;
+}
+
+function plan_pill(plan) {
+  const cls = {'free':'gray','pro':'blue','business':'purple','enterprise':'orange'}[plan] || 'gray';
+  return `<span class="badge badge-${cls}">${plan}</span>`;
+}
+
+function role_badge(role) {
+  const cls = {'admin':'red','analyst':'blue','viewer':'gray'}[role] || 'gray';
+  return `<span class="badge badge-${cls}">${role}</span>`;
+}
+
+function status_badge(status) {
+  if (status === 'active') return '<span class="badge badge-green">● Ativo</span>';
+  if (status === 'expired') return '<span class="badge badge-red">Expirado</span>';
+  if (status === 'revoked') return '<span class="badge badge-gray">Revogado</span>';
+  return `<span class="badge badge-gray">${status}</span>`;
+}
+
+function action_badge(action) {
+  const colors = {
+    LOGIN_OK: 'green', LOGIN_FAIL: 'red', LOGIN_BLOCKED: 'red',
+    LOGOUT: 'gray', TOKEN_ROTATED: 'blue', TENANT_TRIAL: 'purple',
+    TENANT_CREATED: 'blue', BLOCK_IP: 'orange', UNBLOCK_IP: 'green',
+  };
+  const c = colors[action] || 'gray';
+  return `<span class="badge badge-${c}">${action}</span>`;
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'audit') loadAudit();
+  });
+});
+
+// ── Modals ────────────────────────────────────────────────────────
+function openModal(id)  { document.getElementById('modal-'+id).classList.add('open'); }
+function closeModal(id) { document.getElementById('modal-'+id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
+});
+
+// ── Load Tenants ──────────────────────────────────────────────────
+async function loadTenants() {
+  try {
+    const r = await fetch('/api/admin/tenants');
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    const tenants = data.tenants || [];
+    document.getElementById('s-tenants').textContent = tenants.length;
+
+    const tbody = document.getElementById('tenants-tbody');
+    if (!tenants.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Nenhum tenant cadastrado.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = tenants.map(t => `
+      <tr>
+        <td>
+          <div style="font-weight:600">${escHtml(t.name || t.tenant_id)}</div>
+          <div class="mono" style="font-size:.75rem">${escHtml(t.tenant_id)}</div>
+        </td>
+        <td>${plan_pill(t.plan || 'free')}</td>
+        <td>${role_badge(t.role || 'analyst')}</td>
+        <td><span class="mono">${escHtml((t.token||'').substring(0,12))}…</span></td>
+        <td>
+          <div>${t.host_count||0} / ${t.max_hosts||'∞'}</div>
+          <div class="progress-wrap" style="margin-top:.3rem;width:80px">
+            <div class="progress-bar ${pct_class(t.host_count, t.max_hosts)}"
+                 style="width:${Math.min(100, ((t.host_count||0)/(t.max_hosts||1))*100)}%"></div>
+          </div>
+        </td>
+        <td class="mono">${fmt_date(t.created_at)}</td>
+        <td>
+          <div class="actions-cell">
+            <button class="btn btn-ghost btn-sm" onclick="rotateTenantToken('${t.tenant_id}')">↺ Token</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteTenant('${t.tenant_id}', '${escHtml(t.name||t.tenant_id)}')">Remover</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    console.error('loadTenants', e);
+  }
+}
+
+function pct_class(count, max) {
+  if (!max || max === 0) return 'progress-ok';
+  const pct = (count||0) / max;
+  if (pct >= .9) return 'progress-crit';
+  if (pct >= .7) return 'progress-warn';
+  return 'progress-ok';
+}
+
+// ── Load Trials ───────────────────────────────────────────────────
+async function loadTrials() {
+  try {
+    const r = await fetch('/api/admin/trials');
+    if (!r.ok) { document.getElementById('s-trials').textContent = '?'; return; }
+    const data = await r.json();
+    const trials = data.trials || [];
+    const stats  = data.stats  || {};
+
+    const active  = trials.filter(t => t.status === 'active');
+    const expired = trials.filter(t => t.status === 'expired' || t.status === 'revoked');
+    document.getElementById('s-trials').textContent  = active.length;
+    document.getElementById('s-expired').textContent = expired.length;
+
+    const tbody = document.getElementById('trials-tbody');
+    if (!trials.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhum trial cadastrado.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = trials.map(t => {
+      const total_ms = new Date(t.expires_at) - new Date(t.created_at);
+      const elapsed_ms = Math.min(Date.now() - new Date(t.created_at), total_ms);
+      const pct = total_ms > 0 ? (elapsed_ms / total_ms) * 100 : 0;
+      const pc = pct >= 90 ? 'progress-crit' : pct >= 60 ? 'progress-warn' : 'progress-ok';
+      return `
+        <tr>
+          <td>
+            <div style="font-weight:600">${escHtml(t.name||'—')}</div>
+            <div style="font-size:.78rem;color:var(--txt2)">${escHtml(t.company||'')}</div>
+          </td>
+          <td class="mono" style="font-size:.78rem">${escHtml(t.email||'—')}</td>
+          <td>${status_badge(t.status)}</td>
+          <td>${time_remaining(t.expires_at)}</td>
+          <td style="width:120px">
+            <div class="progress-wrap">
+              <div class="progress-bar ${pc}" style="width:${Math.min(100,pct)}%"></div>
+            </div>
+            <div style="font-size:.72rem;color:var(--txt3);margin-top:.2rem">${Math.round(pct)}% usado</div>
+          </td>
+          <td>
+            <div class="actions-cell">
+              ${t.status==='active'
+                ? `<button class="btn btn-success btn-sm" onclick="extendTrial('${t.token}')">+24h</button>
+                   <button class="btn btn-danger btn-sm" onclick="revokeTrial('${t.token}')">Revogar</button>`
+                : '<span style="color:var(--txt3);font-size:.78rem">inativo</span>'}
+            </div>
+          </td>
+        </tr>`;
+    }).join('');
+  } catch(e) {
+    console.error('loadTrials', e);
+  }
+}
+
+// ── Load Audit ────────────────────────────────────────────────────
+let _auditFilter = '';
+async function loadAudit() {
+  const search = document.getElementById('audit-search').value.toLowerCase();
+  try {
+    const r = await fetch('/api/admin/audit?limit=200');
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    let rows = (data.entries || []);
+    if (_auditFilter) rows = rows.filter(r => r.action === _auditFilter);
+    if (search) rows = rows.filter(r =>
+      (r.action||'').toLowerCase().includes(search) ||
+      (r.actor||'').toLowerCase().includes(search) ||
+      (r.ip||'').includes(search) ||
+      (r.detail||'').toLowerCase().includes(search)
+    );
+    const el = document.getElementById('audit-entries');
+    if (!rows.length) {
+      el.innerHTML = '<div class="empty-state" style="padding:2rem">Nenhum evento encontrado.</div>';
+      return;
+    }
+    el.innerHTML = rows.map(r => `
+      <div class="audit-row">
+        <div class="audit-ts">${fmt_date(r.ts)}</div>
+        <div class="audit-action">${action_badge(r.action)}</div>
+        <div class="audit-detail" title="${escHtml(r.actor||'')} ${escHtml(r.detail||'')}">
+          <span style="color:var(--txt)">${escHtml(r.actor||'—')}</span>
+          ${r.detail ? '<span style="color:var(--txt3)"> · '+escHtml(r.detail)+'</span>' : ''}
+        </div>
+        <div class="audit-ip">${escHtml(r.ip||'—')}</div>
+      </div>
+    `).join('');
+  } catch(e) {
+    document.getElementById('audit-entries').innerHTML =
+      '<div class="empty-state" style="padding:2rem;color:var(--red)">Erro ao carregar audit log.</div>';
+  }
+}
+
+document.querySelectorAll('.audit-filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.audit-filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    _auditFilter = btn.dataset.filter;
+    loadAudit();
+  });
+});
+document.getElementById('audit-search').addEventListener('input', () => loadAudit());
+
+// ── Actions ───────────────────────────────────────────────────────
+async function revokeTrial(token) {
+  if (!confirm('Revogar este trial?')) return;
+  const r = await fetch(`/api/admin/trials/${token}/revoke`, {method:'POST', headers:{'X-CSRFToken':getCsrf()}});
+  toast(r.ok ? 'Trial revogado.' : 'Erro ao revogar.', r.ok);
+  if (r.ok) loadTrials();
+}
+
+async function extendTrial(token) {
+  const r = await fetch(`/api/admin/trials/${token}/extend`, {
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body: JSON.stringify({hours:24})
+  });
+  toast(r.ok ? '+24h adicionadas.' : 'Erro ao estender.', r.ok);
+  if (r.ok) loadTrials();
+}
+
+async function deleteTenant(id, name) {
+  if (!confirm(`Remover tenant "${name}"? Esta ação não pode ser desfeita.`)) return;
+  const r = await fetch(`/api/admin/tenants/${id}`, {method:'DELETE', headers:{'X-CSRFToken':getCsrf()}});
+  toast(r.ok ? 'Tenant removido.' : 'Erro ao remover.', r.ok);
+  if (r.ok) loadTenants();
+}
+
+async function rotateTenantToken(id) {
+  if (!confirm('Rotacionar o token deste tenant? O token atual será invalidado.')) return;
+  const r = await fetch(`/api/admin/tenants/${id}/rotate-token`, {method:'POST', headers:{'X-CSRFToken':getCsrf()}});
+  const d = await r.json();
+  if (r.ok) {
+    toast('Token rotacionado: ' + (d.new_token||'').substring(0,16) + '…', true);
+    loadTenants();
+  } else {
+    toast('Erro: ' + (d.error||'desconhecido'), false);
+  }
+}
+
+async function submitCreateTenant(e) {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const body = Object.fromEntries(fd.entries());
+  const r = await fetch('/api/admin/tenants', {
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  toast(r.ok ? 'Tenant criado! Token: '+(d.token||'').substring(0,16)+'…' : (d.error||'Erro'), r.ok);
+  if (r.ok) { closeModal('create-tenant'); loadTenants(); e.target.reset(); }
+}
+
+async function submitCreateTrial(e) {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const body = Object.fromEntries(fd.entries());
+  body.duration_h = parseInt(body.duration_h);
+  const r = await fetch('/api/admin/trials', {
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+    body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  toast(r.ok ? 'Trial criado!' : (d.error||'Erro'), r.ok);
+  if (r.ok) { closeModal('create-trial'); loadTrials(); e.target.reset(); }
+}
+
+// ── Load Stats ────────────────────────────────────────────────────
+async function loadBlockedCount() {
+  try {
+    const r = await fetch('/api/admin/security-stats');
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById('s-blocked').textContent = d.blocked_today ?? '—';
+    document.getElementById('s-mrr').textContent = d.mrr ? 'R$'+d.mrr : '—';
+  } catch {}
+}
+
+function getCsrf() {
+  const m = document.cookie.match(/csrf_token=([^;]+)/);
+  return m ? m[1] : '';
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init ──────────────────────────────────────────────────────────
+function refresh() {
+  loadTenants();
+  loadTrials();
+  loadBlockedCount();
+  document.getElementById('last-refresh').textContent =
+    'Última atualização: ' + new Date().toLocaleTimeString('pt-BR');
+}
+
+// Relógio no header
+setInterval(() => {
+  document.getElementById('hdr-time').textContent =
+    new Date().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}, 1000);
+
+// Auto-refresh a cada 60s
+setInterval(refresh, 60000);
+refresh();
+</script>
+</body>
+</html>

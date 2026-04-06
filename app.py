@@ -128,6 +128,15 @@ except Exception as _mail_err:
     def send_contact_confirmation(*a, **kw): pass  # noqa: E302
     print(f"[WARN] Mailer module: {_mail_err}")
 
+# Notifier — Telegram/Slack para eventos de negócio
+try:
+    from notifier import notify as _notify
+    NOTIFIER_OK = True
+except Exception as _notif_err:
+    NOTIFIER_OK = False
+    def _notify(event, **kw): pass  # noqa: E302
+    print(f"[WARN] Notifier module: {_notif_err}")
+
 # Auth + HTTPS
 try:
     from auth import (  # noqa: F401
@@ -486,6 +495,8 @@ try:
     )
     # Atalhos de decorator reutilizáveis
     _limit_login    = limiter.limit("10 per minute")     # brute force login
+    _limit_trial    = limiter.limit("3 per hour")        # anti-bot trial signup
+    _limit_contact  = limiter.limit("5 per hour")        # anti-spam contact form
     _limit_report   = limiter.limit("5 per minute")      # PDF pesado
     _limit_ioc_check= limiter.limit("60 per minute")     # check de IOC em massa
     _limit_train    = limiter.limit("2 per minute")      # treino ML
@@ -500,7 +511,8 @@ except ImportError:
             return decorator
         def exempt(self, f): return f
     limiter       = _NoopLimiter()
-    _limit_login  = _limit_report = _limit_ioc_check = _limit_train = limiter.limit("")
+    _limit_login  = _limit_trial = _limit_contact = _noop = limiter.limit("")
+    _limit_report = _limit_ioc_check = _limit_train = _noop
 
 # ── Whitelist ─────────────────────────────────────────────────────
 WHITELIST = ["127.0.0.1","::1","192.168.15.1","192.168.15.2"]
@@ -3029,9 +3041,13 @@ def auth_login():
     _bf      = get_bf_guard(_bf_db)
     if _bf and _bf.is_locked(ip):
         remaining = _bf.lockout_remaining(ip)
+        count     = _bf.failure_count(ip)
         logger.warning("Login bloqueado (BruteForce) | ip=%s | restam=%ds", ip, remaining)
         audit("LOGIN_BLOCKED", actor="brute_force_guard", ip=ip,
-              detail=f"lockout_remaining={remaining}s")
+              detail=f"lockout_remaining={remaining}s count={count}")
+        # Notifica operações apenas nos thresholds graves (10+ falhas)
+        if count >= 10:
+            _notify("BRUTE_FORCE_ALERT", ip=ip, count=count, duration_s=remaining)
         return jsonify({
             "valid": False,
             "error": f"Conta bloqueada por excesso de tentativas. Tente novamente em {remaining}s.",
@@ -3182,6 +3198,7 @@ def pricing():
 
 
 @app.route("/trial", methods=["POST"])
+@_limit_trial
 def trial():
     """
     Registra um novo tenant no plano Free ou Pro sem exigir cartão.
@@ -3240,6 +3257,10 @@ def trial():
         app_url = request.host_url.rstrip("/"),
     )
 
+    # Notificação Telegram/Slack — assíncrona, falha silenciosa
+    _notify("TRIAL_CREATED", name=name, email=email,
+            company=company, plan=plan_key, tenant_id=tenant_id)
+
     if request.is_json:
         return jsonify({
             "ok": True,
@@ -3258,6 +3279,7 @@ def trial():
 
 
 @app.route("/contact", methods=["POST"])
+@_limit_contact
 def contact():
     """
     Recebe formulário de contato para Enterprise/MSSP.
@@ -4343,6 +4365,192 @@ def admin_trials_extend(token):
     data  = request.get_json(force=True) or {}
     trial = _get_trial_engine().extend_trial(token, int(data.get("hours", 24)))
     return jsonify({"ok": True, "trial": trial})
+
+
+# ── Admin Dashboard ───────────────────────────────────────────────
+
+@app.route("/admin")
+@require_session
+@require_role("admin")
+def admin_dashboard():
+    """Painel de administração — visão geral de tenants, trials e auditoria."""
+    from flask import render_template
+    return render_template("admin_dashboard.html")
+
+
+@app.route("/api/admin/tenants", methods=["GET"])
+@auth
+@require_role("admin")
+def admin_tenants_list():
+    """Lista todos os tenants com stats de uso."""
+    try:
+        tenants_raw = repo.list_tenants()
+        tenants = []
+        for t in tenants_raw:
+            td = dict(t) if not isinstance(t, dict) else t
+            # Mascara token — só exibe prefixo
+            token = td.get("token", "")
+            td["token"] = token[:16] if token else ""
+            td["host_count"] = len(_ids_engines.get(td.get("tenant_id", ""), {__class__: None}).__dict__) \
+                if td.get("tenant_id") in _ids_engines else 0
+            tenants.append(td)
+        return jsonify({"tenants": tenants, "total": len(tenants)})
+    except Exception as exc:
+        logger.error("admin_tenants_list error: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/admin/tenants", methods=["POST"])
+@auth
+@require_role("admin")
+@csrf_protect
+def admin_tenants_create():
+    """Cria um tenant diretamente (sem self-serve)."""
+    import uuid
+    data     = request.get_json(force=True) or {}
+    name     = sanitize(data.get("name","").strip(), 200, "name")
+    plan_key = data.get("plan", "pro")
+    max_hosts = int(data.get("max_hosts", 10))
+    if not name:
+        return jsonify({"error": "nome obrigatório"}), 400
+    if plan_key not in ("free", "pro", "business", "enterprise"):
+        plan_key = "pro"
+    token     = generate_api_token()
+    tenant_id = str(uuid.uuid4())
+    try:
+        repo.create_tenant(tenant_id=tenant_id, name=name, token=token,
+                           plan=plan_key, max_hosts=max_hosts)
+        audit("TENANT_CREATED", actor=tenant_id, ip=request.remote_addr or "-",
+              detail=f"plan={plan_key} name={name}")
+        _notify("TENANT_CREATED", tenant_id=tenant_id, name=name, plan=plan_key)
+        return jsonify({"ok": True, "tenant_id": tenant_id, "token": token}), 201
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/admin/tenants/<tid>", methods=["DELETE"])
+@auth
+@require_role("admin")
+@csrf_protect
+def admin_tenants_delete(tid):
+    """Remove um tenant do banco (não apaga dados de detecção)."""
+    try:
+        repo.delete_tenant(tid)
+        # Remove engine em memória se existir
+        with _ids_lock:
+            _ids_engines.pop(tid, None)
+        audit("TENANT_DELETED", actor=tid, ip=request.remote_addr or "-")
+        return jsonify({"ok": True})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/admin/tenants/<tid>/rotate-token", methods=["POST"])
+@auth
+@require_role("admin")
+@csrf_protect
+def admin_rotate_tenant_token(tid):
+    """Rotaciona o token de um tenant específico (ação admin)."""
+    try:
+        old_row = repo.get_tenant_by_id(tid) if hasattr(repo, "get_tenant_by_id") else None
+        old_tok = (dict(old_row).get("token","") if old_row else "")
+        new_token, new_hash = rotate_token(old_tok, generate_api_token)
+        repo.update_tenant_token(tid, new_token, new_hash)
+        audit("TOKEN_ROTATED", actor=tid, ip=request.remote_addr or "-",
+              detail=f"by=admin new_prefix={new_token[:8]}")
+        return jsonify({"ok": True, "new_token": new_token})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/admin/audit", methods=["GET"])
+@auth
+@require_role("admin")
+def admin_audit_log():
+    """
+    Retorna entradas do audit log (netguard_audit.log) como JSON.
+    Parâmetros: limit (default 200), action (filtro), since (ISO datetime)
+    """
+    import json as _json
+    limit  = min(int(request.args.get("limit", 200)), 1000)
+    action_filter = request.args.get("action", "").strip().upper()
+
+    entries = []
+    audit_path = os.environ.get("IDS_AUDIT_LOG", "netguard_audit.log")
+    try:
+        if os.path.exists(audit_path):
+            with open(audit_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = _json.loads(line)
+                        if action_filter and obj.get("msg","").upper() != action_filter:
+                            continue
+                        entries.append({
+                            "ts":     obj.get("ts",""),
+                            "action": obj.get("msg",""),
+                            "actor":  obj.get("actor","—"),
+                            "ip":     obj.get("ip","—"),
+                            "detail": obj.get("detail",""),
+                        })
+                    except _json.JSONDecodeError:
+                        pass
+        # Retorna as mais recentes primeiro
+        entries = list(reversed(entries[-limit:]))
+    except Exception as exc:
+        logger.error("admin_audit_log error: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({"entries": entries, "total": len(entries)})
+
+
+@app.route("/api/admin/security-stats", methods=["GET"])
+@auth
+@require_role("admin")
+def admin_security_stats():
+    """
+    Stats de segurança: tentativas bloqueadas hoje, MRR estimado.
+    """
+    import json as _json
+    from datetime import datetime, timezone, timedelta
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    blocked_today = 0
+    mrr = 0
+
+    # Conta LOGIN_BLOCKED no audit log de hoje
+    audit_path = os.environ.get("IDS_AUDIT_LOG", "netguard_audit.log")
+    try:
+        if os.path.exists(audit_path):
+            with open(audit_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        obj = _json.loads(line)
+                        if obj.get("msg","") == "LOGIN_BLOCKED" and obj.get("ts","").startswith(today):
+                            blocked_today += 1
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    # MRR estimado pelos planos dos tenants
+    plan_prices = {"free": 0, "pro": 149, "business": 349, "enterprise": 999}
+    try:
+        tenants = repo.list_tenants()
+        for t in tenants:
+            td = dict(t) if not isinstance(t, dict) else t
+            plan = td.get("plan", "free")
+            mrr += plan_prices.get(plan, 0)
+    except Exception:
+        pass
+
+    return jsonify({
+        "blocked_today": blocked_today,
+        "mrr": mrr,
+        "mrr_formatted": f"R${mrr:,}".replace(",", "."),
+    })
 
 
 # ═══════════════════════════════════════ WEBHOOK ALERTS ════════════

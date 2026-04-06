@@ -725,6 +725,46 @@ class EventRepository:
             logger.error("create_tenant error: %s", e)
             return False
 
+    def list_tenants(self) -> list:
+        """Retorna todos os tenants ativos ordenados por data de criação."""
+        ph = self._placeholder()
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute("SELECT * FROM tenants WHERE active=TRUE ORDER BY created_at DESC")
+                rows = cur.fetchall()
+                cur.close()
+                return [dict(r) for r in rows]
+            else:
+                rows = self._conn().execute(
+                    "SELECT * FROM tenants WHERE active=1 ORDER BY rowid DESC"
+                ).fetchall()
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error("list_tenants error: %s", e)
+            return []
+
+    def delete_tenant(self, tenant_id: str) -> bool:
+        """Desativa (soft-delete) um tenant pelo tenant_id."""
+        ph = self._placeholder()
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"UPDATE tenants SET active=FALSE WHERE tenant_id={ph}", (tenant_id,)
+                )
+                self._conn().commit()
+                cur.close()
+            else:
+                self._conn().execute(
+                    f"UPDATE tenants SET active=0 WHERE tenant_id={ph}", (tenant_id,)
+                )
+                self._conn().commit()
+            return True
+        except Exception as e:
+            logger.error("delete_tenant error: %s", e)
+            return False
+
     def _exec_sql(self, sql: str, params: tuple = ()) -> bool:
         """
         Executa SQL arbitrário de forma segura (usado pelo webhook handler).
