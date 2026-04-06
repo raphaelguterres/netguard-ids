@@ -3093,6 +3093,63 @@ def auth_login():
     return resp
 
 
+@app.route("/api/me")
+@auth
+def api_me():
+    """
+    Retorna dados do tenant autenticado: id, plano, role, e flags de acesso.
+    Usado pelo dashboard para decidir quais abas/features mostrar.
+
+    Resposta:
+        {
+          "tenant_id": "...",
+          "name": "...",
+          "plan": "pro",           // free | pro | business | enterprise
+          "role": "admin",         // admin | analyst | viewer
+          "is_paid": true,         // plano != free
+          "is_admin": true,        // role == admin
+          "can_see_admin_tab": true // is_paid && is_admin
+        }
+    """
+    from flask import g
+    token = request.cookies.get("netguard_token", "") or \
+            request.headers.get("X-API-Token", "") or \
+            request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+
+    # Admin token
+    result = verify_any_token(token, repo)
+    if result.get("type") == "admin":
+        return jsonify({
+            "tenant_id":       "admin",
+            "name":            "Administrador",
+            "plan":            "enterprise",
+            "role":            "admin",
+            "is_paid":         True,
+            "is_admin":        True,
+            "can_see_admin_tab": True,
+        })
+
+    tenant = result.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Não autenticado"}), 401
+
+    t = dict(tenant) if not isinstance(tenant, dict) else tenant
+    plan    = t.get("plan", "free")
+    role    = t.get("role", "analyst")
+    is_paid = plan in ("pro", "business", "enterprise")
+    is_adm  = role == "admin"
+
+    return jsonify({
+        "tenant_id":         t.get("tenant_id", ""),
+        "name":              t.get("name", ""),
+        "plan":              plan,
+        "role":              role,
+        "is_paid":           is_paid,
+        "is_admin":          is_adm,
+        "can_see_admin_tab": is_paid and is_adm,
+    })
+
+
 @app.route("/logout")
 def logout():
     """Limpa cookie de sessão e redireciona para login."""
@@ -4373,8 +4430,24 @@ def admin_trials_extend(token):
 @require_session
 @require_role("admin")
 def admin_dashboard():
-    """Painel de administração — visão geral de tenants, trials e auditoria."""
-    from flask import render_template
+    """
+    Painel de administração.
+    Acesso: apenas tenants com role=admin E plano pago (pro/business/enterprise).
+    Usuários free são redirecionados para /pricing mesmo que tenham role=admin.
+    """
+    from flask import render_template, redirect as _redir, g
+    # Verificação extra de plano pago (dupla barreira além do require_role)
+    token = request.cookies.get("netguard_token", "")
+    result = verify_any_token(token, repo)
+    if result.get("type") != "admin":                  # admin token do sistema → acesso total
+        tenant = result.get("tenant")
+        if tenant:
+            t    = dict(tenant) if not isinstance(tenant, dict) else tenant
+            plan = t.get("plan", "free")
+            if plan not in ("pro", "business", "enterprise"):
+                logger.warning("Tentativa de acesso ao admin por tenant free | tid=%s",
+                               t.get("tenant_id",""))
+                return _redir("/pricing?upgrade=admin_required")
     return render_template("admin_dashboard.html")
 
 

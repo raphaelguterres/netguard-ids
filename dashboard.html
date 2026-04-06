@@ -1759,6 +1759,21 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
   <div class="hdr-r">
     <div class="stat-pill"><div class="stat-pill-dot on" id="led-mon"></div><span class="stat-pill-txt">Monitor <span id="mon-cycle">#0</span></span></div>
     <div class="stat-pill"><div class="stat-pill-dot on" id="led-cap"></div><span class="stat-pill-txt">Captura · <span id="cap-iface">—</span></span></div>
+    <!-- Badge de plano — visível apenas para usuários pagos (injetado via /api/me) -->
+    <span id="hdr-plan-badge"
+          style="display:none;font-size:.68rem;font-weight:700;letter-spacing:.08em;
+                 padding:.2rem .55rem;border-radius:5px;border:1px solid currentColor;
+                 opacity:.85;cursor:default"
+          title="Seu plano atual"></span>
+    <!-- Botão Admin no header — visível apenas para admin de plano pago -->
+    <a id="hdr-admin-btn" href="/admin"
+       style="display:none;font-size:.78rem;font-weight:700;color:#58a6ff;
+              background:rgba(31,111,235,.15);border:1px solid rgba(88,166,255,.35);
+              padding:.3rem .85rem;border-radius:6px;text-decoration:none;
+              transition:background .2s;letter-spacing:.02em"
+       onmouseover="this.style.background='rgba(31,111,235,.28)'"
+       onmouseout="this.style.background='rgba(31,111,235,.15)'"
+       title="Painel de Administração">⚡ Admin</a>
     <div id="utc">—</div>
   </div>
 </div>
@@ -1792,6 +1807,9 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
     <div class="tab" onclick="goPage('custom-rules',this)" title="Regras Customizadas">⚙ My Rules</div>
     <div class="tab" onclick="goPage('webhooks',this)" title="Webhook Alerts">🔔 Webhooks</div>
     <div class="tab" onclick="goPage('trials',this)" title="Trials de Clientes">🔗 Trials</div>
+    <div class="tab" id="tab-admin-btn"
+         style="display:none;background:linear-gradient(90deg,rgba(31,111,235,.18),rgba(188,140,255,.12));border:1px solid rgba(88,166,255,.3);border-radius:6px;color:#58a6ff;font-weight:700;letter-spacing:.02em"
+         onclick="location.href='/admin'" title="Painel de Administração — planos pagos">⚡ Admin</div>
   </div>
   <button class="tab-scroll-btn" id="tab-scroll-right" onclick="scrollTabs(200)" title="Mais abas →">›</button>
 </div>
@@ -3043,6 +3061,40 @@ document.addEventListener('DOMContentLoaded',function(){
   });
   // Mostra onboarding para novos usuários (apenas 1 vez por sessão)
   setTimeout(obShowIfNeeded, 800);
+
+  // ── Aba Admin: visível apenas para usuários pagos com role=admin ──
+  (async function checkAdminAccess(){
+    try {
+      const r = await fetch('/api/me', {credentials: 'include'});
+      if (!r.ok) return;
+      const me = await r.json();
+
+      // Badge de plano sempre visível para usuários autenticados (exceto free)
+      const planEl = document.getElementById('hdr-plan-badge');
+      if (planEl && me.plan && me.plan !== 'free') {
+        const colors = {pro:'#58a6ff', business:'#bc8cff', enterprise:'#f0883e'};
+        planEl.textContent = (me.plan||'').toUpperCase();
+        planEl.style.color = colors[me.plan] || '#8b949e';
+        planEl.style.borderColor = colors[me.plan] || '#8b949e';
+        planEl.style.display = 'inline-block';
+      }
+
+      if (me.can_see_admin_tab) {
+        // Mostra a aba Admin na barra de tabs
+        const tabBtn = document.getElementById('tab-admin-btn');
+        if (tabBtn) tabBtn.style.display = '';
+
+        // Mostra botão Admin no header (mais visível)
+        const hdrBtn = document.getElementById('hdr-admin-btn');
+        if (hdrBtn) hdrBtn.style.display = 'inline-block';
+      }
+
+      // Armazena globalmente para uso por outros módulos
+      window._ngMe = me;
+    } catch(e) {
+      // silencioso — usuário não autenticado ou endpoint indisponível
+    }
+  })();
 });
 
 function goPage(name,el){
