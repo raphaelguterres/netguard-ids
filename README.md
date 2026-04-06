@@ -330,6 +330,39 @@ curl -X POST http://localhost:5000/api/webhooks/1/test -H "X-API-Key: SUA_KEY"
 
 ---
 
+## E-mail Transacional
+
+O NetGuard IDS envia e-mails automáticos (boas-vindas, confirmação de contato) via SMTP padrão — sem dependências externas além da stdlib Python.
+
+Configure as variáveis abaixo no `.env` ou como variáveis de ambiente:
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `SMTP_HOST` | Servidor SMTP | _(sem envio se vazio)_ |
+| `SMTP_PORT` | Porta | `587` |
+| `SMTP_USER` | Usuário/login | — |
+| `SMTP_PASS` | Senha / API Key | — |
+| `SMTP_FROM` | Endereço "De" | igual ao `SMTP_USER` |
+| `SMTP_STARTTLS` | STARTTLS (porta 587) | `true` |
+| `SMTP_SSL` | SSL direto (porta 465) | `false` |
+| `APP_URL` | URL base para links no e-mail | `http://localhost:5000` |
+
+**Provedor recomendado para produção:** [Resend](https://resend.com) — gratuito até 3.000 e-mails/mês, domínio próprio, SPF/DKIM automático.
+
+```bash
+# Exemplo com Resend
+SMTP_HOST=smtp.resend.com
+SMTP_PORT=587
+SMTP_USER=resend
+SMTP_PASS=re_SUA_API_KEY
+SMTP_FROM=noreply@seudominio.com
+APP_URL=https://seudominio.com
+```
+
+Se `SMTP_HOST` não estiver definido, os e-mails são apenas logados (modo dry-run) — a aplicação nunca bloqueia por falta de configuração SMTP.
+
+---
+
 ## Dashboard
 
 12 monitoring tabs:

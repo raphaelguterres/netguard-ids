@@ -118,6 +118,16 @@ except Exception as _bill_err:
     BILLING_OK = False
     print(f"[WARN] Billing module: {_bill_err}")
 
+# Mailer — envio assíncrono via SMTP (falha silenciosa se não configurado)
+try:
+    from mailer import send_welcome, send_contact_confirmation
+    MAILER_OK = True
+except Exception as _mail_err:
+    MAILER_OK = False
+    def send_welcome(*a, **kw): pass          # noqa: E302
+    def send_contact_confirmation(*a, **kw): pass  # noqa: E302
+    print(f"[WARN] Mailer module: {_mail_err}")
+
 # Auth + HTTPS
 try:
     from auth import (  # noqa: F401
@@ -3062,6 +3072,15 @@ def trial():
             return jsonify({"error": "Falha ao criar conta"}), 500
         return redirect("/pricing?error=server")
 
+    # E-mail de boas-vindas — assíncrono, falha silenciosa
+    send_welcome(
+        name    = name,
+        email   = email,
+        token   = token,
+        plan    = plan_key,
+        app_url = request.host_url.rstrip("/"),
+    )
+
     if request.is_json:
         return jsonify({
             "ok": True,
@@ -3106,6 +3125,9 @@ def contact():
     audit("CONTACT_LEAD", actor=email,
           ip=request.remote_addr or "-",
           detail=f"plan={plan} company={company} msg_len={len(message)}")
+
+    # Confirmação para o lead — assíncrona, falha silenciosa
+    send_contact_confirmation(name=name, email=email, plan=plan)
 
     if request.is_json:
         return jsonify({
