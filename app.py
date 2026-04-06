@@ -4250,6 +4250,13 @@ def webhooks_types():
 # ═══════════════════════════════════════════════════════════════════
 
 @app.route("/")
+def index():
+    """Landing page pública — apresentação do produto."""
+    from flask import render_template
+    contact_email = CONTACT_EMAIL if BILLING_OK else "contato@netguard.io"
+    return render_template("landing.html", contact_email=contact_email)
+
+
 @app.route("/dashboard")
 @require_session
 def dashboard():

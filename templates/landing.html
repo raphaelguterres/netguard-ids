@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NetGuard IDS — Segurança de Rede para Empresas Brasileiras</title>
+  <meta name="description" content="Sistema de detecção de intrusão com IA, monitoramento em tempo real, alertas no Telegram e WhatsApp. Setup em 5 minutos. Trial grátis de 14 dias." />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:     #0d1117;
+      --s1:     #161b22;
+      --s2:     #21262d;
+      --border: #30363d;
+      --txt:    #e6edf3;
+      --txt2:   #8b949e;
+      --blue:   #58a6ff;
+      --blue2:  #1f6feb;
+      --green:  #3fb950;
+      --orange: #f0883e;
+      --red:    #f85149;
+    }
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--txt); line-height: 1.6; overflow-x: hidden; }
+    a { color: inherit; text-decoration: none; }
+
+    /* ── HEADER ─────────────────────────────────────────── */
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1rem 2.5rem; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(13,17,23,.92); backdrop-filter: blur(10px);
+    }
+    .logo { display: flex; align-items: center; gap: .55rem; font-weight: 800; font-size: 1.1rem; color: var(--blue); }
+    .logo svg { width: 28px; height: 28px; }
+    header nav { display: flex; align-items: center; gap: 1.8rem; }
+    header nav a { color: var(--txt2); font-size: .9rem; transition: color .2s; }
+    header nav a:hover { color: var(--txt); }
+    .btn-nav { background: var(--blue2); color: #fff !important; padding: .45rem 1.15rem; border-radius: 6px; font-weight: 600; font-size: .85rem; transition: background .2s !important; }
+    .btn-nav:hover { background: #388bfd !important; }
+    .nav-login { border: 1px solid var(--border); padding: .43rem 1rem; border-radius: 6px; font-size: .85rem; }
+
+    /* ── HERO ────────────────────────────────────────────── */
+    .hero {
+      text-align: center; padding: 6rem 1.5rem 5rem;
+      background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(31,111,235,.18) 0%, transparent 70%);
+    }
+    .badge-pill {
+      display: inline-flex; align-items: center; gap: .4rem;
+      background: rgba(31,111,235,.15); border: 1px solid rgba(88,166,255,.3);
+      color: var(--blue); font-size: .72rem; font-weight: 700;
+      padding: .3rem 1rem; border-radius: 999px; margin-bottom: 1.5rem;
+      letter-spacing: .06em; text-transform: uppercase;
+    }
+    .badge-pill span { width: 6px; height: 6px; background: var(--green); border-radius: 50%; display: inline-block; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.8)} }
+
+    .hero h1 { font-size: clamp(2.2rem, 5.5vw, 3.6rem); font-weight: 800; line-height: 1.12; margin-bottom: 1.2rem; letter-spacing: -.02em; }
+    .hero h1 em { color: var(--blue); font-style: normal; }
+    .hero p { color: var(--txt2); font-size: 1.12rem; max-width: 580px; margin: 0 auto 2.2rem; }
+    .hero-btns { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 2.5rem; }
+    .btn-primary { background: var(--blue2); color: #fff; padding: .75rem 1.8rem; border-radius: 8px; font-weight: 700; font-size: 1rem; transition: background .2s, transform .15s; }
+    .btn-primary:hover { background: #388bfd; transform: translateY(-1px); }
+    .btn-secondary { border: 1px solid var(--border); color: var(--txt); padding: .75rem 1.8rem; border-radius: 8px; font-weight: 600; font-size: 1rem; transition: border-color .2s, background .2s; }
+    .btn-secondary:hover { border-color: var(--blue); background: rgba(88,166,255,.06); }
+    .hero-note { color: var(--txt2); font-size: .82rem; }
+
+    /* ── STATS BAR ───────────────────────────────────────── */
+    .stats-bar { display: flex; justify-content: center; flex-wrap: wrap; gap: 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--s1); }
+    .stat-item { flex: 1; min-width: 160px; padding: 1.8rem 1.5rem; text-align: center; border-right: 1px solid var(--border); }
+    .stat-item:last-child { border-right: none; }
+    .stat-num { font-size: 2rem; font-weight: 800; color: var(--blue); display: block; }
+    .stat-label { font-size: .78rem; color: var(--txt2); margin-top: .2rem; }
+
+    /* ── SECTION COMMONS ─────────────────────────────────── */
+    section { padding: 5rem 1.5rem; }
+    .section-label { font-size: .72rem; font-weight: 700; color: var(--blue); text-transform: uppercase; letter-spacing: .1em; margin-bottom: .75rem; }
+    .section-title { font-size: clamp(1.6rem, 3vw, 2.2rem); font-weight: 800; line-height: 1.2; margin-bottom: 1rem; }
+    .section-sub { color: var(--txt2); font-size: 1rem; max-width: 540px; }
+    .center { text-align: center; }
+    .center .section-sub { margin: 0 auto; }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+
+    /* ── FEATURES GRID ───────────────────────────────────── */
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; margin-top: 3rem; }
+    .feat-card { background: var(--s1); border: 1px solid var(--border); border-radius: 12px; padding: 1.75rem; transition: border-color .2s, transform .2s; }
+    .feat-card:hover { border-color: var(--blue2); transform: translateY(-2px); }
+    .feat-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 1rem; font-size: 1.3rem; }
+    .feat-icon.blue { background: rgba(31,111,235,.2); }
+    .feat-icon.green { background: rgba(63,185,80,.2); }
+    .feat-icon.orange { background: rgba(240,136,62,.2); }
+    .feat-icon.red { background: rgba(248,81,73,.2); }
+    .feat-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: .5rem; }
+    .feat-card p { color: var(--txt2); font-size: .88rem; line-height: 1.55; }
+
+    /* ── HOW IT WORKS ────────────────────────────────────── */
+    .steps-wrap { background: var(--s1); border-radius: 0; }
+    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 0; max-width: 900px; margin: 3rem auto 0; }
+    .step { padding: 2rem 1.5rem; text-align: center; position: relative; }
+    .step:not(:last-child)::after { content:'→'; position:absolute; right:0; top:50%; transform:translateY(-50%); color:var(--txt2); font-size:1.2rem; }
+    .step-num { width: 44px; height: 44px; border-radius: 50%; background: var(--blue2); color: #fff; font-weight: 800; font-size: 1.1rem; display: flex; align-items: center; justify-content: center; margin: 0 auto 1rem; }
+    .step h3 { font-size: .95rem; font-weight: 700; margin-bottom: .4rem; }
+    .step p { color: var(--txt2); font-size: .83rem; }
+
+    /* ── THREAT TYPES ────────────────────────────────────── */
+    .threats { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 2.5rem; justify-content: center; }
+    .threat-tag { background: var(--s2); border: 1px solid var(--border); padding: .45rem 1rem; border-radius: 999px; font-size: .82rem; color: var(--txt2); display: flex; align-items: center; gap: .4rem; }
+    .threat-tag.hi { border-color: rgba(248,81,73,.4); color: var(--red); background: rgba(248,81,73,.07); }
+    .threat-tag.med { border-color: rgba(240,136,62,.4); color: var(--orange); background: rgba(240,136,62,.07); }
+    .threat-tag.low { border-color: rgba(63,185,80,.3); color: var(--green); background: rgba(63,185,80,.07); }
+
+    /* ── ALERT PREVIEW ───────────────────────────────────── */
+    .preview-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 3rem; align-items: center; }
+    @media (max-width: 700px) { .preview-wrap { grid-template-columns: 1fr; } }
+    .preview-phone { background: var(--s2); border: 1px solid var(--border); border-radius: 16px; padding: 1.5rem; font-size: .82rem; max-width: 340px; }
+    .phone-header { display:flex; align-items:center; gap:.5rem; margin-bottom:1rem; font-weight:700; }
+    .phone-header span { font-size:1.2rem; }
+    .msg-bubble { background: var(--s1); border-left: 3px solid var(--red); border-radius: 0 8px 8px 0; padding: .75rem 1rem; margin-bottom: .75rem; font-family: monospace; font-size: .78rem; line-height: 1.5; color: var(--txt2); }
+    .msg-bubble strong { color: var(--txt); display: block; margin-bottom: .2rem; }
+    .msg-bubble .sev-tag { font-size: .65rem; font-weight: 700; padding: .15rem .5rem; border-radius: 999px; margin-right: .4rem; }
+    .sev-critical { background: rgba(248,81,73,.2); color:var(--red); }
+    .sev-high { background: rgba(240,136,62,.2); color:var(--orange); }
+    .preview-text h3 { font-size: 1.3rem; font-weight: 800; margin-bottom: .75rem; }
+    .preview-text p { color: var(--txt2); font-size: .93rem; margin-bottom: 1rem; }
+    .channel-list { display:flex; flex-direction:column; gap:.5rem; }
+    .channel-item { display:flex; align-items:center; gap:.6rem; font-size:.88rem; color:var(--txt2); }
+    .channel-item::before { content:'✓'; color:var(--green); font-weight:700; }
+
+    /* ── PRICING TEASER ──────────────────────────────────── */
+    .pricing-teaser { background: var(--s1); border-radius: 16px; padding: 3rem 2.5rem; text-align: center; border: 1px solid var(--border); }
+    .pricing-teaser h2 { font-size: 1.8rem; font-weight: 800; margin-bottom: .75rem; }
+    .pricing-teaser p { color: var(--txt2); margin-bottom: 2rem; }
+    .plans-mini { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 2rem; }
+    .plan-mini { background: var(--s2); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem 1.5rem; min-width: 140px; text-align: center; }
+    .plan-mini.pop { border-color: var(--blue2); }
+    .plan-mini .pname { font-size: .7rem; font-weight: 700; color: var(--txt2); text-transform: uppercase; letter-spacing: .08em; margin-bottom: .4rem; }
+    .plan-mini .pprice { font-size: 1.3rem; font-weight: 800; color: var(--blue); }
+    .plan-mini .pper { font-size: .72rem; color: var(--txt2); }
+
+    /* ── FINAL CTA ───────────────────────────────────────── */
+    .cta-section { text-align: center; padding: 5rem 1.5rem; background: radial-gradient(ellipse 60% 60% at 50% 100%, rgba(31,111,235,.15) 0%, transparent 70%); }
+    .cta-section h2 { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800; margin-bottom: 1rem; }
+    .cta-section p { color: var(--txt2); margin-bottom: 2rem; font-size: 1rem; }
+
+    /* ── FOOTER ──────────────────────────────────────────── */
+    footer { border-top: 1px solid var(--border); padding: 2rem 2.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+    footer .logo { font-size: .9rem; }
+    footer .links { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+    footer .links a { color: var(--txt2); font-size: .82rem; transition: color .2s; }
+    footer .links a:hover { color: var(--txt); }
+    footer .copy { color: var(--txt2); font-size: .78rem; }
+
+    /* ── RESPONSIVE ──────────────────────────────────────── */
+    @media (max-width: 640px) {
+      header { padding: .9rem 1.2rem; }
+      header nav .nav-login { display: none; }
+      .stat-item { min-width: 140px; }
+      .step:not(:last-child)::after { display: none; }
+      .pricing-teaser { padding: 2rem 1.2rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── HEADER ──────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z"/>
+    </svg>
+    NetGuard IDS
+  </div>
+  <nav>
+    <a href="#features">Funcionalidades</a>
+    <a href="#como-funciona">Como funciona</a>
+    <a href="/pricing">Preços</a>
+    <a href="/login" class="nav-login">Entrar</a>
+    <a href="/pricing" class="btn-nav">Testar grátis</a>
+  </nav>
+</header>
+
+<!-- ── HERO ────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="badge-pill"><span></span> Monitoramento em tempo real</div>
+  <h1>Detecte ameaças na sua rede<br>antes que virem <em>incidentes</em></h1>
+  <p>NetGuard IDS é um sistema de detecção de intrusão com IA que monitora sua rede 24/7, detecta ataques automaticamente e avisa você no Telegram ou WhatsApp.</p>
+  <div class="hero-btns">
+    <a href="/pricing" class="btn-primary">🚀 Começar trial de 14 dias</a>
+    <a href="/demo" class="btn-secondary">Ver demonstração ao vivo</a>
+  </div>
+  <p class="hero-note">Sem cartão de crédito &nbsp;·&nbsp; Setup em 5 minutos &nbsp;·&nbsp; Cancele quando quiser</p>
+</section>
+
+<!-- ── STATS BAR ────────────────────────────────────────────── -->
+<div class="stats-bar">
+  <div class="stat-item">
+    <span class="stat-num">50+</span>
+    <span class="stat-label">Tipos de ataques detectados</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-num">6</span>
+    <span class="stat-label">Canais de alerta (Telegram, WhatsApp…)</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-num">&lt;1s</span>
+    <span class="stat-label">Tempo de detecção</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-num">99,9%</span>
+    <span class="stat-label">Uptime garantido</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-num">R$0</span>
+    <span class="stat-label">Para começar (plano Free)</span>
+  </div>
+</div>
+
+<!-- ── FEATURES ─────────────────────────────────────────────── -->
+<section id="features">
+  <div class="wrap">
+    <div class="center">
+      <p class="section-label">Funcionalidades</p>
+      <h2 class="section-title">Tudo que um SOC precisa,<br>sem a complexidade</h2>
+      <p class="section-sub">Do monitoramento de pacotes às regras MITRE ATT&CK — em uma única plataforma com dashboard web.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feat-card">
+        <div class="feat-icon blue">🛡️</div>
+        <h3>Detecção com IA + Assinaturas</h3>
+        <p>Motor híbrido que combina regras de assinatura, ML baseline e regras Sigma/YARA para detectar ataques conhecidos e comportamentos anômalos.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon green">📱</div>
+        <h3>Alertas no Telegram e WhatsApp</h3>
+        <p>Receba notificações em tempo real nos canais que você já usa — Telegram, WhatsApp, Slack, Discord, Teams e webhooks genéricos.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon orange">🕸️</div>
+        <h3>Mapa de Ameaças ao Vivo</h3>
+        <p>Visualize de onde vêm os ataques em um mapa geográfico interativo, com geolocalização de IP e enriquecimento via Shodan e VirusTotal.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon red">🎯</div>
+        <h3>Threat Hunting e MITRE ATT&CK</h3>
+        <p>Caça proativa de ameaças com linguagem de query própria, detecção de movimento lateral entre hosts e mapeamento para táticas MITRE.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon blue">📊</div>
+        <h3>Relatórios PDF e Compliance</h3>
+        <p>Gere relatórios mensais em PDF com estatísticas, top ameaças e métricas de SLA. Relatórios de compliance LGPD, ISO 27001 e PCI-DSS.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon green">🐝</div>
+        <h3>Honeypot Inteligente</h3>
+        <p>Armadilha para atacantes com portas SSH, RDP, SMB e MySQL simuladas. Captura credenciais, fingerprint e classifica o tipo de atacante.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── HOW IT WORKS ──────────────────────────────────────────── -->
+<section id="como-funciona" class="steps-wrap">
+  <div class="wrap">
+    <div class="center">
+      <p class="section-label">Como funciona</p>
+      <h2 class="section-title">Em produção em 3 passos</h2>
+      <p class="section-sub">Sem agentes complexos. Sem configuração elaborada. Só rodar e monitorar.</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Crie sua conta</h3>
+        <p>Trial de 14 dias sem cartão. Receba seu token de API na hora.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>Instale o agente</h3>
+        <p>Um comando Docker ou Python na sua máquina. Windows e Linux.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>Configure os alertas</h3>
+        <p>Cole o token do seu bot Telegram ou WhatsApp e pronto.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── THREAT TYPES ──────────────────────────────────────────── -->
+<section>
+  <div class="wrap center">
+    <p class="section-label">O que detectamos</p>
+    <h2 class="section-title">50+ tipos de ameaças cobertas</h2>
+    <p class="section-sub" style="margin:0 auto 0">De ataques de rede a exploits web — detectamos automaticamente, sem configuração manual.</p>
+    <div class="threats">
+      <span class="threat-tag hi">💀 Ransomware C2</span>
+      <span class="threat-tag hi">🔴 SQL Injection</span>
+      <span class="threat-tag hi">⚡ Brute Force SSH</span>
+      <span class="threat-tag hi">🕷️ XSS / Web Shell</span>
+      <span class="threat-tag hi">🌊 DDoS / SYN Flood</span>
+      <span class="threat-tag med">🔍 Port Scan (Nmap)</span>
+      <span class="threat-tag med">↔️ Movimento Lateral</span>
+      <span class="threat-tag med">🧬 DGA / DNS Tunneling</span>
+      <span class="threat-tag med">🎣 Phishing Interno</span>
+      <span class="threat-tag med">📦 Exfiltração de Dados</span>
+      <span class="threat-tag med">🤖 Botnets</span>
+      <span class="threat-tag low">🔓 Credenciais Expostas</span>
+      <span class="threat-tag low">⚠️ OWASP Top 10</span>
+      <span class="threat-tag low">📡 Rogue DHCP</span>
+      <span class="threat-tag low">🔧 Configuração Insegura</span>
+    </div>
+  </div>
+</section>
+
+<!-- ── ALERT PREVIEW ─────────────────────────────────────────── -->
+<section style="background: var(--s1); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
+  <div class="wrap">
+    <div class="preview-wrap">
+      <div class="preview-phone">
+        <div class="phone-header"><span>📱</span> NetGuard Bot — Telegram</div>
+        <div class="msg-bubble">
+          <strong>🚨 Alerta NetGuard IDS</strong>
+          <span class="sev-tag sev-critical">CRITICAL</span> Brute Force SSH<br>
+          📍 IP: <code>185.220.101.42</code> (Rússia)<br>
+          🎯 Alvo: servidor-prod-01:22<br>
+          🕐 23:14:07 · 847 tentativas/min
+        </div>
+        <div class="msg-bubble" style="border-color: var(--orange);">
+          <strong>⚠️ Alerta NetGuard IDS</strong>
+          <span class="sev-tag sev-high">HIGH</span> SQL Injection<br>
+          📍 IP: <code>203.0.113.99</code> (China)<br>
+          🎯 /api/users?id=1%20UNION%20SELECT<br>
+          🕐 23:14:52 · WAF bloqueado ✓
+        </div>
+      </div>
+      <div class="preview-text">
+        <h3>Alertas onde você já está</h3>
+        <p>Configure em minutos. Receba alertas com contexto completo — IP, geolocalização, severidade e sugestão de resposta — direto no seu canal preferido.</p>
+        <div class="channel-list">
+          <div class="channel-item">Telegram Bot — gratuito e instantâneo</div>
+          <div class="channel-item">WhatsApp via Z-API ou Twilio</div>
+          <div class="channel-item">Slack, Discord e Microsoft Teams</div>
+          <div class="channel-item">Webhook genérico para qualquer sistema</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── PRICING TEASER ────────────────────────────────────────── -->
+<section>
+  <div class="wrap">
+    <div class="pricing-teaser">
+      <h2>Planos para todo tamanho de empresa</h2>
+      <p>De startups a revendedores MSSP — comece de graça e escale conforme cresce.</p>
+      <div class="plans-mini">
+        <div class="plan-mini">
+          <div class="pname">Free</div>
+          <div class="pprice">R$0</div>
+          <div class="pper">para sempre</div>
+        </div>
+        <div class="plan-mini pop">
+          <div class="pname">Pro ⭐</div>
+          <div class="pprice">R$990</div>
+          <div class="pper">/mês</div>
+        </div>
+        <div class="plan-mini">
+          <div class="pname">Enterprise</div>
+          <div class="pprice">R$3.900</div>
+          <div class="pper">/mês</div>
+        </div>
+        <div class="plan-mini">
+          <div class="pname">MSSP</div>
+          <div class="pprice">R$300</div>
+          <div class="pper">/cliente/mês</div>
+        </div>
+      </div>
+      <a href="/pricing" class="btn-primary">Ver todos os planos →</a>
+    </div>
+  </div>
+</section>
+
+<!-- ── FINAL CTA ─────────────────────────────────────────────── -->
+<section class="cta-section">
+  <p class="section-label">Pronto para começar?</p>
+  <h2>Proteja sua rede hoje.<br>14 dias grátis, sem cartão.</h2>
+  <p>Configura em 5 minutos. Você já estará monitorando antes de acabar o café.</p>
+  <div class="hero-btns">
+    <a href="/pricing" class="btn-primary">🚀 Criar conta grátis</a>
+    <a href="mailto:{{ contact_email }}" class="btn-secondary">Falar com especialista</a>
+  </div>
+</section>
+
+<!-- ── FOOTER ────────────────────────────────────────────────── -->
+<footer>
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px">
+      <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z"/>
+    </svg>
+    NetGuard IDS
+  </div>
+  <div class="links">
+    <a href="/pricing">Preços</a>
+    <a href="/demo">Demo</a>
+    <a href="/login">Login</a>
+    <a href="https://github.com/raphaelguterres/netguard-ids" target="_blank" rel="noopener">GitHub</a>
+    <a href="mailto:{{ contact_email }}">Contato</a>
+  </div>
+  <span class="copy">© 2025 NetGuard IDS · Open source + SaaS gerenciado</span>
+</footer>
+
+</body>
+</html>
