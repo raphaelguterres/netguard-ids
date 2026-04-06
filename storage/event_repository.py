@@ -98,6 +98,8 @@ _DDL_SQLITE = """
         tenant_id              TEXT PRIMARY KEY,
         name                   TEXT NOT NULL,
         token                  TEXT NOT NULL UNIQUE,
+        token_hash             TEXT,
+        role                   TEXT NOT NULL DEFAULT 'analyst',
         plan                   TEXT NOT NULL DEFAULT 'free',
         max_hosts              INTEGER DEFAULT 1,
         created_at             TEXT DEFAULT (datetime('now')),
@@ -106,6 +108,17 @@ _DDL_SQLITE = """
         stripe_customer_id     TEXT,
         stripe_subscription_id TEXT
     );
+"""
+
+# Migration SQL — adicionado às colunas de tenants existentes de forma segura
+_DDL_MIGRATION_SQLITE = """
+    ALTER TABLE tenants ADD COLUMN token_hash TEXT;
+    ALTER TABLE tenants ADD COLUMN role TEXT NOT NULL DEFAULT 'analyst';
+"""
+
+_DDL_MIGRATION_POSTGRES = """
+    ALTER TABLE tenants ADD COLUMN IF NOT EXISTS token_hash TEXT;
+    ALTER TABLE tenants ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'analyst';
 """
 
 _DDL_POSTGRES = """
@@ -157,6 +170,8 @@ _DDL_POSTGRES = """
         tenant_id              TEXT PRIMARY KEY,
         name                   TEXT NOT NULL,
         token                  TEXT NOT NULL UNIQUE,
+        token_hash             TEXT,
+        role                   TEXT NOT NULL DEFAULT 'analyst',
         plan                   TEXT NOT NULL DEFAULT 'free',
         max_hosts              INTEGER DEFAULT 1,
         created_at             TIMESTAMPTZ DEFAULT NOW(),
@@ -542,8 +557,27 @@ class EventRepository:
             return None
 
     def get_tenant_by_token(self, token: str) -> Optional[dict]:
-        """Resolve um token de agente para seu tenant_id e configurações."""
+        """
+        Resolve um token de agente para seu tenant.
+        Tenta lookup por token_hash primeiro (mais seguro);
+        faz fallback para plaintext se token_hash ainda não estiver definido
+        (compatibilidade com tenants criados antes da migração de segurança).
+        """
+        if not token:
+            return None
         ph = self._placeholder()
+
+        # Tenta por hash (preferred path)
+        try:
+            from security import hash_token
+            token_hash = hash_token(token)
+            tenant = self.get_tenant_by_token_hash(token_hash)
+            if tenant:
+                return tenant
+        except Exception:
+            pass
+
+        # Fallback legacy: busca por plaintext e faz upgrade para hash se encontrado
         try:
             if USE_POSTGRES:
                 cur = self._conn().cursor()
@@ -552,15 +586,98 @@ class EventRepository:
                 )
                 row = cur.fetchone()
                 cur.close()
-                return dict(row) if row else None
+                result = dict(row) if row else None
             else:
                 row = self._conn().execute(
                     f"SELECT * FROM tenants WHERE token={ph} AND active=1", (token,)
                 ).fetchone()
-                return dict(row) if row else None
+                result = dict(row) if row else None
+
+            # Upgrade automático: salva hash e mantém plaintext para rollback
+            if result and result.get("token_hash") is None:
+                try:
+                    from security import hash_token
+                    self.set_tenant_token_hash(result["tenant_id"], hash_token(token))
+                    logger.info("[security] Token hash atualizado (migration) | tenant=%s",
+                                result["tenant_id"])
+                except Exception:
+                    pass
+            return result
         except Exception as e:
             logger.debug("get_tenant_by_token error: %s", e)
             return None
+
+    def get_tenant_by_token_hash(self, token_hash: str) -> Optional[dict]:
+        """Busca tenant pelo hash HMAC-SHA256 do token (caminho seguro)."""
+        if not token_hash:
+            return None
+        ph = self._placeholder()
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"SELECT * FROM tenants WHERE token_hash={ph} AND active=TRUE",
+                    (token_hash,)
+                )
+                row = cur.fetchone()
+                cur.close()
+                return dict(row) if row else None
+            else:
+                row = self._conn().execute(
+                    f"SELECT * FROM tenants WHERE token_hash={ph} AND active=1",
+                    (token_hash,)
+                ).fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.debug("get_tenant_by_token_hash error: %s", e)
+            return None
+
+    def set_tenant_token_hash(self, tenant_id: str, token_hash: str) -> bool:
+        """Atualiza o hash do token de um tenant (usado em migration e rotação)."""
+        ph = self._placeholder()
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"UPDATE tenants SET token_hash={ph} WHERE tenant_id={ph}",
+                    (token_hash, tenant_id)
+                )
+                self._conn().commit()
+                cur.close()
+            else:
+                self._conn().execute(
+                    f"UPDATE tenants SET token_hash={ph} WHERE tenant_id={ph}",
+                    (token_hash, tenant_id)
+                )
+                self._conn().commit()
+            return True
+        except Exception as e:
+            logger.error("set_tenant_token_hash error: %s", e)
+            return False
+
+    def update_tenant_token(self, tenant_id: str, new_token: str,
+                            new_token_hash: str) -> bool:
+        """Rotaciona o token de um tenant (token + hash atualizados atomicamente)."""
+        ph = self._placeholder()
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"UPDATE tenants SET token={ph}, token_hash={ph} WHERE tenant_id={ph}",
+                    (new_token, new_token_hash, tenant_id)
+                )
+                self._conn().commit()
+                cur.close()
+            else:
+                self._conn().execute(
+                    f"UPDATE tenants SET token={ph}, token_hash={ph} WHERE tenant_id={ph}",
+                    (new_token, new_token_hash, tenant_id)
+                )
+                self._conn().commit()
+            return True
+        except Exception as e:
+            logger.error("update_tenant_token error: %s", e)
+            return False
 
     def create_tenant(self, tenant_id: str, name: str, token: str,
                       plan: str = "free", max_hosts: int = 1,
@@ -570,24 +687,37 @@ class EventRepository:
         ph = self._placeholder()
         try:
             if USE_POSTGRES:
+                # Hash token antes de salvar — nunca armazena plaintext
+                try:
+                    from security import hash_token as _ht
+                    _token_hash = _ht(token)
+                except Exception:
+                    _token_hash = None
+
                 cur = self._conn().cursor()
                 cur.execute(f"""
                     INSERT INTO tenants
-                        (tenant_id, name, token, plan, max_hosts, email,
+                        (tenant_id, name, token, token_hash, plan, max_hosts, email,
                          stripe_customer_id, stripe_subscription_id)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
                     ON CONFLICT (tenant_id) DO NOTHING
-                """, (tenant_id, name, token, plan, max_hosts, email,
+                """, (tenant_id, name, token, _token_hash, plan, max_hosts, email,
                       stripe_customer_id, stripe_subscription_id))
                 self._conn().commit()
                 cur.close()
             else:
+                try:
+                    from security import hash_token as _ht
+                    _token_hash = _ht(token)
+                except Exception:
+                    _token_hash = None
+
                 self._conn().execute(f"""
                     INSERT OR IGNORE INTO tenants
-                        (tenant_id, name, token, plan, max_hosts, email,
+                        (tenant_id, name, token, token_hash, plan, max_hosts, email,
                          stripe_customer_id, stripe_subscription_id)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
-                """, (tenant_id, name, token, plan, max_hosts, email,
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+                """, (tenant_id, name, token, _token_hash, plan, max_hosts, email,
                       stripe_customer_id, stripe_subscription_id))
                 self._conn().commit()
             return True
@@ -643,6 +773,9 @@ class EventRepository:
                 ("email",                  "TEXT DEFAULT ''"),
                 ("stripe_customer_id",     "TEXT DEFAULT ''"),
                 ("stripe_subscription_id", "TEXT DEFAULT ''"),
+                # Security migrations — token hashing e RBAC
+                ("token_hash",             "TEXT"),
+                ("role",                   "TEXT NOT NULL DEFAULT 'analyst'"),
             ],
         }
 

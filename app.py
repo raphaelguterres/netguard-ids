@@ -299,6 +299,9 @@ h.setFormatter(JSONFormatter())
 logging.basicConfig(handlers=[h], level=logging.INFO, force=True)
 logger = logging.getLogger("ids.api")
 
+# SensitiveDataFilter — instalado após importar security (mais abaixo)
+# A instalação real acontece em _install_sensitive_filter() chamado no final do setup
+
 # ── Hostname real da máquina ──────────────────────────────────────
 def _get_real_hostname() -> str:
     try:
@@ -341,7 +344,7 @@ def audit(action: str, actor: str = "system", ip: str = "-", detail: str = ""):
 def _resolve_tenant_id(fallback: str = None) -> str:
     """
     Resolve o tenant_id da requisição atual.
-    Prioridade: query param → cookie → 'default'
+    Prioridade: fallback param → cookie → 'default'
     """
     if fallback:
         return fallback
@@ -350,7 +353,8 @@ def _resolve_tenant_id(fallback: str = None) -> str:
         if token and token.startswith("ng_"):
             tenant = repo.get_tenant_by_token(token)
             if tenant:
-                tid = (dict(tenant) if not isinstance(tenant, dict) else tenant).get("tenant_id")
+                t = dict(tenant) if not isinstance(tenant, dict) else tenant
+                tid = t.get("tenant_id")
                 if tid:
                     return tid
     except Exception:
@@ -358,8 +362,78 @@ def _resolve_tenant_id(fallback: str = None) -> str:
     return "default"
 
 
+def _resolve_tenant_with_role() -> tuple[str, str]:
+    """
+    Resolve (tenant_id, role) da requisição atual.
+    Retorna ('default', 'viewer') se não autenticado.
+    """
+    try:
+        token = request.cookies.get("netguard_token", "").strip()
+        if token:
+            # Admin token → role admin
+            if AUTH_MODULE_OK and AUTH_ENABLED:
+                result = verify_any_token(token, repo)
+                if result.get("valid"):
+                    if result.get("type") == "admin":
+                        return "admin", "admin"
+                    tenant = result.get("tenant")
+                    if tenant:
+                        t = dict(tenant) if not isinstance(tenant, dict) else tenant
+                        tid  = t.get("tenant_id", "default")
+                        role = t.get("role", "analyst")
+                        return tid, role
+    except Exception:
+        pass
+    return "default", "viewer"
+
+
 # ── App ───────────────────────────────────────────────────────────
 app = Flask(__name__)
+
+# ── Limites globais de request ────────────────────────────────────
+# Previne DoS por upload de payload gigante (padrão Flask: 16 MB)
+app.config["MAX_CONTENT_LENGTH"] = int(
+    os.environ.get("MAX_CONTENT_LENGTH", str(5 * 1024 * 1024))  # 5 MB
+)
+
+# ── Security module ───────────────────────────────────────────────
+try:
+    from security import (
+        hash_token, verify_token,
+        BruteForceGuard, get_bf_guard,
+        require_role,
+        mask_sensitive, SensitiveDataFilter,
+        validate_redirect_url, safe_filename, sanitize_csv_cell,
+        validate_absolute_session, SESSION_MAX_AGE_SECONDS,
+        rotate_token,
+    )
+    SECURITY_OK = True
+except Exception as _sec_err:
+    SECURITY_OK = False
+    print(f"[WARN] Security module: {_sec_err}")
+    # No-op fallbacks para não quebrar o app
+    def hash_token(t): return t          # noqa
+    def verify_token(t, h): return t == h  # noqa
+    def require_role(*r): return lambda f: f  # noqa
+    def mask_sensitive(t): return t      # noqa
+    def validate_redirect_url(u, **_): return u or "/"  # noqa
+    def safe_filename(f, d="download"): return os.path.basename(f) if f else d  # noqa
+    def sanitize_csv_cell(v): return v   # noqa
+    def get_bf_guard(**_): return None   # noqa
+    SESSION_MAX_AGE_SECONDS = 8 * 3600  # noqa
+
+# ── SensitiveDataFilter — instala em todos os handlers de logging ──
+if SECURITY_OK:
+    _sdf = SensitiveDataFilter()
+    for _handler in logging.root.handlers:
+        _handler.addFilter(_sdf)
+    # Garante também nos loggers nomeados usados pelo app
+    for _log_name in ("ids.api", "netguard.audit", "netguard.security",
+                      "ids.sigma", "werkzeug"):
+        _named = logging.getLogger(_log_name)
+        for _h in _named.handlers:
+            _h.addFilter(_sdf)
+    logger.info("SensitiveDataFilter instalado em todos os handlers de logging")
 
 # ── CORS — whitelist configurável via env (não mais wildcard) ─────
 _cors_origins_raw = os.environ.get("IDS_CORS_ORIGINS", "")
@@ -1228,11 +1302,16 @@ def loop_monitor(intervalo=30):
 # ── Middleware ────────────────────────────────────────────────────
 @app.before_request
 def before():
+    from flask import g
     request._t  = time.monotonic()
     rid = request.headers.get("X-Request-ID") or _uuid_mod.uuid4().hex[:16]
     request._rid = rid
     _request_ctx.request_id = rid
-    _request_ctx.tenant_id  = _resolve_tenant_id()
+    # Resolve tenant + role e expõe via flask.g (para require_role() funcionar)
+    _tid, _role = _resolve_tenant_with_role()
+    _request_ctx.tenant_id = _tid
+    g.tenant_id   = _tid
+    g.tenant_role = _role
 
 @app.after_request
 def after(resp):
@@ -1280,6 +1359,7 @@ def get_detection(did):
 
 @app.route("/api/detections/<did>/status",methods=["PATCH"])
 @auth
+@require_role("analyst", "admin")
 def update_status(did):
     _ids = _get_ids(_resolve_tenant_id())
     body = request.get_json(force=True) or {}
@@ -1360,11 +1440,12 @@ def export():
     fmt  = request.args.get("format","json")
     data = _get_ids(_resolve_tenant_id()).export(fmt)
     ct   = "text/csv" if fmt=="csv" else "application/json"
-    fn   = f"ids_export.{fmt}"
+    fn   = safe_filename(f"ids_export.{fmt}")  # protege contra path traversal
     return Response(data,mimetype=ct,headers={"Content-Disposition":f"attachment;filename={fn}"})
 
 @app.route("/api/block",methods=["POST"])
 @auth
+@require_role("analyst", "admin")
 def block_ip():
     _ids = _get_ids(_resolve_tenant_id())
     body   = request.get_json(force=True) or {}
@@ -1384,6 +1465,7 @@ def list_blocks():
 
 @app.route("/api/block/<ip>",methods=["DELETE"])
 @auth
+@require_role("analyst", "admin")
 def unblock_ip(ip):
     ok = _get_ids(_resolve_tenant_id()).unblock_ip(ip)
     return jsonify({"success":ok,"ip":ip})
@@ -2924,7 +3006,8 @@ def login_page():
             result = verify_any_token(token, repo)
             if result["valid"]:
                 from flask import redirect as _redir
-                return _redir(request.args.get("next", "/"))
+                _next = validate_redirect_url(request.args.get("next", "/"))
+                return _redir(_next)
     return render_template("login.html")
 
 
@@ -2936,21 +3019,23 @@ def auth_login():
     Seta cookie httponly válido por 8h.
     Rate limit: 10 tentativas por IP por janela de 60 segundos.
     """
-    import time as _time
     from flask import make_response
 
-    # ── Rate limiting (in-memory, sem dependências externas) ─────────
-    ip  = request.remote_addr or "unknown"
-    now = _time.time()
-    _rl = app.config.setdefault("_login_rl", {})
-    entry = _rl.get(ip, {"count": 0, "window_start": now})
-    if now - entry["window_start"] > 60:          # janela expirou — reseta
-        entry = {"count": 0, "window_start": now}
-    entry["count"] += 1
-    _rl[ip] = entry
-    if entry["count"] > 10:
-        logger.warning("Rate limit atingido | ip=%s | tentativas=%s", ip, entry["count"])
-        return jsonify({"valid": False, "error": "Muitas tentativas. Aguarde 60 segundos."}), 429
+    ip = request.remote_addr or "unknown"
+
+    # ── BruteForceGuard — lockout escalonado persistido em SQLite ────
+    # Thresholds: 3 erros→5min, 5→15min, 10→1h, 20→24h
+    _bf_db   = os.environ.get("IDS_BF_DB", "netguard_security.db")
+    _bf      = get_bf_guard(_bf_db)
+    if _bf and _bf.is_locked(ip):
+        remaining = _bf.lockout_remaining(ip)
+        logger.warning("Login bloqueado (BruteForce) | ip=%s | restam=%ds", ip, remaining)
+        audit("LOGIN_BLOCKED", actor="brute_force_guard", ip=ip,
+              detail=f"lockout_remaining={remaining}s")
+        return jsonify({
+            "valid": False,
+            "error": f"Conta bloqueada por excesso de tentativas. Tente novamente em {remaining}s.",
+        }), 429
 
     data  = request.get_json(silent=True) or {}
     token = data.get("token", "").strip()
@@ -2959,11 +3044,19 @@ def auth_login():
 
     result = verify_any_token(token, repo)
     if not result["valid"]:
-        logger.warning("Login falhou | ip=%s | token=%s…", ip, token[:8])
+        if _bf:
+            _bf.record_failure(ip)
+            failures = _bf.failure_count(ip)
+            logger.warning("Login falhou | ip=%s | token=%s… | tentativas=%d",
+                           ip, token[:8], failures)
+        else:
+            logger.warning("Login falhou | ip=%s | token=%s…", ip, token[:8])
+        audit("LOGIN_FAIL", actor="unknown", ip=ip, detail=f"token_prefix={token[:8]}")
         return jsonify({"valid": False, "error": "Token inválido"}), 401
 
-    # Login OK — limpa contador de tentativas
-    _rl.pop(ip, None)
+    # Login OK — reseta contador de falhas
+    if _bf:
+        _bf.reset(ip)
 
     tenant_id = (result.get("tenant") or {}).get("tenant_id", "-")
     logger.info("Login OK | ip=%s | type=%s", ip, result["type"])
@@ -3010,6 +3103,72 @@ def auth_validate():
             "tenant": result.get("tenant"),
         })
     return jsonify({"valid": False, "error": "Token inválido"}), 401
+
+
+@app.route("/api/auth/rotate", methods=["POST"])
+@auth
+@require_role("admin")
+def rotate_token_endpoint():
+    """
+    Rotaciona o token de API do tenant autenticado.
+
+    Segurança:
+    - Requer role=admin (apenas o owner do tenant pode rotacionar)
+    - Token antigo é invalidado atomicamente no banco
+    - Novo token retornado apenas nesta resposta (one-time display)
+    - Cookie é atualizado automaticamente
+
+    Returns:
+        200: { "new_token": "ng_...", "rotated_at": "<iso>" }
+        403: role insuficiente
+        500: erro interno
+    """
+    from flask import g, make_response
+    from datetime import datetime, timezone
+
+    ip = request.remote_addr or "unknown"
+    try:
+        tenant_id = getattr(g, "tenant_id", None) or _resolve_tenant_id()
+        if not tenant_id or tenant_id == "default":
+            return jsonify({"error": "Tenant não identificado"}), 400
+
+        old_token = request.cookies.get("netguard_token", "")
+
+        # Gera novo token + hash via rotate_token()
+        if BILLING_OK:
+            new_token, new_hash = rotate_token(old_token, generate_api_token)
+        else:
+            import secrets, base64
+            _gen = lambda: "ng_" + base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()  # noqa
+            new_token, new_hash = rotate_token(old_token, _gen)
+
+        # Persiste atomicamente no banco
+        repo.update_tenant_token(tenant_id, new_token, new_hash)
+
+        audit("TOKEN_ROTATED", actor=tenant_id, ip=ip,
+              detail=f"old_prefix={old_token[:8]} new_prefix={new_token[:8]}")
+        logger.info("Token rotacionado | tenant=%s | ip=%s", tenant_id, ip)
+
+        rotated_at = datetime.now(timezone.utc).isoformat()
+        resp = make_response(jsonify({
+            "new_token":  new_token,
+            "rotated_at": rotated_at,
+            "message":    "Salve este token agora — não será exibido novamente.",
+        }))
+        # Atualiza cookie com novo token
+        resp.set_cookie(
+            "netguard_token",
+            new_token,
+            httponly=True,
+            samesite="Lax",
+            max_age=8 * 3600,
+            secure=_HTTPS_ONLY,
+        )
+        return resp
+
+    except Exception as exc:
+        logger.error("Erro ao rotacionar token | tenant=%s | err=%s", tenant_id, exc)
+        return jsonify({"error": "Erro interno ao rotacionar token"}), 500
 
 
 @app.route("/pricing")
@@ -4131,6 +4290,7 @@ def trial_access(token):
 # ── Admin: gestão de trials ───────────────────────────────────────
 @app.route("/api/admin/trials", methods=["GET"])
 @auth
+@require_role("admin")
 def admin_trials_list():
     if not TRIAL_AVAILABLE:
         return jsonify({"error": "Trial Engine indisponível"}), 503
@@ -4143,6 +4303,7 @@ def admin_trials_list():
 
 @app.route("/api/admin/trials", methods=["POST"])
 @auth
+@require_role("admin")
 @csrf_protect
 def admin_trials_create():
     if not TRIAL_AVAILABLE:
@@ -4164,6 +4325,7 @@ def admin_trials_create():
 
 @app.route("/api/admin/trials/<token>/revoke", methods=["POST"])
 @auth
+@require_role("admin")
 @csrf_protect
 def admin_trials_revoke(token):
     if not TRIAL_AVAILABLE:
@@ -4173,6 +4335,7 @@ def admin_trials_revoke(token):
 
 @app.route("/api/admin/trials/<token>/extend", methods=["POST"])
 @auth
+@require_role("admin")
 @csrf_protect
 def admin_trials_extend(token):
     if not TRIAL_AVAILABLE:
