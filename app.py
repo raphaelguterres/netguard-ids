@@ -374,23 +374,36 @@ def _resolve_tenant_id(fallback: str = None) -> str:
 def _resolve_tenant_with_role() -> tuple[str, str]:
     """
     Resolve (tenant_id, role) da requisição atual.
-    Retorna ('default', 'viewer') se não autenticado.
+
+    Lógica de prioridade:
+      1. AUTH_ENABLED=False → modo local single-user → admin automático
+      2. Token de admin (arquivo .netguard_token) → admin
+      3. Token ng_ de tenant SaaS → lê role do banco
+      4. Sem token → viewer (apenas endpoints públicos)
     """
+    # Modo local (AUTH_ENABLED=False): usuário único, acesso total
+    if not AUTH_ENABLED:
+        return "admin", "admin"
+
     try:
         token = request.cookies.get("netguard_token", "").strip()
-        if token:
-            # Admin token → role admin
-            if AUTH_MODULE_OK and AUTH_ENABLED:
-                result = verify_any_token(token, repo)
-                if result.get("valid"):
-                    if result.get("type") == "admin":
-                        return "admin", "admin"
-                    tenant = result.get("tenant")
-                    if tenant:
-                        t = dict(tenant) if not isinstance(tenant, dict) else tenant
-                        tid  = t.get("tenant_id", "default")
-                        role = t.get("role", "analyst")
-                        return tid, role
+        if not token:
+            # Tenta header como fallback (API calls)
+            token = (
+                request.headers.get("X-API-Token", "")
+                or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+            )
+        if token and AUTH_MODULE_OK:
+            result = verify_any_token(token, repo)
+            if result.get("valid"):
+                if result.get("type") == "admin":
+                    return "admin", "admin"
+                tenant = result.get("tenant")
+                if tenant:
+                    t    = dict(tenant) if not isinstance(tenant, dict) else tenant
+                    tid  = t.get("tenant_id", "default")
+                    role = t.get("role", "analyst")
+                    return tid, role
     except Exception:
         pass
     return "default", "viewer"
@@ -3112,11 +3125,23 @@ def api_me():
         }
     """
     from flask import g
+    # Modo local (AUTH_ENABLED=False) → admin automático
+    if not AUTH_ENABLED:
+        return jsonify({
+            "tenant_id":         "admin",
+            "name":              "Administrador Local",
+            "plan":              "enterprise",
+            "role":              "admin",
+            "is_paid":           True,
+            "is_admin":          True,
+            "can_see_admin_tab": True,
+        })
+
     token = request.cookies.get("netguard_token", "") or \
             request.headers.get("X-API-Token", "") or \
             request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
 
-    # Admin token
+    # Admin token (arquivo .netguard_token)
     result = verify_any_token(token, repo)
     if result.get("type") == "admin":
         return jsonify({
@@ -4436,8 +4461,14 @@ def admin_dashboard():
     Usuários free são redirecionados para /pricing mesmo que tenham role=admin.
     """
     from flask import render_template, redirect as _redir, g
+    # Modo local (sem auth) → acesso total ao admin
+    if not AUTH_ENABLED:
+        return render_template("admin_dashboard.html")
     # Verificação extra de plano pago (dupla barreira além do require_role)
-    token = request.cookies.get("netguard_token", "")
+    token = (
+        request.cookies.get("netguard_token", "")
+        or request.headers.get("X-API-Token", "")
+    )
     result = verify_any_token(token, repo)
     if result.get("type") != "admin":                  # admin token do sistema → acesso total
         tenant = result.get("tenant")
