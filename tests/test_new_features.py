@@ -118,7 +118,7 @@ class TestSanitize(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # Importa apenas as funções de sanitização, sem subir o app inteiro
-        import importlib.util, types
+        import importlib.util
         # Lê o app.py e extrai apenas as funções necessárias via exec parcial
         spec = importlib.util.spec_from_file_location(
             "_sanitize_only",
@@ -237,19 +237,18 @@ class TestTenantIsolation(unittest.TestCase):
 
         self._engines = {}
         self._lock = threading.Lock()
-        self._tmpdir = tempfile.mkdtemp()
+        self._tmpdir = tempfile.mkdtemp(prefix="tenant-isolation-", dir=ROOT)
 
         def _get_ids(tid=None):
             if not tid or tid == "default":
                 return IDSEngine(
-                    db_path=os.path.join(self._tmpdir, "default.db"),
+                    db_path=":memory:",
                     whitelist_ips=[], auto_block=False,
                 )
             with self._lock:
                 if tid not in self._engines:
-                    db_name = f"ids_{tid[:32].replace('-','')}.db"
                     self._engines[tid] = IDSEngine(
-                        db_path=os.path.join(self._tmpdir, db_name),
+                        db_path=":memory:",
                         whitelist_ips=[], auto_block=False,
                     )
                 return self._engines[tid]
@@ -465,7 +464,7 @@ def _build_test_client():
     Retorna None se o app não puder ser importado no ambiente de CI.
     """
     try:
-        import importlib, app as app_module
+        import app as app_module
         # Usa o app Flask já instanciado
         flask_app = app_module.app
         flask_app.config["TESTING"]    = True

@@ -4,7 +4,7 @@ Detecção contextual, janela deslizante, whitelist,
 composite scoring, persistência SQLite, bloqueio de IP.
 """
 
-import re, json, sqlite3, hashlib, logging, threading, subprocess
+import os, re, json, sqlite3, hashlib, logging, threading, subprocess
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
@@ -220,6 +220,9 @@ class DetectionStore:
         self.db_path = db_path
         self._local  = threading.local()
         if db_path != ":memory:":
+            db_dir = os.path.dirname(os.path.abspath(db_path))
+            if db_dir:
+                os.makedirs(db_dir, exist_ok=True)
             conn = sqlite3.connect(db_path)
             conn.executescript(self.SCHEMA); conn.commit(); conn.close()
 

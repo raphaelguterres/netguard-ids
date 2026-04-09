@@ -258,7 +258,6 @@ except ImportError:
     def enrich_async(ip, cb=None): pass
 
 # ── Logging ───────────────────────────────────────────────────────
-import traceback as _tb_mod
 import uuid as _uuid_mod
 
 # Contexto de request local (thread-safe)
@@ -483,14 +482,15 @@ def _ensure_demo_access_token(*, min_events: int = 50, reason: str = "demo") -> 
 def _resolve_tenant_id(fallback: str = None) -> str:
     """
     Resolve o tenant_id da requisição atual.
-    Prioridade: fallback param → cookie → 'default'
+    Prioridade: fallback param → token/header/cookie → 'default'
     """
     if fallback:
         return fallback
     try:
-        token = request.cookies.get("netguard_token", "").strip()
-        if token and token.startswith("ng_"):
-            tenant = repo.get_tenant_by_token(token)
+        token = _extract_token()
+        if token and AUTH_MODULE_OK:
+            result = verify_any_token(token, repo)
+            tenant = result.get("tenant")
             if tenant:
                 t = dict(tenant) if not isinstance(tenant, dict) else tenant
                 tid = t.get("tenant_id")
@@ -511,18 +511,8 @@ def _resolve_tenant_with_role() -> tuple[str, str]:
       3. Token ng_ de tenant SaaS → lê role do banco
       4. Sem token → viewer (apenas endpoints públicos)
     """
-    # Modo local (AUTH_ENABLED=False): usuário único, acesso total
-    if not AUTH_ENABLED:
-        return "admin", "admin"
-
     try:
-        token = request.cookies.get("netguard_token", "").strip()
-        if not token:
-            # Tenta header como fallback (API calls)
-            token = (
-                request.headers.get("X-API-Token", "")
-                or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-            )
+        token = _extract_token()
         if token and AUTH_MODULE_OK:
             result = verify_any_token(token, repo)
             if result.get("valid"):
@@ -536,6 +526,9 @@ def _resolve_tenant_with_role() -> tuple[str, str]:
                     return tid, role
     except Exception:
         pass
+    # Modo local (AUTH_ENABLED=False): usuário único, acesso total
+    if not AUTH_ENABLED:
+        return "admin", "admin"
     return "default", "viewer"
 
 
@@ -552,11 +545,11 @@ app.config["MAX_CONTENT_LENGTH"] = int(
 try:
     from security import (
         hash_token, verify_token,
-        BruteForceGuard, get_bf_guard,
+        get_bf_guard,
         require_role,
         mask_sensitive, SensitiveDataFilter,
         validate_redirect_url, safe_filename, sanitize_csv_cell,
-        validate_absolute_session, SESSION_MAX_AGE_SECONDS,
+        SESSION_MAX_AGE_SECONDS,
         rotate_token,
     )
     SECURITY_OK = True
@@ -629,20 +622,25 @@ except ImportError:
 try:
     from flask_limiter import Limiter
     from flask_limiter.util import get_remote_address
+
+    def _skip_rate_limit() -> bool:
+        return bool(app.config.get("TESTING"))
+
     limiter = Limiter(
         app=app,
         key_func=get_remote_address,
         default_limits=["600 per minute"],  # limite global
         storage_uri="memory://",
         headers_enabled=True,                # X-RateLimit-* headers
+        default_limits_exempt_when=_skip_rate_limit,
     )
     # Atalhos de decorator reutilizáveis
-    _limit_login    = limiter.limit("10 per minute")     # brute force login
-    _limit_trial    = limiter.limit("3 per hour")        # anti-bot trial signup
-    _limit_contact  = limiter.limit("5 per hour")        # anti-spam contact form
-    _limit_report   = limiter.limit("5 per minute")      # PDF pesado
-    _limit_ioc_check= limiter.limit("60 per minute")     # check de IOC em massa
-    _limit_train    = limiter.limit("2 per minute")      # treino ML
+    _limit_login    = limiter.limit("10 per minute", exempt_when=_skip_rate_limit)
+    _limit_trial    = limiter.limit("3 per hour", exempt_when=_skip_rate_limit)
+    _limit_contact  = limiter.limit("5 per hour", exempt_when=_skip_rate_limit)
+    _limit_report   = limiter.limit("5 per minute", exempt_when=_skip_rate_limit)
+    _limit_ioc_check= limiter.limit("60 per minute", exempt_when=_skip_rate_limit)
+    _limit_train    = limiter.limit("2 per minute", exempt_when=_skip_rate_limit)
     logger.info("Flask-Limiter ativo | default=600/min")
 except ImportError:
     logger.warning("flask-limiter não instalado — rate limiting desativado. "
@@ -1038,6 +1036,12 @@ def sanitize(value, max_len: int = 512, label: str = "input") -> str:
         logger.warning("sanitize: padrão suspeito em %s: %.80r", label, s)
         s = _DANGEROUS_PATTERNS.sub("", s)
     return _html.escape(s, quote=True)
+
+
+def has_dangerous_input(value) -> bool:
+    if value is None:
+        return False
+    return bool(_DANGEROUS_PATTERNS.search(str(value)))
 
 def sanitize_ip(value) -> str:
     """Valida e retorna IP limpo ou '' se inválido."""
@@ -1527,10 +1531,11 @@ def update_status(did):
             if ok else jsonify({"error":"not found"}),404)
 
 @app.route("/api/analyze",methods=["POST"])
+@app.route("/api/detect",methods=["POST"])
 @auth
 def analyze():
     body = request.get_json(force=True) or {}
-    log  = body.get("log","").strip()
+    log  = (body.get("log") or body.get("log_line") or "").strip()
     if not log: return jsonify({"error":"log obrigatorio"}),400
     if len(log)>10000: return jsonify({"error":"log muito longo"}),413
     field = sanitize(body.get("field","raw"), max_len=30, label="field")
@@ -3288,7 +3293,6 @@ def api_me():
           "can_see_admin_tab": true // is_paid && is_admin
         }
     """
-    from flask import g
     # Modo local (AUTH_ENABLED=False) → admin automático
     if not AUTH_ENABLED:
         return jsonify({
@@ -3470,6 +3474,11 @@ def trial():
     else:
         data = request.form
 
+    if any(has_dangerous_input(data.get(field, "")) for field in ("name", "email", "company")):
+        if request.is_json:
+            return jsonify({"error": "Entrada inválida"}), 400
+        return redirect("/pricing?error=missing_fields")
+
     name    = sanitize(data.get("name", "").strip(),    100, "name")
     email   = sanitize(data.get("email", "").strip(),   200, "email")
     company = sanitize(data.get("company", "").strip(), 200, "company")
@@ -3557,6 +3566,11 @@ def contact():
     else:
         data = request.form
 
+    if any(has_dangerous_input(data.get(field, "")) for field in ("name", "email", "company", "message")):
+        if request.is_json:
+            return jsonify({"error": "Entrada inválida"}), 400
+        return redirect("/pricing?error=missing_fields")
+
     name    = sanitize(data.get("name", "").strip(),    100, "name")
     email   = sanitize(data.get("email", "").strip(),   200, "email")
     company = sanitize(data.get("company", "").strip(), 200, "company")
@@ -3605,6 +3619,8 @@ def checkout():
     _MAX_HOSTS = {"free": 1, "pro": 20, "enterprise": 9999, "mssp": 9999}
 
     try:
+        if any(has_dangerous_input(request.form.get(field, "")) for field in ("plan", "email", "name", "company")):
+            return redirect("/pricing?error=missing_fields")
         plan    = sanitize(request.form.get("plan",    "pro").strip(),   20,  "plan")
         email   = sanitize(request.form.get("email",   "").strip(),      200, "email")
         name    = sanitize(request.form.get("name",    "").strip(),      100, "name")
@@ -4750,7 +4766,7 @@ def admin_dashboard():
     Acesso: apenas tenants com role=admin E plano pago (pro/business/enterprise).
     Usuários free são redirecionados para /pricing mesmo que tenham role=admin.
     """
-    from flask import render_template, redirect as _redir, g
+    from flask import render_template, redirect as _redir
     # Modo local (sem auth) → acesso total ao admin
     if not AUTH_ENABLED:
         return render_template("admin_dashboard.html")
@@ -4908,7 +4924,7 @@ def admin_security_stats():
     Stats de segurança: tentativas bloqueadas hoje, MRR estimado.
     """
     import json as _json
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timezone
 
     today = datetime.now(timezone.utc).date().isoformat()
     blocked_today = 0

@@ -22,7 +22,6 @@ Skipped automaticamente se o Flask ou o app não puder ser importado.
 import os
 import sys
 import json
-import time
 import tempfile
 import unittest
 

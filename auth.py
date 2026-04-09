@@ -16,6 +16,7 @@ import secrets
 import hashlib  # noqa: F401
 import logging
 import pathlib
+import sys
 from functools import wraps
 from datetime import datetime, timezone  # noqa: F401
 from flask import request, jsonify, redirect
@@ -83,10 +84,13 @@ def verify_any_token(token: str, repo=None) -> dict:
 # ── Helpers internos ──────────────────────────────────────────────
 
 def _extract_token() -> str:
-    """Extrai token de header Bearer, query param ou cookie."""
+    """Extrai token de header Bearer/X-API-Token, query param ou cookie."""
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         return auth_header[7:].strip()
+    api_token = request.headers.get("X-API-Token", "").strip()
+    if api_token:
+        return api_token
     t = request.args.get("token", "").strip()
     if t:
         return t
@@ -109,6 +113,25 @@ def _has_explicit_token_auth() -> bool:
     auth_header = request.headers.get("Authorization", "")
     api_token   = request.headers.get("X-API-Token", "").strip()
     return auth_header.startswith("Bearer ") or bool(api_token)
+
+
+def _resolve_repo():
+    """Tenta localizar o repositório compartilhado da aplicação."""
+    try:
+        from flask import g
+        repo = getattr(g, "_repo", None)
+        if repo is not None:
+            return repo
+    except Exception:
+        pass
+
+    try:
+        app_module = sys.modules.get("__main__") or sys.modules.get("app")
+        if app_module:
+            return getattr(app_module, "repo", None)
+    except Exception:
+        pass
+    return None
 
 
 # ── Proteção de dashboard (sempre ativa, independente de IDS_AUTH) ─
@@ -197,22 +220,20 @@ def auth(f):
       - Browser (Accept: text/html) → redireciona para /login?next=<path>
       - API (Accept: application/json ou outros) → retorna 401 JSON
 
-    Se AUTH_ENABLED=false, passa direto (default).
+    Para rotas /api/*, sempre exige um token válido.
+    Em outras rotas protegidas, respeita AUTH_ENABLED.
     """
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not AUTH_ENABLED:
+        requires_auth = request.path.startswith("/api/") or AUTH_ENABLED
+        if not requires_auth:
             return f(*args, **kwargs)
 
-        global _valid_token
-        if _valid_token is None:
-            _valid_token = get_or_create_token()
-
         token = _extract_token()
+        repo = _resolve_repo()
+        result = verify_any_token(token, repo)
 
-        if not token or not secrets.compare_digest(
-            token.encode(), _valid_token.encode()
-        ):
+        if not result["valid"]:
             logger.warning("Auth falhou | ip=%s | path=%s",
                            request.remote_addr, request.path)
 

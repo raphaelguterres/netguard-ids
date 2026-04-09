@@ -159,7 +159,8 @@ class MLBaseline:
                 contamination = self.contamination,
                 n_estimators  = 100,
                 random_state  = 42,
-                n_jobs        = -1,
+                # Evita workers paralelos temporários que quebram em ambientes restritos.
+                n_jobs        = 1,
             )
             self._model.fit(X_scaled)
             self._trained = True
