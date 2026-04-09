@@ -366,6 +366,13 @@ class TestPublicRoutes(BaseIntegration):
         r = self.client.get("/pricing")
         self.assertEqual(r.status_code, 200)
 
+    def test_pricing_page_trial_modal_usa_trial_sem_checkout(self):
+        r = self.client.get("/pricing")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"form.action = '/trial';", r.data)
+        self.assertNotIn(b"form.action = '/checkout';", r.data)
+        self.assertNotIn(b"Continuar para pagamento", r.data)
+
     def test_login_page_200(self):
         r = self.client.get("/login")
         self.assertIn(r.status_code, (200, 302))

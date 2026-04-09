@@ -41,9 +41,10 @@
     .trust-item { display:flex; align-items:center; gap:.4rem; font-size:.82rem; color:var(--txt2); }
     .trust-item svg { width:16px; height:16px; color:var(--green); }
 
-    /* ── Alert cancelled ── */
+    /* ── Alerts ── */
     .alert-cancelled { max-width:700px; margin:0 auto 2rem; background:#1c1212; border:1px solid #f8514955; border-radius:8px; padding:.9rem 1.2rem; color:var(--red); font-size:.9rem; text-align:center; }
-
+    .alert-success  { max-width:700px; margin:0 auto 2rem; background:#0d1f12; border:1px solid #3fb95055; border-radius:8px; padding:.9rem 1.2rem; color:var(--green); font-size:.9rem; text-align:center; }
+    .alert-error    { max-width:700px; margin:0 auto 2rem; background:#1c1212; border:1px solid #f8514955; border-radius:8px; padding:.9rem 1.2rem; color:var(--red); font-size:.9rem; text-align:center; }
     /* ── Plans grid ── */
     .plans-wrap { max-width:1100px; margin:0 auto; padding:0 1.5rem 5rem; }
     .plans { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px,1fr)); gap:1.25rem; }
@@ -159,6 +160,16 @@
 
 {% if cancelled %}
 <div class="alert-cancelled">⚠️ Checkout cancelado. Nenhuma cobrança foi feita. Escolha um plano abaixo quando estiver pronto.</div>
+{% endif %}
+{% if contact_ok %}
+<div class="alert-success">✓ Mensagem recebida! Nossa equipe entrará em contato em até 1 dia útil.</div>
+{% endif %}
+{% if error == 'missing_fields' %}
+<div class="alert-error">⚠️ Preencha nome e e-mail para continuar.</div>
+{% elif error == 'checkout_failed' %}
+<div class="alert-error">⚠️ Erro ao iniciar o checkout. Tente novamente em instantes.</div>
+{% elif error == 'server' %}
+<div class="alert-error">⚠️ Erro interno. Tente novamente ou fale conosco.</div>
 {% endif %}
 
 <!-- Plans -->
@@ -353,10 +364,10 @@
       </label>
 
       <div class="modal-actions">
-        <button type="submit" style="background:var(--blue2);color:#fff">Criar conta grátis →</button>
+        <button type="submit" id="modal-submit-btn" style="background:var(--blue2);color:#fff">Criar conta grátis →</button>
         <button type="button" style="background:var(--s2);color:var(--txt);border:1px solid var(--border)" onclick="closeModal()">Cancelar</button>
       </div>
-      <p style="font-size:.72rem;color:var(--txt2);margin-top:.9rem;text-align:center">Sem cartão de crédito · Cancele quando quiser · Dados protegidos pela LGPD</p>
+      <p id="modal-footer-note" style="font-size:.72rem;color:var(--txt2);margin-top:.9rem;text-align:center">Sem cartão de crédito · Cancele quando quiser · Dados protegidos pela LGPD</p>
     </form>
   </div>
 </div>
@@ -382,34 +393,73 @@
 </div>
 
 <script>
-const PLAN_LABELS = { free:'Gratuito', pro:'Pro — R$ 990/mês', enterprise:'Enterprise — R$ 3.900/mês', mssp:'MSSP Partner — R$ 300/cliente/mês' };
+const PLAN_LABELS = {
+  free:       'Gratuito',
+  pro:        'Pro — R$ 990/mês',
+  enterprise: 'Enterprise — R$ 3.900/mês',
+  mssp:       'MSSP Partner — R$ 300/cliente/mês'
+};
 
 function openSignup(plan){
+  const form      = document.getElementById('signup-form');
+  const submitBtn = document.getElementById('modal-submit-btn');
+  const footerNote = document.getElementById('modal-footer-note');
+
   document.getElementById('form-plan').value = plan;
-  document.getElementById('modal-plan-name').textContent = PLAN_LABELS[plan] || plan;
-  document.getElementById('modal-title').textContent = plan==='free' ? 'Criar conta gratuita' : 'Iniciar trial de 14 dias';
-  document.getElementById('modal-sub').innerHTML = plan==='free'
-    ? 'Grátis para sempre. Sem cartão.'
-    : `Plano: <strong>${PLAN_LABELS[plan]}</strong> · Sem cartão por 14 dias`;
+
+  if (plan === 'free') {
+    // Plano gratuito → /trial direto, sem cartão
+    form.action = '/trial';
+    document.getElementById('modal-title').textContent = 'Criar conta gratuita';
+    document.getElementById('modal-sub').innerHTML = 'Grátis para sempre. Sem cartão, sem compromisso.';
+    submitBtn.textContent = 'Criar conta grátis →';
+    footerNote.innerHTML = 'Sem cartão de crédito · Cancele quando quiser · Dados protegidos pela LGPD';
+  } else {
+    // Trial self-serve continua sem cartão, mesmo com Stripe configurado.
+    form.action = '/trial';
+    document.getElementById('modal-title').textContent = 'Iniciar trial de 14 dias';
+    document.getElementById('modal-sub').innerHTML =
+      `Plano: <strong>${PLAN_LABELS[plan]}</strong> · Sem cartão por 14 dias`;
+    submitBtn.textContent = 'Iniciar trial grátis →';
+    footerNote.innerHTML = 'Sem cartão de crédito · 14 dias grátis · Cancele quando quiser';
+  }
+
   document.getElementById('modal-overlay').classList.add('open');
 }
-function closeModal(){ document.getElementById('modal-overlay').classList.remove('open'); }
+
+function closeModal(){
+  document.getElementById('modal-overlay').classList.remove('open');
+}
 
 function openContact(plan){
   document.getElementById('contact-plan').value = plan;
-  document.getElementById('contact-title').textContent = plan==='mssp' ? 'Tornar-se parceiro MSSP' : 'Falar com especialista';
+  document.getElementById('contact-title').textContent =
+    plan === 'mssp' ? 'Tornar-se parceiro MSSP' : 'Falar com especialista';
   document.getElementById('contact-overlay').classList.add('open');
 }
-function closeContact(){ document.getElementById('contact-overlay').classList.remove('open'); }
+
+function closeContact(){
+  document.getElementById('contact-overlay').classList.remove('open');
+}
 
 function toggleFaq(el){
   el.closest('.faq-item').classList.toggle('open');
 }
 
 // Fecha modais ao clicar fora
-document.querySelectorAll('.overlay').forEach(o=>{
-  o.addEventListener('click', e=>{ if(e.target===o) o.classList.remove('open'); });
+document.querySelectorAll('.overlay').forEach(o => {
+  o.addEventListener('click', e => { if (e.target === o) o.classList.remove('open'); });
 });
+
+// Exibe erro de URL se veio de redirect com ?error=
+(function(){
+  const params = new URLSearchParams(location.search);
+  const err = params.get('error');
+  if (!err) return;
+  // Remove o parâmetro da URL sem recarregar
+  const clean = location.pathname + (params.toString().replace(`error=${err}`, '').replace(/^&|&$/, '') ? '?' + params.toString().replace(`error=${err}`, '').replace(/^&|&$/, '') : '');
+  history.replaceState({}, '', clean);
+})();
 </script>
 </body>
 </html>
