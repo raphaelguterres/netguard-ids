@@ -469,8 +469,12 @@ def _ensure_demo_access_token(*, min_events: int = 50, reason: str = "demo") -> 
             event_count = 0
         if not existing or event_count < min_events:
             seed_demo(repo, n_events=350, verbose=False)
+            existing = repo.get_tenant_by_token(DEMO_TOKEN)
             logger.info("Demo seed criado/refeito | reason=%s | ip=%s | events_before=%d",
                         reason, request.remote_addr, event_count)
+        if not existing:
+            logger.warning("Demo token indisponivel apos seed | reason=%s", reason)
+            return None
         audit("DEMO_ACCESS", ip=request.remote_addr or "-",
               detail=f"tenant={DEMO_TENANT_ID} events={event_count} reason={reason}")
         return DEMO_TOKEN

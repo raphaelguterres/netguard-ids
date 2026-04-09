@@ -172,6 +172,20 @@ def seed_demo(repo, n_events: int = 350, verbose: bool = True,
         try:
             existing = repo.get_tenant_by_token(DEMO_TOKEN)
             if not existing:
+                existing_by_id = repo.get_tenant_by_id(DEMO_TENANT_ID)
+                if existing_by_id:
+                    from security import hash_token
+
+                    repaired = repo.update_tenant_token(
+                        DEMO_TENANT_ID,
+                        DEMO_TOKEN,
+                        hash_token(DEMO_TOKEN),
+                    )
+                    if repaired:
+                        existing = repo.get_tenant_by_token(DEMO_TOKEN)
+                        if verbose:
+                            print(f"[demo] Token demo revalidado: {_TENANT_ID}")
+            if not existing:
                 repo.create_tenant(
                     tenant_id = DEMO_TENANT_ID,
                     name      = DEMO_NAME,

@@ -240,6 +240,44 @@ class TestAuthFlow(BaseIntegration):
         self.assertTrue(any("netguard_preview_mode=free" in c for c in cookies))
         self.assertTrue(any("netguard_preview_expires=" in c for c in cookies))
 
+    def test_free_preview_recupera_demo_token_legado_e_abre_dashboard(self):
+        from demo_seed import DEMO_TENANT_ID, DEMO_TOKEN
+        from security import hash_token
+        from billing import generate_api_token
+        from auth import verify_any_token
+
+        stale_token = generate_api_token()
+        if repo.get_tenant_by_id(DEMO_TENANT_ID):
+            repo.update_tenant_token(DEMO_TENANT_ID, stale_token, hash_token(stale_token))
+        else:
+            repo.create_tenant(
+                tenant_id=DEMO_TENANT_ID,
+                name="Demo Legacy",
+                token=stale_token,
+                plan="pro",
+                max_hosts=50,
+            )
+
+        self.assertIsNone(repo.get_tenant_by_token(DEMO_TOKEN))
+
+        client = app.test_client(use_cookies=False)
+        r = client.post(
+            "/api/auth/free-preview",
+            data=json.dumps({"token": self.token}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        d = json.loads(r.data)
+        self.assertTrue(d.get("uses_demo_data"))
+        cookies = r.headers.getlist("Set-Cookie")
+        self.assertTrue(any(f"netguard_token={DEMO_TOKEN}" in c for c in cookies))
+
+        demo_tenant = repo.get_tenant_by_token(DEMO_TOKEN)
+        self.assertIsNotNone(demo_tenant)
+        result = verify_any_token(DEMO_TOKEN, repo)
+        self.assertTrue(result.get("valid"))
+        self.assertEqual((result.get("tenant") or {}).get("tenant_id"), DEMO_TENANT_ID)
+
     def test_login_normal_limpa_preview_cookies(self):
         self.post_json("/api/auth/free-preview", {"token": self.token})
         r = self.post_json("/api/auth/login", {"token": self.token})
