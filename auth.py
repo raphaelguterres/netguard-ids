@@ -99,6 +99,18 @@ def _is_browser_request() -> bool:
     return "text/html" in accept
 
 
+def _has_explicit_token_auth() -> bool:
+    """
+    True quando a autenticação veio de um segredo enviado explicitamente pela requisição.
+
+    Esse cenário não depende de cookies automáticos do browser, então não sofre
+    o mesmo risco clássico de CSRF do fluxo de sessão.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    api_token   = request.headers.get("X-API-Token", "").strip()
+    return auth_header.startswith("Bearer ") or bool(api_token)
+
+
 # ── Proteção de dashboard (sempre ativa, independente de IDS_AUTH) ─
 
 # Pode desativar com IDS_DASHBOARD_AUTH=false (ex.: desenvolvimento local)
@@ -114,8 +126,13 @@ def require_session(f):
     """
     @wraps(f)
     def decorated(*args, **kwargs):
+        from flask import make_response
+
         if not DASHBOARD_AUTH:
-            return f(*args, **kwargs)
+            resp = make_response(f(*args, **kwargs))
+            if _CSRF_ENABLED:
+                _get_or_set_csrf_cookie(resp)
+            return resp
 
         token = request.cookies.get("netguard_token", "").strip()
         if not token:
@@ -124,7 +141,10 @@ def require_session(f):
                 next_url += "?" + request.query_string.decode()
             logger.info("Sessão ausente → /login | ip=%s | path=%s",
                         request.remote_addr, request.path)
-            return redirect(f"/login?next={next_url}")
+            resp = redirect(f"/login?next={next_url}")
+            if _CSRF_ENABLED:
+                _get_or_set_csrf_cookie(resp)
+            return resp
 
         # Valida o cookie (admin token ou tenant token)
         # repo é injetado como parâmetro opcional via g ou importado sob demanda
@@ -149,9 +169,14 @@ def require_session(f):
             logger.warning("Cookie inválido → /login | ip=%s", request.remote_addr)
             resp = redirect(f"/login?next={request.path}&expired=1")
             resp.delete_cookie("netguard_token")
+            if _CSRF_ENABLED:
+                _get_or_set_csrf_cookie(resp)
             return resp
 
-        return f(*args, **kwargs)
+        resp = make_response(f(*args, **kwargs))
+        if _CSRF_ENABLED:
+            _get_or_set_csrf_cookie(resp)
+        return resp
     return decorated
 
 
@@ -241,10 +266,17 @@ def csrf_protect(f):
     Decorador que valida CSRF token em mutações (POST/PUT/PATCH/DELETE).
     Cliente deve enviar o valor do cookie csrf_token no header X-CSRFToken.
     Pattern: double-submit cookie.
+
+    Bypass apenas para clientes que autenticam via header explícito
+    (Authorization / X-API-Token), já que esse fluxo não depende de cookie.
     """
     @wraps(f)
     def decorated(*args, **kwargs):
         if not _CSRF_ENABLED or request.method in _CSRF_SAFE_METHODS:
+            return f(*args, **kwargs)
+
+        # Clientes API autenticados por header não dependem de cookie de sessão.
+        if _has_explicit_token_auth():
             return f(*args, **kwargs)
 
         cookie_token = request.cookies.get("csrf_token", "")
