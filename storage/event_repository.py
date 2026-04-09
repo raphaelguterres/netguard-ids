@@ -14,6 +14,7 @@ import os
 import json
 import logging
 import threading
+import time
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any  # noqa: F401
 from pathlib import Path
@@ -94,11 +95,21 @@ _DDL_SQLITE = """
         PRIMARY KEY (tenant_id, date, event_type, severity)
     );
 
+    CREATE TABLE IF NOT EXISTS onboarding_tickets (
+        ticket      TEXT PRIMARY KEY,
+        payload     TEXT NOT NULL,
+        expires_at  REAL NOT NULL,
+        created_at  TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_onboarding_tickets_expires_at
+        ON onboarding_tickets(expires_at);
+
     CREATE TABLE IF NOT EXISTS tenants (
         tenant_id              TEXT PRIMARY KEY,
         name                   TEXT NOT NULL,
         token                  TEXT NOT NULL UNIQUE,
         token_hash             TEXT,
+        token_prefix           TEXT,
         role                   TEXT NOT NULL DEFAULT 'analyst',
         plan                   TEXT NOT NULL DEFAULT 'free',
         max_hosts              INTEGER DEFAULT 1,
@@ -113,11 +124,13 @@ _DDL_SQLITE = """
 # Migration SQL — adicionado às colunas de tenants existentes de forma segura
 _DDL_MIGRATION_SQLITE = """
     ALTER TABLE tenants ADD COLUMN token_hash TEXT;
+    ALTER TABLE tenants ADD COLUMN token_prefix TEXT;
     ALTER TABLE tenants ADD COLUMN role TEXT NOT NULL DEFAULT 'analyst';
 """
 
 _DDL_MIGRATION_POSTGRES = """
     ALTER TABLE tenants ADD COLUMN IF NOT EXISTS token_hash TEXT;
+    ALTER TABLE tenants ADD COLUMN IF NOT EXISTS token_prefix TEXT;
     ALTER TABLE tenants ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'analyst';
 """
 
@@ -166,11 +179,21 @@ _DDL_POSTGRES = """
         PRIMARY KEY (tenant_id, date, event_type, severity)
     );
 
+    CREATE TABLE IF NOT EXISTS onboarding_tickets (
+        ticket      TEXT PRIMARY KEY,
+        payload     TEXT NOT NULL,
+        expires_at  DOUBLE PRECISION NOT NULL,
+        created_at  TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_onboarding_tickets_expires_at
+        ON onboarding_tickets(expires_at);
+
     CREATE TABLE IF NOT EXISTS tenants (
         tenant_id              TEXT PRIMARY KEY,
         name                   TEXT NOT NULL,
         token                  TEXT NOT NULL UNIQUE,
         token_hash             TEXT,
+        token_prefix           TEXT,
         role                   TEXT NOT NULL DEFAULT 'analyst',
         plan                   TEXT NOT NULL DEFAULT 'free',
         max_hosts              INTEGER DEFAULT 1,
@@ -258,10 +281,71 @@ class EventRepository:
             conn.close()
         # Aplica migrations (adiciona colunas novas em bancos pré-existentes)
         self._migrate_schema()
+        self._ensure_aux_tables()
+        self._harden_tenant_tokens()
 
     def _placeholder(self) -> str:
         """Retorna placeholder de query correto para o backend."""
         return "%s" if USE_POSTGRES else "?"
+
+    def _ensure_aux_tables(self):
+        """Garante tabelas auxiliares criadas em bancos legados."""
+        statements = [
+            """
+            CREATE TABLE IF NOT EXISTS onboarding_tickets (
+                ticket      TEXT PRIMARY KEY,
+                payload     TEXT NOT NULL,
+                expires_at  {expires_type} NOT NULL,
+                created_at  {created_type}
+            )
+            """.format(
+                expires_type="DOUBLE PRECISION" if USE_POSTGRES else "REAL",
+                created_type="TIMESTAMPTZ DEFAULT NOW()" if USE_POSTGRES
+                else "TEXT DEFAULT (datetime('now'))",
+            ),
+            """
+            CREATE INDEX IF NOT EXISTS idx_onboarding_tickets_expires_at
+                ON onboarding_tickets(expires_at)
+            """,
+        ]
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                for stmt in statements:
+                    cur.execute(stmt)
+                self._conn().commit()
+                cur.close()
+            else:
+                for stmt in statements:
+                    self._conn().execute(stmt)
+                self._conn().commit()
+        except Exception as exc:
+            logger.debug("_ensure_aux_tables skipped: %s", exc)
+
+    @staticmethod
+    def _token_prefix(token: str) -> str:
+        """Retorna um prefixo seguro para exibição administrativa."""
+        return (token or "")[:16]
+
+    @staticmethod
+    def _token_ref(token_hash: str) -> str:
+        """Gera referência opaca determinística para manter compatibilidade do schema."""
+        return f"tk_{token_hash}" if token_hash else ""
+
+    @classmethod
+    def _sanitize_tenant_record(cls, tenant: Optional[dict]) -> Optional[dict]:
+        """Remove materiais sensíveis de autenticação de objetos tenant retornados."""
+        if not tenant:
+            return None
+        data = dict(tenant)
+        prefix = data.get("token_prefix") or ""
+        raw_token = data.get("token") or ""
+        if not prefix and isinstance(raw_token, str) and raw_token.startswith("ng_"):
+            prefix = cls._token_prefix(raw_token)
+        data["token_prefix"] = prefix
+        data["token"] = prefix
+        data.pop("token_hash", None)
+        return data
 
     # ── Save ──────────────────────────────────────────────────────
 
@@ -546,12 +630,12 @@ class EventRepository:
                 )
                 row = cur.fetchone()
                 cur.close()
-                return dict(row) if row else None
+                return self._sanitize_tenant_record(dict(row) if row else None)
             else:
                 row = self._conn().execute(
                     f"SELECT * FROM tenants WHERE tenant_id={ph} AND active=1", (tenant_id,)
                 ).fetchone()
-                return dict(row) if row else None
+                return self._sanitize_tenant_record(dict(row) if row else None)
         except Exception as e:
             logger.debug("get_tenant_by_id error: %s", e)
             return None
@@ -577,7 +661,7 @@ class EventRepository:
         except Exception:
             pass
 
-        # Fallback legacy: busca por plaintext e faz upgrade para hash se encontrado
+        # Fallback legacy: busca por plaintext e faz upgrade para material opaco
         try:
             if USE_POSTGRES:
                 cur = self._conn().cursor()
@@ -593,16 +677,17 @@ class EventRepository:
                 ).fetchone()
                 result = dict(row) if row else None
 
-            # Upgrade automático: salva hash e mantém plaintext para rollback
-            if result and result.get("token_hash") is None:
+            if result and isinstance(result.get("token"), str) and result["token"].startswith("ng_"):
                 try:
-                    from security import hash_token
-                    self.set_tenant_token_hash(result["tenant_id"], hash_token(token))
-                    logger.info("[security] Token hash atualizado (migration) | tenant=%s",
+                    self._upgrade_legacy_tenant_token(result["tenant_id"], token)
+                    result["token"] = self._token_prefix(token)
+                    result["token_prefix"] = self._token_prefix(token)
+                    result.pop("token_hash", None)
+                    logger.info("[security] Token legado endurecido | tenant=%s",
                                 result["tenant_id"])
                 except Exception:
                     pass
-            return result
+            return self._sanitize_tenant_record(result)
         except Exception as e:
             logger.debug("get_tenant_by_token error: %s", e)
             return None
@@ -621,13 +706,13 @@ class EventRepository:
                 )
                 row = cur.fetchone()
                 cur.close()
-                return dict(row) if row else None
+                return self._sanitize_tenant_record(dict(row) if row else None)
             else:
                 row = self._conn().execute(
                     f"SELECT * FROM tenants WHERE token_hash={ph} AND active=1",
                     (token_hash,)
                 ).fetchone()
-                return dict(row) if row else None
+                return self._sanitize_tenant_record(dict(row) if row else None)
         except Exception as e:
             logger.debug("get_tenant_by_token_hash error: %s", e)
             return None
@@ -657,21 +742,23 @@ class EventRepository:
 
     def update_tenant_token(self, tenant_id: str, new_token: str,
                             new_token_hash: str) -> bool:
-        """Rotaciona o token de um tenant (token + hash atualizados atomicamente)."""
+        """Rotaciona o token de um tenant sem persistir o plaintext."""
         ph = self._placeholder()
+        token_ref = self._token_ref(new_token_hash)
+        token_prefix = self._token_prefix(new_token)
         try:
             if USE_POSTGRES:
                 cur = self._conn().cursor()
                 cur.execute(
-                    f"UPDATE tenants SET token={ph}, token_hash={ph} WHERE tenant_id={ph}",
-                    (new_token, new_token_hash, tenant_id)
+                    f"UPDATE tenants SET token={ph}, token_hash={ph}, token_prefix={ph} WHERE tenant_id={ph}",
+                    (token_ref, new_token_hash, token_prefix, tenant_id)
                 )
                 self._conn().commit()
                 cur.close()
             else:
                 self._conn().execute(
-                    f"UPDATE tenants SET token={ph}, token_hash={ph} WHERE tenant_id={ph}",
-                    (new_token, new_token_hash, tenant_id)
+                    f"UPDATE tenants SET token={ph}, token_hash={ph}, token_prefix={ph} WHERE tenant_id={ph}",
+                    (token_ref, new_token_hash, token_prefix, tenant_id)
                 )
                 self._conn().commit()
             return True
@@ -686,38 +773,31 @@ class EventRepository:
                       stripe_subscription_id: str = "") -> bool:
         ph = self._placeholder()
         try:
-            if USE_POSTGRES:
-                # Hash token antes de salvar — nunca armazena plaintext
-                try:
-                    from security import hash_token as _ht
-                    _token_hash = _ht(token)
-                except Exception:
-                    _token_hash = None
+            from security import hash_token as _ht
 
+            token_hash = _ht(token)
+            token_ref = self._token_ref(token_hash)
+            token_prefix = self._token_prefix(token)
+
+            if USE_POSTGRES:
                 cur = self._conn().cursor()
                 cur.execute(f"""
                     INSERT INTO tenants
-                        (tenant_id, name, token, token_hash, plan, max_hosts, email,
+                        (tenant_id, name, token, token_hash, token_prefix, plan, max_hosts, email,
                          stripe_customer_id, stripe_subscription_id)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
                     ON CONFLICT (tenant_id) DO NOTHING
-                """, (tenant_id, name, token, _token_hash, plan, max_hosts, email,
+                """, (tenant_id, name, token_ref, token_hash, token_prefix, plan, max_hosts, email,
                       stripe_customer_id, stripe_subscription_id))
                 self._conn().commit()
                 cur.close()
             else:
-                try:
-                    from security import hash_token as _ht
-                    _token_hash = _ht(token)
-                except Exception:
-                    _token_hash = None
-
                 self._conn().execute(f"""
                     INSERT OR IGNORE INTO tenants
-                        (tenant_id, name, token, token_hash, plan, max_hosts, email,
+                        (tenant_id, name, token, token_hash, token_prefix, plan, max_hosts, email,
                          stripe_customer_id, stripe_subscription_id)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
-                """, (tenant_id, name, token, _token_hash, plan, max_hosts, email,
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+                """, (tenant_id, name, token_ref, token_hash, token_prefix, plan, max_hosts, email,
                       stripe_customer_id, stripe_subscription_id))
                 self._conn().commit()
             return True
@@ -734,15 +814,183 @@ class EventRepository:
                 cur.execute("SELECT * FROM tenants WHERE active=TRUE ORDER BY created_at DESC")
                 rows = cur.fetchall()
                 cur.close()
-                return [dict(r) for r in rows]
+                return [self._sanitize_tenant_record(dict(r)) for r in rows]
             else:
                 rows = self._conn().execute(
                     "SELECT * FROM tenants WHERE active=1 ORDER BY rowid DESC"
                 ).fetchall()
-                return [dict(r) for r in rows]
+                return [self._sanitize_tenant_record(dict(r)) for r in rows]
         except Exception as e:
             logger.error("list_tenants error: %s", e)
             return []
+
+    def save_onboarding_ticket(self, ticket: str, payload: dict,
+                               ttl_seconds: int = 900) -> bool:
+        """Persiste um ticket efêmero de onboarding em storage compartilhado."""
+        if not ticket:
+            return False
+        ph = self._placeholder()
+        now = time.time()
+        expires_at = now + max(1, int(ttl_seconds))
+        payload_json = json.dumps(payload)
+        try:
+            with self._lock:
+                if USE_POSTGRES:
+                    cur = self._conn().cursor()
+                    cur.execute(
+                        f"DELETE FROM onboarding_tickets WHERE expires_at <= {ph}",
+                        (now,)
+                    )
+                    cur.execute(f"""
+                        INSERT INTO onboarding_tickets (ticket, payload, expires_at)
+                        VALUES ({ph},{ph},{ph})
+                        ON CONFLICT (ticket) DO UPDATE SET
+                            payload = EXCLUDED.payload,
+                            expires_at = EXCLUDED.expires_at
+                    """, (ticket, payload_json, expires_at))
+                    self._conn().commit()
+                    cur.close()
+                else:
+                    self._conn().execute(
+                        f"DELETE FROM onboarding_tickets WHERE expires_at <= {ph}",
+                        (now,)
+                    )
+                    self._conn().execute(f"""
+                        INSERT INTO onboarding_tickets (ticket, payload, expires_at)
+                        VALUES ({ph},{ph},{ph})
+                        ON CONFLICT(ticket) DO UPDATE SET
+                            payload=excluded.payload,
+                            expires_at=excluded.expires_at
+                    """, (ticket, payload_json, expires_at))
+                    self._conn().commit()
+            return True
+        except Exception as exc:
+            logger.error("save_onboarding_ticket error: %s", exc)
+            return False
+
+    def consume_onboarding_ticket(self, ticket: str) -> Optional[dict]:
+        """Consome um ticket de onboarding uma única vez."""
+        if not ticket:
+            return None
+        ph = self._placeholder()
+        now = time.time()
+        try:
+            with self._lock:
+                if USE_POSTGRES:
+                    cur = self._conn().cursor()
+                    cur.execute(
+                        f"DELETE FROM onboarding_tickets WHERE expires_at <= {ph}",
+                        (now,)
+                    )
+                    cur.execute(
+                        f"SELECT payload FROM onboarding_tickets WHERE ticket={ph}",
+                        (ticket,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        cur.execute(
+                            f"DELETE FROM onboarding_tickets WHERE ticket={ph}",
+                            (ticket,)
+                        )
+                    self._conn().commit()
+                    cur.close()
+                    payload_json = row["payload"] if row else None
+                else:
+                    self._conn().execute(
+                        f"DELETE FROM onboarding_tickets WHERE expires_at <= {ph}",
+                        (now,)
+                    )
+                    row = self._conn().execute(
+                        f"SELECT payload FROM onboarding_tickets WHERE ticket={ph}",
+                        (ticket,)
+                    ).fetchone()
+                    if row:
+                        self._conn().execute(
+                            f"DELETE FROM onboarding_tickets WHERE ticket={ph}",
+                            (ticket,)
+                        )
+                    self._conn().commit()
+                    payload_json = row["payload"] if row else None
+
+            return json.loads(payload_json) if payload_json else None
+        except Exception as exc:
+            logger.error("consume_onboarding_ticket error: %s", exc)
+            return None
+
+    def purge_expired_onboarding_tickets(self) -> int:
+        """Remove tickets de onboarding expirados."""
+        ph = self._placeholder()
+        now = time.time()
+        try:
+            with self._lock:
+                if USE_POSTGRES:
+                    cur = self._conn().cursor()
+                    cur.execute(
+                        f"DELETE FROM onboarding_tickets WHERE expires_at <= {ph}",
+                        (now,)
+                    )
+                    deleted = cur.rowcount
+                    self._conn().commit()
+                    cur.close()
+                else:
+                    cur = self._conn().execute(
+                        f"DELETE FROM onboarding_tickets WHERE expires_at <= {ph}",
+                        (now,)
+                    )
+                    deleted = cur.rowcount
+                    self._conn().commit()
+            return deleted
+        except Exception as exc:
+            logger.error("purge_expired_onboarding_tickets error: %s", exc)
+            return 0
+
+    def get_tenant_by_stripe_customer_id(self, stripe_customer_id: str) -> Optional[dict]:
+        """Busca tenant ativo pelo customer_id do Stripe."""
+        if not stripe_customer_id:
+            return None
+        ph = self._placeholder()
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"SELECT * FROM tenants WHERE stripe_customer_id={ph} AND active=TRUE",
+                    (stripe_customer_id,)
+                )
+                row = cur.fetchone()
+                cur.close()
+                return self._sanitize_tenant_record(dict(row) if row else None)
+            row = self._conn().execute(
+                f"SELECT * FROM tenants WHERE stripe_customer_id={ph} AND active=1",
+                (stripe_customer_id,)
+            ).fetchone()
+            return self._sanitize_tenant_record(dict(row) if row else None)
+        except Exception as e:
+            logger.debug("get_tenant_by_stripe_customer_id error: %s", e)
+            return None
+
+    def get_tenant_by_stripe_subscription_id(self, stripe_subscription_id: str) -> Optional[dict]:
+        """Busca tenant ativo pelo subscription_id do Stripe."""
+        if not stripe_subscription_id:
+            return None
+        ph = self._placeholder()
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"SELECT * FROM tenants WHERE stripe_subscription_id={ph} AND active=TRUE",
+                    (stripe_subscription_id,)
+                )
+                row = cur.fetchone()
+                cur.close()
+                return self._sanitize_tenant_record(dict(row) if row else None)
+            row = self._conn().execute(
+                f"SELECT * FROM tenants WHERE stripe_subscription_id={ph} AND active=1",
+                (stripe_subscription_id,)
+            ).fetchone()
+            return self._sanitize_tenant_record(dict(row) if row else None)
+        except Exception as e:
+            logger.debug("get_tenant_by_stripe_subscription_id error: %s", e)
+            return None
 
     def delete_tenant(self, tenant_id: str) -> bool:
         """Desativa (soft-delete) um tenant pelo tenant_id."""
@@ -815,6 +1063,7 @@ class EventRepository:
                 ("stripe_subscription_id", "TEXT DEFAULT ''"),
                 # Security migrations — token hashing e RBAC
                 ("token_hash",             "TEXT"),
+                ("token_prefix",           "TEXT"),
                 ("role",                   "TEXT NOT NULL DEFAULT 'analyst'"),
             ],
         }
@@ -837,6 +1086,66 @@ class EventRepository:
                     logger.debug("Migration OK: %s.%s", table, col)
                 except Exception:
                     pass  # Coluna já existe ou tabela não existe ainda — ignorar
+
+    def _upgrade_legacy_tenant_token(self, tenant_id: str, token: str) -> bool:
+        """Migra um tenant legado de plaintext para referência opaca + hash."""
+        from security import hash_token
+
+        ph = self._placeholder()
+        token_hash = hash_token(token)
+        token_ref = self._token_ref(token_hash)
+        token_prefix = self._token_prefix(token)
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"UPDATE tenants SET token={ph}, token_hash={ph}, token_prefix={ph} WHERE tenant_id={ph}",
+                    (token_ref, token_hash, token_prefix, tenant_id)
+                )
+                self._conn().commit()
+                cur.close()
+            else:
+                self._conn().execute(
+                    f"UPDATE tenants SET token={ph}, token_hash={ph}, token_prefix={ph} WHERE tenant_id={ph}",
+                    (token_ref, token_hash, token_prefix, tenant_id)
+                )
+                self._conn().commit()
+            return True
+        except Exception as exc:
+            logger.error("_upgrade_legacy_tenant_token error: %s", exc)
+            return False
+
+    def _harden_tenant_tokens(self):
+        """
+        Migra tokens legados em plaintext para material seguro.
+        Idempotente: pode rodar em toda inicialização.
+        """
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute("SELECT tenant_id, token, token_hash, token_prefix FROM tenants")
+                rows = [dict(r) for r in cur.fetchall()]
+                cur.close()
+            else:
+                rows = [
+                    dict(r) for r in self._conn().execute(
+                        "SELECT tenant_id, token, token_hash, token_prefix FROM tenants"
+                    ).fetchall()
+                ]
+        except Exception as exc:
+            logger.debug("_harden_tenant_tokens skipped: %s", exc)
+            return
+
+        migrated = 0
+        for row in rows:
+            token = row.get("token") or ""
+            if not isinstance(token, str) or not token.startswith("ng_"):
+                continue
+            if self._upgrade_legacy_tenant_token(row["tenant_id"], token):
+                migrated += 1
+
+        if migrated:
+            logger.info("[security] %d tenant(s) migrados para token opaco", migrated)
 
     # ── Row converters ────────────────────────────────────────────
 

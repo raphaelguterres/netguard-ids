@@ -13,6 +13,36 @@ Variáveis de ambiente necessárias:
   APP_URL                 https://seudominio.com (sem barra final)
   TRIAL_DAYS              14 (dias de trial gratuito sem cartão, default 14)
   CONTACT_EMAIL           contato@suaempresa.com (exibido na página de preços)
+
+─────────────────────────────────────────────────────────────────
+TODO — OPÇÃO 2: Ativar Stripe real (quando tiver conta criada)
+─────────────────────────────────────────────────────────────────
+Passo 1 — Crie sua conta em https://dashboard.stripe.com/register
+Passo 2 — No dashboard Stripe, vá em Developers > API Keys e copie:
+           • Secret key   → começa com sk_test_...
+           • Publishable  → começa com pk_test_...
+Passo 3 — Crie os produtos/preços em Products > Add product:
+           • Pro:        R$ 990/mês   → copie o Price ID (price_...)
+           • Enterprise: R$ 3.900/mês → copie o Price ID
+           • MSSP:       R$ 300/mês   → copie o Price ID
+Passo 4 — Configure as variáveis de ambiente antes de subir o servidor:
+           Windows (PowerShell):
+             $env:STRIPE_SECRET_KEY      = "sk_test_..."
+             $env:STRIPE_PUBLISHABLE_KEY = "pk_test_..."
+             $env:STRIPE_WEBHOOK_SECRET  = "whsec_..."   # Stripe CLI > webhook
+             $env:STRIPE_PRICE_PRO        = "price_..."
+             $env:STRIPE_PRICE_ENTERPRISE = "price_..."
+             $env:STRIPE_PRICE_MSSP       = "price_..."
+             $env:APP_URL                 = "http://127.0.0.1:5000"
+           Linux/Mac:
+             export STRIPE_SECRET_KEY="sk_test_..."
+             (mesma lógica para as demais)
+Passo 5 — Inicie o servidor e teste: o botão mudará para
+           "🔒 Continuar para pagamento →" e o checkout
+           redirecionará para checkout.stripe.com automaticamente.
+Passo 6 — Para testar webhooks localmente, instale o Stripe CLI e rode:
+           stripe listen --forward-to localhost:5000/webhook/stripe
+─────────────────────────────────────────────────────────────────
 """
 
 import os
@@ -162,8 +192,8 @@ else:
 # ══════════════════════════════════════════════════════════════════
 
 def get_plan(plan_key: str) -> Dict:
-    """Retorna configuração do plano; cai no starter se desconhecido."""
-    return PLANS.get(plan_key, PLANS["starter"])
+    """Retorna configuração do plano; cai no 'free' se desconhecido."""
+    return PLANS.get(plan_key, PLANS["free"])
 
 
 def generate_api_token() -> str:
@@ -188,18 +218,10 @@ def create_checkout_session(
 ) -> Optional[str]:
     """
     Cria sessão de checkout no Stripe e retorna URL de pagamento.
-
-    Em modo demo (sem STRIPE_SECRET_KEY), retorna URL de welcome direta
-    com token fake para testes locais sem cartão.
     """
     if not STRIPE_OK:
-        # Modo demo: cria tenant simulado sem passar pelo Stripe
-        fake_token = generate_api_token()
-        return (
-            f"{APP_URL}/welcome"
-            f"?demo=1&plan={plan_key}&token={fake_token}"
-            f"&name={name}&email={email}"
-        )
+        logger.warning("create_checkout_session chamado sem Stripe configurado")
+        return None
 
     plan = get_plan(plan_key)
     if not plan["price_id"]:
@@ -223,6 +245,7 @@ def create_checkout_session(
                 "company": company,
                 "email":   email,
             },
+            timeout=15,   # nunca bloqueia o servidor por mais de 15s
         )
         logger.info("Checkout session criada: %s | plano=%s | email=%s",
                     session.id, plan_key, email)

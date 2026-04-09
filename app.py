@@ -4,7 +4,7 @@ Monitor de rede real + API REST + Dashboard executivo.
 Um único processo. Sem simulador. Sem dados falsos.
 """
 
-import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress  # noqa: F401
+import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress, secrets  # noqa: F401
 from platform_utils import (  # noqa: F401
     OS, IS_WINDOWS, IS_LINUX,
     get_processes, get_pid_name_map, get_listen_ports,
@@ -348,6 +348,136 @@ def audit(action: str, actor: str = "system", ip: str = "-", detail: str = ""):
         action,
         extra={"event_type": "audit", "actor": actor, "source_ip": ip, "detail": detail}
     )
+
+
+_WELCOME_TICKET_TTL = int(os.environ.get("IDS_WELCOME_TICKET_TTL", "900"))
+try:
+    _FREE_PREVIEW_MINUTES = max(1, min(60, int(os.environ.get("IDS_FREE_PREVIEW_MINUTES", "15"))))
+except ValueError:
+    _FREE_PREVIEW_MINUTES = 15
+_FREE_PREVIEW_SECONDS = _FREE_PREVIEW_MINUTES * 60
+_welcome_ticket_lock = threading.Lock()
+_welcome_tickets = {}
+
+
+def _purge_welcome_tickets(now: float | None = None):
+    now = now if now is not None else time.time()
+    expired = [
+        ticket for ticket, payload in _welcome_tickets.items()
+        if payload.get("expires_at", 0) <= now
+    ]
+    for ticket in expired:
+        _welcome_tickets.pop(ticket, None)
+
+
+def _issue_welcome_ticket(payload: dict) -> str:
+    now = time.time()
+    ticket = secrets.token_urlsafe(24)
+    repo_obj = globals().get("repo")
+    if repo_obj and hasattr(repo_obj, "save_onboarding_ticket"):
+        if repo_obj.save_onboarding_ticket(ticket, payload, _WELCOME_TICKET_TTL):
+            return ticket
+    with _welcome_ticket_lock:
+        _purge_welcome_tickets(now)
+        _welcome_tickets[ticket] = {**payload, "expires_at": now + _WELCOME_TICKET_TTL}
+    return ticket
+
+
+def _consume_welcome_ticket(ticket: str) -> dict | None:
+    if not ticket:
+        return None
+    repo_obj = globals().get("repo")
+    if repo_obj and hasattr(repo_obj, "consume_onboarding_ticket"):
+        payload = repo_obj.consume_onboarding_ticket(ticket)
+        if payload is not None:
+            return payload
+    now = time.time()
+    with _welcome_ticket_lock:
+        _purge_welcome_tickets(now)
+        payload = _welcome_tickets.pop(ticket, None)
+    if not payload:
+        return None
+    payload.pop("expires_at", None)
+    return payload
+
+
+def _build_welcome_context(*, demo: bool, token: str, name: str, plan_label: str,
+                           server_url: str) -> dict:
+    return {
+        "demo": demo,
+        "token": token,
+        "name": name,
+        "plan_label": plan_label,
+        "server_url": server_url,
+    }
+
+
+def _render_welcome_page(**context):
+    from flask import make_response, render_template
+
+    resp = make_response(render_template("welcome.html", **context))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    return resp
+
+
+def _clear_preview_cookies(resp):
+    for cookie_name in ("netguard_preview_mode", "netguard_preview_expires"):
+        resp.delete_cookie(cookie_name)
+    return resp
+
+
+def _apply_free_preview_cookies(resp, *, preview_token: str, seconds: int):
+    expires_at = int(time.time()) + seconds
+    resp.set_cookie(
+        "netguard_token",
+        preview_token,
+        httponly=True,
+        samesite="Lax",
+        max_age=seconds,
+        secure=_HTTPS_ONLY,
+    )
+    resp.set_cookie(
+        "netguard_preview_mode",
+        "free",
+        httponly=False,
+        samesite="Lax",
+        max_age=seconds,
+        secure=_HTTPS_ONLY,
+    )
+    resp.set_cookie(
+        "netguard_preview_expires",
+        str(expires_at),
+        httponly=False,
+        samesite="Lax",
+        max_age=seconds,
+        secure=_HTTPS_ONLY,
+    )
+    return resp
+
+
+def _ensure_demo_access_token(*, min_events: int = 50, reason: str = "demo") -> str | None:
+    if os.environ.get("IDS_DEMO_DISABLED", "false").lower() == "true":
+        return None
+    try:
+        from demo_seed import seed_demo, DEMO_TOKEN, DEMO_TENANT_ID
+        try:
+            existing = repo.get_tenant_by_token(DEMO_TOKEN)
+            event_count = repo.count(tenant_id=DEMO_TENANT_ID) if existing else 0
+        except Exception:
+            existing = None
+            event_count = 0
+        if not existing or event_count < min_events:
+            seed_demo(repo, n_events=350, verbose=False)
+            logger.info("Demo seed criado/refeito | reason=%s | ip=%s | events_before=%d",
+                        reason, request.remote_addr, event_count)
+        audit("DEMO_ACCESS", ip=request.remote_addr or "-",
+              detail=f"tenant={DEMO_TENANT_ID} events={event_count} reason={reason}")
+        return DEMO_TOKEN
+    except Exception as exc:
+        logger.warning("Demo seed falhou (%s): %s", reason, exc)
+        return None
 
 
 def _resolve_tenant_id(fallback: str = None) -> str:
@@ -1949,7 +2079,14 @@ if SOC_IMPORT_OK:
 @app.route("/api/enrich/<ip>")
 @auth
 def enrich_ip_route(ip):
-    """Enriquece um IP com AbuseIPDB + ThreatFox."""
+    """Enriquece um IP com o engine atual e faz fallback para o legado."""
+    if ENRICH_AVAILABLE and _enrichment:
+        try:
+            data = _enrichment.enrich(ip)
+            return jsonify(data)
+        except Exception:
+            pass
+
     result = enrich_ip(ip)
     return jsonify(result)
 
@@ -2095,19 +2232,6 @@ def dns_stats():
     return jsonify(_dns_monitor.stats())
 
 # ── IP Enrichment API (Shodan + WHOIS) ────────────────────────────
-
-@app.route("/api/enrich/<ip>")
-@auth
-def enrich_ip_api(ip):
-    # Use new enrichment engine if available, fallback to old
-    if ENRICH_AVAILABLE and _enrichment:
-        try:
-            data = _enrichment.enrich(ip)
-            return jsonify(data)
-        except Exception as e:
-            pass
-    # Fallback to original enrichment
-    return jsonify({"ip": ip, "error": "enrichment unavailable"})
 
 @app.route("/api/enrich/bulk", methods=["POST"])
 @auth
@@ -2940,9 +3064,8 @@ def _health_inner():
 
     # ── DB Adapter backend ─────────────────────────────────────────
     try:
-        from db_adapter import db_info as _db_info_fn
-        _dbi = _db_info_fn()
-        db_backend = _dbi.get("backend", "sqlite")
+        from storage.event_repository import USE_POSTGRES as _USE_STORAGE_PG
+        db_backend = "postgresql" if _USE_STORAGE_PG else "sqlite"
     except Exception:
         db_backend = "sqlite"
 
@@ -3031,7 +3154,7 @@ def login_page():
             result = verify_any_token(token, repo)
             if result["valid"]:
                 from flask import redirect as _redir
-                _next = validate_redirect_url(request.args.get("next", "/"))
+                _next = validate_redirect_url(request.args.get("next", "/dashboard"))
                 return _redir(_next)
     return render_template("login.html")
 
@@ -3095,6 +3218,7 @@ def auth_login():
         "type":   result["type"],
         "tenant": result.get("tenant"),
     }))
+    _clear_preview_cookies(resp)
     resp.set_cookie(
         "netguard_token",
         token,
@@ -3103,6 +3227,46 @@ def auth_login():
         max_age=8 * 3600,
         secure=_HTTPS_ONLY,  # True automaticamente quando HTTPS_ONLY=true
     )
+    return resp
+
+
+@app.route("/api/auth/free-preview", methods=["POST"])
+@_limit_login
+def auth_free_preview():
+    """
+    Inicia uma sessÃ£o curta de avaliaÃ§Ã£o com expiraÃ§Ã£o automÃ¡tica.
+    O token real continua fora da URL e a experiÃªncia pode usar dados demo.
+    """
+    from flask import make_response
+
+    data = request.get_json(silent=True) or {}
+    token = data.get("token", "").strip()
+    if not token:
+        return jsonify({"valid": False, "error": "Token ausente"}), 400
+
+    result = verify_any_token(token, repo)
+    if not result["valid"]:
+        return jsonify({"valid": False, "error": "Token invÃ¡lido"}), 401
+
+    tenant = result.get("tenant") or {}
+    preview_token = _ensure_demo_access_token(reason="free_preview") or token
+    source = "demo" if preview_token != token else "tenant"
+    actor = tenant.get("tenant_id", result.get("type", "unknown"))
+
+    logger.info("Free preview iniciado | ip=%s | actor=%s | seconds=%d | source=%s",
+                request.remote_addr or "unknown", actor, _FREE_PREVIEW_SECONDS, source)
+    audit("FREE_PREVIEW_START", actor=actor, ip=request.remote_addr or "-",
+          detail=f"seconds={_FREE_PREVIEW_SECONDS} source={source}")
+
+    resp = make_response(jsonify({
+        "valid": True,
+        "mode": "free_preview",
+        "minutes": _FREE_PREVIEW_MINUTES,
+        "redirect_to": "/dashboard",
+        "uses_demo_data": source == "demo",
+    }))
+    _clear_preview_cookies(resp)
+    _apply_free_preview_cookies(resp, preview_token=preview_token, seconds=_FREE_PREVIEW_SECONDS)
     return resp
 
 
@@ -3181,6 +3345,7 @@ def logout():
     from flask import make_response, redirect as _redir
     resp = make_response(_redir("/login"))
     resp.delete_cookie("netguard_token")
+    _clear_preview_cookies(resp)
     logger.info("Logout | ip=%s", request.remote_addr)
     audit("LOGOUT", ip=request.remote_addr or "-")
     return resp
@@ -3273,10 +3438,20 @@ def rotate_token_endpoint():
 def pricing():
     """Página pública de planos e preços."""
     from flask import render_template
-    cancelled = request.args.get("cancelled") == "1"
+    cancelled     = request.args.get("cancelled") == "1"
+    contact_ok    = request.args.get("contact") == "ok"
+    error         = request.args.get("error", "")
     contact_email = CONTACT_EMAIL if BILLING_OK else "contato@netguard.io"
-    return render_template("pricing.html", cancelled=cancelled,
-                           contact_email=contact_email, plans=PLANS if BILLING_OK else {})
+    stripe_active = BILLING_OK and billing_active()
+    return render_template(
+        "pricing.html",
+        cancelled     = cancelled,
+        contact_ok    = contact_ok,
+        error         = error,
+        contact_email = contact_email,
+        plans         = PLANS if BILLING_OK else {},
+        stripe_active = stripe_active,
+    )
 
 
 @app.route("/trial", methods=["POST"])
@@ -3344,20 +3519,29 @@ def trial():
             company=company, plan=plan_key, tenant_id=tenant_id)
 
     if request.is_json:
+        welcome_ticket = _issue_welcome_ticket(_build_welcome_context(
+            demo=True,
+            token=token,
+            name=name,
+            plan_label=plan_info["name"],
+            server_url=request.host_url.rstrip("/"),
+        ))
         return jsonify({
             "ok": True,
             "token": token,
             "tenant_id": tenant_id,
             "plan": plan_key,
-            "welcome_url": f"{request.host_url.rstrip('/')}/welcome?demo=1&plan={plan_key}"
-                           f"&token={token}&name={name}&email={email}",
+            "welcome_url": f"{request.host_url.rstrip('/')}/welcome?onboarding={welcome_ticket}",
         })
 
-    from urllib.parse import quote
-    return redirect(
-        f"/welcome?demo=1&plan={plan_key}&token={token}"
-        f"&name={quote(name)}&email={quote(email)}"
-    )
+    welcome_ticket = _issue_welcome_ticket(_build_welcome_context(
+        demo=True,
+        token=token,
+        name=name,
+        plan_label=plan_info["name"],
+        server_url=request.host_url.rstrip("/"),
+    ))
+    return redirect(f"/welcome?onboarding={welcome_ticket}", code=303)
 
 
 @app.route("/contact", methods=["POST"])
@@ -3403,26 +3587,84 @@ def contact():
 
 @app.route("/checkout", methods=["POST"])
 def checkout():
-    """Inicia sessão de checkout no Stripe."""
+    """
+    Inicia sessão de checkout no Stripe (modo produção) ou cria tenant demo.
+
+    Modo Stripe  → redireciona para checkout.stripe.com
+    Modo demo    → cria tenant direto e redireciona para /welcome
+    """
     from flask import redirect
-    if not BILLING_OK:
-        return jsonify({"error": "Billing module não disponível"}), 500
+    import traceback as _tb
+    import uuid as _uuid
 
-    plan    = request.form.get("plan", "pro")
-    email   = request.form.get("email", "").strip()
-    name    = request.form.get("name", "").strip()
-    company = request.form.get("company", "").strip()
+    # Funções de fallback quando billing.py não está disponível
+    def _gen_token():
+        import secrets as _s
+        return "ng_" + _s.token_urlsafe(32)
 
-    if not email or not name:
-        return jsonify({"error": "Nome e email são obrigatórios"}), 400
+    _MAX_HOSTS = {"free": 1, "pro": 20, "enterprise": 9999, "mssp": 9999}
 
-    url = create_checkout_session(plan, email, name, company)
-    if not url:
-        return jsonify({"error": "Falha ao criar sessão de checkout"}), 500
+    try:
+        plan    = sanitize(request.form.get("plan",    "pro").strip(),   20,  "plan")
+        email   = sanitize(request.form.get("email",   "").strip(),      200, "email")
+        name    = sanitize(request.form.get("name",    "").strip(),      100, "name")
+        company = sanitize(request.form.get("company", "").strip(),      200, "company")
 
-    audit("CHECKOUT_START", actor=email, ip=request.remote_addr or "-",
-          detail=f"plan={plan} company={company}")
-    return redirect(url)
+        if plan not in ("free", "pro", "enterprise", "mssp"):
+            plan = "pro"
+
+        if not email or not name:
+            return redirect("/pricing?error=missing_fields")
+
+        # Só usa Stripe se: billing ok + key configurada + price_id do plano configurado
+        stripe_on = False
+        if BILLING_OK and billing_active():
+            _plan_cfg = get_plan(plan)
+            if _plan_cfg.get("price_id"):   # price_id vazio → modo demo
+                stripe_on = True
+
+        if not stripe_on:
+            # ── Modo demo / sem Stripe ──────────────────────────────
+            token     = generate_api_token() if BILLING_OK else _gen_token()
+            max_hosts = (get_plan(plan)["max_hosts"] if BILLING_OK
+                         else _MAX_HOSTS.get(plan, 1))
+            tenant_id = str(_uuid.uuid4())
+
+            repo.create_tenant(
+                tenant_id = tenant_id,
+                name      = company or name,
+                token     = token,
+                plan      = plan,
+                max_hosts = max_hosts,
+            )
+            audit("TENANT_CHECKOUT_DEMO", actor=email, ip=request.remote_addr or "-",
+                  detail=f"plan={plan} company={company} tenant_id={tenant_id}")
+            _notify("TRIAL_CREATED", name=name, email=email,
+                    company=company, plan=plan, tenant_id=tenant_id)
+            send_welcome(name=name, email=email, token=token, plan=plan,
+                         app_url=request.host_url.rstrip("/"))
+            welcome_ticket = _issue_welcome_ticket(_build_welcome_context(
+                demo=True,
+                token=token,
+                name=name,
+                plan_label=get_plan(plan)["name"] if BILLING_OK else plan.upper(),
+                server_url=request.host_url.rstrip("/"),
+            ))
+            return redirect(f"/welcome?onboarding={welcome_ticket}", code=303)
+
+        # ── Modo Stripe real ────────────────────────────────────────
+        url = create_checkout_session(plan, email, name, company)
+        if not url:
+            logger.error("Stripe checkout falhou: plan=%s email=%s", plan, email)
+            return redirect("/pricing?error=checkout_failed")
+
+        audit("CHECKOUT_START", actor=email, ip=request.remote_addr or "-",
+              detail=f"plan={plan} company={company} mode=stripe")
+        return redirect(url)
+
+    except Exception as _exc:
+        logger.error("checkout() exception: %s\n%s", _exc, _tb.format_exc())
+        return redirect("/pricing?error=server")
 
 
 @app.route("/welcome")
@@ -3430,11 +3672,19 @@ def welcome():
     """
     Página de boas-vindas pós-pagamento.
     Dois modos:
-      ?session_id=cs_...  → pagamento real via Stripe
-      ?demo=1&...         → modo demo sem Stripe
+      ?onboarding=<ticket> → mostra onboarding seguro de uso único
+      ?session_id=cs_...   → pagamento real via Stripe
+      ?demo=1&...          → compatibilidade legada
     """
-    from flask import render_template
+    from flask import redirect
     import uuid
+
+    onboarding = request.args.get("onboarding", "").strip()
+    if onboarding:
+        payload = _consume_welcome_ticket(onboarding)
+        if not payload:
+            return redirect("/pricing?error=welcome_expired")
+        return _render_welcome_page(**payload)
 
     demo       = request.args.get("demo") == "1"
     session_id = request.args.get("session_id", "")
@@ -3444,39 +3694,41 @@ def welcome():
     email      = request.args.get("email", "")
 
     if demo:
-        # Modo demo: cria tenant simulado no banco
+        # Compatibilidade legada: recebe onboarding sensível via query string.
+        # Normalizamos imediatamente para um ticket opaco.
         if not token:
-            token = generate_api_token()
+            return redirect("/pricing?error=welcome_expired")
         plan_info = get_plan(plan_key)
-        tenant_id = str(uuid.uuid4())
-        try:
-            repo.create_tenant(
-                tenant_id = tenant_id,
-                name      = name or email or "Demo Tenant",
-                token     = token,
-                plan      = plan_key,
-                max_hosts = plan_info["max_hosts"],
-            )
-            logger.info("Tenant demo criado: %s | plan=%s | token=%s…",
-                        tenant_id, plan_key, token[:12])
-            audit("TENANT_CREATE", actor=email or name or tenant_id,
-                  ip=request.remote_addr or "-",
-                  detail=f"plan={plan_key} mode=demo tenant_id={tenant_id}")
-        except Exception as exc:
-            logger.error("Erro ao criar tenant demo: %s", exc)
+        existing = repo.get_tenant_by_token(token)
+        if not existing:
+            tenant_id = str(uuid.uuid4())
+            try:
+                repo.create_tenant(
+                    tenant_id = tenant_id,
+                    name      = name or email or "Demo Tenant",
+                    token     = token,
+                    plan      = plan_key,
+                    max_hosts = plan_info["max_hosts"],
+                )
+                logger.info("Tenant demo criado: %s | plan=%s | token=%s…",
+                            tenant_id, plan_key, token[:12])
+                audit("TENANT_CREATE", actor=email or name or tenant_id,
+                      ip=request.remote_addr or "-",
+                      detail=f"plan={plan_key} mode=demo tenant_id={tenant_id}")
+            except Exception as exc:
+                logger.error("Erro ao criar tenant demo: %s", exc)
 
-        return render_template(
-            "welcome.html",
-            demo       = True,
-            token      = token,
-            name       = name,
-            plan_label = plan_info["name"],
-            server_url = request.host_url.rstrip("/"),
-        )
+        welcome_ticket = _issue_welcome_ticket(_build_welcome_context(
+            demo=True,
+            token=token,
+            name=name,
+            plan_label=plan_info["name"],
+            server_url=request.host_url.rstrip("/"),
+        ))
+        return redirect(f"/welcome?onboarding={welcome_ticket}", code=303)
 
     # Pagamento real: busca dados no Stripe
     if not session_id:
-        from flask import redirect
         return redirect("/pricing")
 
     if not BILLING_OK:
@@ -3496,6 +3748,16 @@ def welcome():
     stripe_customer_id      = (stripe_session.get("customer") or {}).get("id", "")
     stripe_subscription_id  = (stripe_session.get("subscription") or {}).get("id", "")
 
+    existing = None
+    if stripe_subscription_id and hasattr(repo, "get_tenant_by_stripe_subscription_id"):
+        existing = repo.get_tenant_by_stripe_subscription_id(stripe_subscription_id)
+    if not existing and stripe_customer_id and hasattr(repo, "get_tenant_by_stripe_customer_id"):
+        existing = repo.get_tenant_by_stripe_customer_id(stripe_customer_id)
+    if existing:
+        logger.info("Stripe session já provisionada | customer=%s | subscription=%s",
+                    stripe_customer_id, stripe_subscription_id)
+        return redirect("/login?provisioned=1")
+
     tenant_id = str(uuid.uuid4())
     try:
         repo.create_tenant(
@@ -3504,6 +3766,8 @@ def welcome():
             token     = token,
             plan      = plan_key,
             max_hosts = plan_info["max_hosts"],
+            stripe_customer_id = stripe_customer_id,
+            stripe_subscription_id = stripe_subscription_id,
         )
         logger.info("Tenant criado via Stripe: %s | plan=%s | cust=%s",
                     tenant_id, plan_key, stripe_customer_id)
@@ -3513,14 +3777,14 @@ def welcome():
     except Exception as exc:
         logger.error("Erro ao criar tenant: %s", exc)
 
-    return render_template(
-        "welcome.html",
-        demo       = False,
-        token      = token,
-        name       = name,
-        plan_label = plan_info["name"],
-        server_url = request.host_url.rstrip("/"),
-    )
+    welcome_ticket = _issue_welcome_ticket(_build_welcome_context(
+        demo=False,
+        token=token,
+        name=name,
+        plan_label=plan_info["name"],
+        server_url=request.host_url.rstrip("/"),
+    ))
+    return redirect(f"/welcome?onboarding={welcome_ticket}", code=303)
 
 
 @app.route("/billing/portal")
@@ -3532,6 +3796,7 @@ def billing_portal():
         request.args.get("token")
         or request.headers.get("X-API-Token", "")
         or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        or request.cookies.get("netguard_token", "")
     )
     if not token:
         return jsonify({"error": "Token de API necessário"}), 401
@@ -3639,6 +3904,30 @@ def demo_access():
     from flask import make_response, redirect as _redir  # noqa: F401
     if os.environ.get("IDS_DEMO_DISABLED", "false").lower() == "true":
         return redirect("/pricing")
+
+    demo_token = _ensure_demo_access_token(reason="demo_route")
+    if not demo_token:
+        try:
+            from demo_seed import DEMO_TOKEN as _DEMO_TOKEN
+            demo_token = _DEMO_TOKEN
+        except Exception:
+            demo_token = "ng_DEMO00000000000000000000000000"
+
+    dashboard_path = pathlib.Path(__file__).parent / "dashboard.html"
+    if not dashboard_path.exists():
+        return redirect("/login")
+
+    html = dashboard_path.read_text(encoding="utf-8")
+    resp = make_response(html, 200)
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    _clear_preview_cookies(resp)
+    resp.set_cookie(
+        "netguard_token", demo_token,
+        httponly=True, samesite="Lax",
+        max_age=4 * 3600,
+        secure=_HTTPS_ONLY,
+    )
+    return resp
 
     try:
         from demo_seed import seed_demo, DEMO_TOKEN, DEMO_TENANT_ID
@@ -4383,6 +4672,7 @@ def trial_access(token):
     html = _render_trial_dashboard(trial, result["remaining_seconds"])
     resp = make_response(html, 200)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    _clear_preview_cookies(resp)
     resp.set_cookie("netguard_token", trial_token_cookie,
                     httponly=True, samesite="Lax", max_age=result["remaining_seconds"],
                     secure=_HTTPS_ONLY)
@@ -4492,9 +4782,9 @@ def admin_tenants_list():
         tenants = []
         for t in tenants_raw:
             td = dict(t) if not isinstance(t, dict) else t
-            # Mascara token — só exibe prefixo
-            token = td.get("token", "")
-            td["token"] = token[:16] if token else ""
+            # O repositório já retorna apenas prefixos seguros; reforçamos aqui.
+            td.pop("token_hash", None)
+            td["token"] = td.get("token_prefix") or td.get("token", "")
             td["host_count"] = len(_ids_engines.get(td.get("tenant_id", ""), {__class__: None}).__dict__) \
                 if td.get("tenant_id") in _ids_engines else 0
             tenants.append(td)
@@ -4557,8 +4847,8 @@ def admin_rotate_tenant_token(tid):
     """Rotaciona o token de um tenant específico (ação admin)."""
     try:
         old_row = repo.get_tenant_by_id(tid) if hasattr(repo, "get_tenant_by_id") else None
-        old_tok = (dict(old_row).get("token","") if old_row else "")
-        new_token, new_hash = rotate_token(old_tok, generate_api_token)
+        old_prefix = (dict(old_row).get("token_prefix","") if old_row else "")
+        new_token, new_hash = rotate_token(old_prefix, generate_api_token)
         repo.update_tenant_token(tid, new_token, new_hash)
         audit("TOKEN_ROTATED", actor=tid, ip=request.remote_addr or "-",
               detail=f"by=admin new_prefix={new_token[:8]}")

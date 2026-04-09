@@ -2994,9 +2994,65 @@ function scrollTabs(delta){
 // Also update on tab click scroll
 // ── Trial / Demo mode detection ───────────────────────────────────
 (function initBanners(){
+  function readCookie(name){
+    const prefix = `${name}=`;
+    const item = document.cookie.split(';')
+      .map(c => c.trim())
+      .find(c => c.startsWith(prefix));
+    return item ? decodeURIComponent(item.slice(prefix.length)) : '';
+  }
+
+  function renderTimedBanner(config){
+    const ban   = document.getElementById('trial-banner');
+    const co    = document.getElementById('trial-company');
+    const label = document.querySelector('#trial-banner span');
+    const link  = document.querySelector('#trial-banner a');
+    if(ban){ ban.style.display = 'flex'; }
+    if(label){ label.textContent = config.label || 'Trial NetGuard IDS'; }
+    if(co){ co.textContent = config.company || ''; }
+    if(link){
+      link.href = config.linkHref || '/pricing';
+      link.textContent = config.linkLabel || 'Ver planos ->';
+    }
+
+    let rem = Math.max(0, config.remainingSeconds || 0);
+    function tick(){
+      if(rem <= 0){
+        document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0d1117;color:#e6edf3;text-align:center;flex-direction:column;gap:16px;font-family:system-ui">
+          <div style="font-size:3rem">!</div>
+          <h2>${config.expiredTitle || 'Sua sessao expirou'}</h2>
+          <p style="color:#8b949e">${config.expiredMessage || 'Entre novamente para continuar usando o NetGuard IDS.'}</p>
+          <a href="${config.expiredHref || '/login'}" style="background:#1f6feb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600">${config.expiredCta || 'Entrar novamente ->'}</a>
+        </div>`;
+        return;
+      }
+      const h  = Math.floor(rem/3600);
+      const m  = Math.floor((rem%3600)/60);
+      const s  = rem%60;
+      const el = document.getElementById('trial-countdown');
+      if(el) el.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      const ban2 = document.getElementById('trial-banner');
+      if(ban2 && rem < 3600) ban2.style.background = 'linear-gradient(90deg,#b91c1c 0%,#f85149 100%)';
+      rem--;
+      setTimeout(tick, 1000);
+    }
+    tick();
+  }
   // Trial mode — injetado pelo servidor em /trial/<token>
   if(window.__TRIAL__){
     const t   = window.__TRIAL__;
+    renderTimedBanner({
+      label: t.label || 'Trial NetGuard IDS',
+      company: t.company || t.name || t.email,
+      remainingSeconds: t.remainingSeconds,
+      linkHref: t.linkHref || '/pricing',
+      linkLabel: t.linkLabel || 'Assinar agora ->',
+      expiredTitle: t.expiredTitle || 'Seu trial expirou',
+      expiredMessage: t.expiredMessage || 'Assine para continuar usando o NetGuard IDS.',
+      expiredHref: t.expiredHref || '/pricing',
+      expiredCta: t.expiredCta || 'Ver planos ->',
+    });
+    return;
     const ban = document.getElementById('trial-banner');
     const co  = document.getElementById('trial-company');
     if(ban){ ban.style.display='flex'; }
@@ -3031,6 +3087,24 @@ function scrollTabs(delta){
   }
 
   // Demo mode — detecta via API
+  const previewMode = readCookie('netguard_preview_mode');
+  const previewExpires = parseInt(readCookie('netguard_preview_expires') || '0', 10);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if(previewMode === 'free' && previewExpires > nowSeconds){
+    renderTimedBanner({
+      label: 'Modo Free temporario',
+      company: 'dados de exemplo desbloqueados',
+      remainingSeconds: previewExpires - nowSeconds,
+      linkHref: '/login',
+      linkLabel: 'Entrar com meu token ->',
+      expiredTitle: 'Seu modo free expirou',
+      expiredMessage: 'Entre com seu token para continuar usando o painel real.',
+      expiredHref: '/login',
+      expiredCta: 'Entrar com meu token ->',
+    });
+    return;
+  }
+
   (async function detectDemo(){
     try {
       const r = await fetch('/api/health');

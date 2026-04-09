@@ -196,17 +196,6 @@
 </div>
 
 <script>
-  // Pré-preenche o token se vier da welcome page
-  (function() {
-    const params = new URLSearchParams(location.search);
-    const t = params.get('token');
-    if (t) {
-      document.getElementById('token-input').value = t;
-      // Auto-login direto se token já veio preenchido
-      validateAndRedirect(t);
-    }
-  })();
-
   function toggleVis() {
     const inp = document.getElementById('token-input');
     inp.type = inp.type === 'password' ? 'text' : 'password';
@@ -242,7 +231,7 @@
     .then(data => {
       if (data.valid) {
         // Cookie já foi setado pelo servidor — redireciona
-        const next = new URLSearchParams(location.search).get('next') || '/';
+        const next = new URLSearchParams(location.search).get('next') || '/dashboard';
         window.location.href = next;
       } else {
         showError();

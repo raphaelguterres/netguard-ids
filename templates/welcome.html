@@ -180,6 +180,14 @@
     .btn:hover { opacity: 0.85; }
     .btn-primary { background: #238636; color: #fff; }
     .btn-outline  { background: transparent; border: 1px solid #30363d; color: #e6edf3; }
+    #btn-dashboard,
+    .actions a[href="/billing/portal"] { display: none; }
+    .actions-note {
+      margin-top: 0.9rem;
+      font-size: 0.82rem;
+      color: #8b949e;
+      line-height: 1.5;
+    }
 
     .demo-notice {
       background: #1c1e12;
@@ -261,9 +269,15 @@ netguard-agent</pre>
   </div>
 
   <div class="actions">
+    <a id="btn-preview" href="/dashboard" class="btn btn-primary">Testar painel agora (15 min) -></a>
+    <a id="btn-login" href="/dashboard" class="btn btn-outline">Entrar com meu token</a>
     <a id="btn-dashboard" href="/login" class="btn btn-primary">Acessar painel →</a>
     <a href="/billing/portal" class="btn btn-outline">Gerenciar billing</a>
   </div>
+
+  <p class="actions-note">
+    O teste rapido abre um modo free temporario com dados de exemplo. Para entrar na sua conta real imediatamente, use o login com token.
+  </p>
 
   <script>
     // Login via POST — token nunca vai na URL (segurança)
@@ -299,6 +313,76 @@ netguard-agent</pre>
         btn.removeAttribute('href');
         btn.style.cursor = 'pointer';
         btn.addEventListener('click', function(e) { e.preventDefault(); loginAndRedirect(); });
+      }
+    })();
+  </script>
+  <script>
+    function setBusy(btn, text) {
+      if (!btn) return;
+      btn.textContent = text;
+      btn.style.pointerEvents = 'none';
+      btn.style.opacity = '0.75';
+    }
+
+    function getCsrfToken() {
+      return document.cookie.split(';')
+        .map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
+    }
+
+    function loginWithToken() {
+      const btn = document.getElementById('btn-login');
+      const token = document.getElementById('token-val').textContent.trim();
+      if (!token) { window.location.href = '/login'; return; }
+
+      setBusy(btn, 'Entrando...');
+
+      fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+        credentials: 'same-origin',
+        body: JSON.stringify({ token })
+      })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(data => {
+        if (data.valid) { window.location.href = '/dashboard'; }
+        else { window.location.href = '/login'; }
+      })
+      .catch(() => { window.location.href = '/login'; });
+    }
+
+    function startFreePreview() {
+      const btn = document.getElementById('btn-preview');
+      const token = document.getElementById('token-val').textContent.trim();
+      if (!token) { window.location.href = '/login'; return; }
+
+      setBusy(btn, 'Abrindo preview...');
+
+      fetch('/api/auth/free-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+        credentials: 'same-origin',
+        body: JSON.stringify({ token })
+      })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(data => {
+        if (data.valid) { window.location.href = data.redirect_to || '/dashboard'; }
+        else { loginWithToken(); }
+      })
+      .catch(() => { loginWithToken(); });
+    }
+
+    (function() {
+      const previewBtn = document.getElementById('btn-preview');
+      const loginBtn = document.getElementById('btn-login');
+      if (previewBtn) {
+        previewBtn.removeAttribute('href');
+        previewBtn.style.cursor = 'pointer';
+        previewBtn.addEventListener('click', function(e) { e.preventDefault(); startFreePreview(); });
+      }
+      if (loginBtn) {
+        loginBtn.removeAttribute('href');
+        loginBtn.style.cursor = 'pointer';
+        loginBtn.addEventListener('click', function(e) { e.preventDefault(); loginWithToken(); });
       }
     })();
   </script>

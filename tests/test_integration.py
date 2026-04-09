@@ -113,6 +113,55 @@ class TestTrialFlow(BaseIntegration):
             self.assertTrue(d["token"].startswith("ng_"))
             return d["token"]
 
+    def test_trial_welcome_url_nao_expoe_token_em_query(self):
+        r = self.post_json("/trial", {
+            "name": "Sem Vazamento",
+            "email": "safe@test.com",
+            "company": "SafeCorp",
+            "plan": "pro",
+        })
+        self.assertIn(r.status_code, (200, 201))
+        d = json.loads(r.data)
+        self.assertIn("welcome_url", d)
+        self.assertIn("onboarding=", d["welcome_url"])
+        self.assertNotIn("token=", d["welcome_url"])
+        self.assertNotIn(d["token"], d["welcome_url"])
+        self.assertNotIn("email=", d["welcome_url"])
+
+    def test_trial_form_redirect_usa_ticket_opaco(self):
+        r = self.client.post("/trial", data={
+            "name": "Form User",
+            "email": "form@test.com",
+            "company": "SafeCorp",
+            "plan": "pro",
+        }, follow_redirects=False)
+        self.assertIn(r.status_code, (302, 303))
+        location = r.headers.get("Location", "")
+        self.assertIn("/welcome?onboarding=", location)
+        self.assertNotIn("token=", location)
+        self.assertNotIn("email=", location)
+
+    def test_welcome_ticket_e_uso_unico_e_sem_cache(self):
+        r = self.post_json("/trial", {
+            "name": "Single Use",
+            "email": "single@test.com",
+            "company": "SafeCorp",
+            "plan": "pro",
+        })
+        self.assertEqual(r.status_code, 200)
+        d = json.loads(r.data)
+        welcome_url = d["welcome_url"]
+
+        first = self.client.get(welcome_url, follow_redirects=False)
+        self.assertEqual(first.status_code, 200)
+        self.assertIn(d["token"].encode(), first.data)
+        self.assertIn("no-store", first.headers.get("Cache-Control", ""))
+        self.assertEqual(first.headers.get("Referrer-Policy"), "no-referrer")
+
+        second = self.client.get(welcome_url, follow_redirects=False)
+        self.assertIn(second.status_code, (302, 303))
+        self.assertIn("/pricing?error=welcome_expired", second.headers.get("Location", ""))
+
     def test_trial_email_invalido_nao_quebra_app(self):
         """App não deve quebrar com email malformado."""
         r = self.post_json("/trial", {
@@ -179,6 +228,27 @@ class TestAuthFlow(BaseIntegration):
             has_ng = any("netguard_token" in c for c in cookies)
             self.assertTrue(has_ng, "Cookie netguard_token não foi setado")
 
+    def test_free_preview_seta_cookies_temporarios(self):
+        r = self.post_json("/api/auth/free-preview", {"token": self.token})
+        self.assertEqual(r.status_code, 200)
+        d = json.loads(r.data)
+        self.assertTrue(d.get("valid"))
+        self.assertEqual(d.get("redirect_to"), "/dashboard")
+        self.assertGreaterEqual(d.get("minutes", 0), 1)
+
+        cookies = r.headers.getlist("Set-Cookie")
+        self.assertTrue(any("netguard_token=" in c for c in cookies))
+        self.assertTrue(any("netguard_preview_mode=free" in c for c in cookies))
+        self.assertTrue(any("netguard_preview_expires=" in c for c in cookies))
+
+    def test_login_normal_limpa_preview_cookies(self):
+        self.post_json("/api/auth/free-preview", {"token": self.token})
+        r = self.post_json("/api/auth/login", {"token": self.token})
+        self.assertEqual(r.status_code, 200)
+        cookies = r.headers.getlist("Set-Cookie")
+        self.assertTrue(any("netguard_preview_mode=;" in c for c in cookies))
+        self.assertTrue(any("netguard_preview_expires=;" in c for c in cookies))
+
     def test_validate_token_valido(self):
         r = self.post_json("/api/auth/validate", {"token": self.token})
         self.assertIn(r.status_code, (200, 401))
@@ -191,6 +261,16 @@ class TestAuthFlow(BaseIntegration):
 # ══════════════════════════════════════════════════════════════════
 # 3. DETECÇÃO DE EVENTOS
 # ══════════════════════════════════════════════════════════════════
+
+@skip_if_no_app
+class TestHealthFlow(BaseIntegration):
+
+    def test_health_reflete_backend_do_storage(self):
+        r = self.client.get("/health")
+        self.assertEqual(r.status_code, 200)
+        d = json.loads(r.data)
+        self.assertEqual(d.get("db_backend"), "sqlite")
+
 
 @skip_if_no_app
 class TestDetectionFlow(BaseIntegration):
