@@ -3119,6 +3119,45 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 <style>
 .ob-step { flex:1; text-align:center; padding:5px 8px; border-radius:20px; font-size:.72rem; color:rgba(255,255,255,.5); background:rgba(255,255,255,.08); cursor:default; }
 .ob-step.on { background:rgba(255,255,255,.2); color:#fff; font-weight:600; }
+
+/* ── Shared form utilities ──────────────────────────────────────── */
+.full-width  { width:100% !important; }
+.span-full   { grid-column: 1 / -1; }
+.push-right  { margin-left:auto; }
+.field-label { font-size:.75rem; color:var(--txt3); margin-bottom:4px; font-weight:500; }
+.hint-muted  { font-size:.7rem; color:var(--txt3); margin-top:3px; }
+.hint-accent { font-size:.7rem; color:var(--blu);  margin-top:3px; min-height:14px; }
+.action-row  { display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap; }
+.webhook-doc-link { font-size:.75rem; color:var(--txt3); text-decoration:none; }
+.webhook-doc-link:hover { color:var(--blu); }
+.primary-action { background:var(--blu) !important; color:#fff !important; font-weight:600; }
+.primary-action:hover { background:var(--acc) !important; }
+
+/* ── Trial & Webhook page layout ─────────────────────────────────── */
+#p-trials .page-inner,
+#p-webhooks .page-inner {
+  padding:20px; width:100%; max-width:960px; margin:0 auto; overflow-y:auto;
+}
+.stat-chip {
+  background:var(--s2); border:1px solid var(--b2); border-radius:8px;
+  padding:10px 16px; flex:1; text-align:center; min-width:80px;
+}
+.stat-chip .val { font-size:1.4rem; font-weight:800; }
+.stat-chip .lbl { font-size:.72rem; color:var(--txt3); margin-top:2px; }
+
+/* ── Trial banner countdown ─────────────────────────────────────── */
+#trial-banner { transition: background .5s; }
+
+/* ── Webhook card ────────────────────────────────────────────────── */
+.wh-card {
+  background:var(--s2); border:1px solid var(--b2); border-radius:8px;
+  padding:14px 16px; margin-bottom:10px;
+}
+.wh-card-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.wh-url-preview {
+  font-size:.7rem; color:var(--txt3); margin-top:6px;
+  font-family:var(--mono); word-break:break-all;
+}
 </style>
 
 <script>
