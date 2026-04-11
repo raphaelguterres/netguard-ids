@@ -3600,6 +3600,7 @@ def auth_validate():
 
 @app.route("/api/auth/rotate", methods=["POST"])
 @auth
+@csrf_protect
 @require_role("admin")
 def rotate_token_endpoint():
     """
@@ -4032,22 +4033,15 @@ def welcome():
 
 
 @app.route("/billing/portal")
+@auth
+@require_role("admin")
 def billing_portal():
     """Redireciona para o portal de auto-atendimento do Stripe."""
-    from flask import redirect
-    # Identifica tenant pelo token de API enviado como query param ou header
-    token = (
-        request.args.get("token")
-        or request.headers.get("X-API-Token", "")
-        or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-        or request.cookies.get("netguard_token", "")
-    )
-    if not token:
-        return jsonify({"error": "Token de API necessário"}), 401
-
-    tenant = repo.get_tenant_by_token(token)
+    from flask import redirect, g as _g
+    # Tenant identificado via g.tenant_id injetado pelo before_request
+    tenant = repo.get_tenant_by_id(getattr(_g, "tenant_id", None))
     if not tenant:
-        return jsonify({"error": "Token inválido"}), 401
+        return jsonify({"error": "Tenant não encontrado"}), 404
 
     stripe_customer_id = tenant.get("stripe_customer_id", "")
     if not stripe_customer_id:
@@ -4412,6 +4406,7 @@ def ioc_list():
 @app.route("/api/ioc", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def ioc_add():
     """Adiciona um IOC manualmente."""
     if not IOC_AVAILABLE:
@@ -4442,6 +4437,7 @@ def ioc_add():
 @app.route("/api/ioc/<ioc_id>", methods=["DELETE"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def ioc_delete(ioc_id):
     """Remove um IOC."""
     if not IOC_AVAILABLE:
@@ -4454,6 +4450,7 @@ def ioc_delete(ioc_id):
 @app.route("/api/ioc/<ioc_id>/toggle", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def ioc_toggle(ioc_id):
     """Ativa ou desativa um IOC."""
     if not IOC_AVAILABLE:
@@ -4468,6 +4465,7 @@ def ioc_toggle(ioc_id):
 @app.route("/api/ioc/import", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def ioc_import():
     """Importa IOCs via CSV (multipart/form-data ou raw bytes)."""
     if not IOC_AVAILABLE:
@@ -4677,6 +4675,7 @@ def custom_rules_list():
 @app.route("/api/rules/custom", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def custom_rules_create():
     if not CUSTOM_RULES_AVAILABLE:
         return jsonify({"error": "Custom Rules não disponível"}), 503
@@ -4714,6 +4713,7 @@ def custom_rules_get(rule_id):
 @app.route("/api/rules/custom/<rule_id>", methods=["PUT"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def custom_rules_update(rule_id):
     if not CUSTOM_RULES_AVAILABLE:
         return jsonify({"error": "não disponível"}), 503
@@ -4731,6 +4731,7 @@ def custom_rules_update(rule_id):
 @app.route("/api/rules/custom/<rule_id>", methods=["DELETE"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def custom_rules_delete(rule_id):
     if not CUSTOM_RULES_AVAILABLE:
         return jsonify({"error": "não disponível"}), 503
@@ -4742,6 +4743,7 @@ def custom_rules_delete(rule_id):
 @app.route("/api/rules/custom/<rule_id>/toggle", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def custom_rules_toggle(rule_id):
     if not CUSTOM_RULES_AVAILABLE:
         return jsonify({"error": "não disponível"}), 503
@@ -5329,6 +5331,7 @@ def _get_webhook_engine():
 
 @app.route("/api/webhooks", methods=["GET"])
 @auth
+@require_role("analyst", "admin")
 def webhooks_list():
     if not WEBHOOK_AVAILABLE:
         return jsonify({"error": "Webhook Engine indisponível"}), 503
@@ -5337,6 +5340,7 @@ def webhooks_list():
 @app.route("/api/webhooks", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def webhooks_create():
     if not WEBHOOK_AVAILABLE:
         return jsonify({"error": "Webhook Engine indisponível"}), 503
@@ -5349,6 +5353,7 @@ def webhooks_create():
 @app.route("/api/webhooks/<int:wid>", methods=["PUT"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def webhooks_update(wid):
     if not WEBHOOK_AVAILABLE:
         return jsonify({"error": "Webhook Engine indisponível"}), 503
@@ -5358,6 +5363,7 @@ def webhooks_update(wid):
 @app.route("/api/webhooks/<int:wid>", methods=["DELETE"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def webhooks_delete(wid):
     if not WEBHOOK_AVAILABLE:
         return jsonify({"error": "Webhook Engine indisponível"}), 503
@@ -5367,6 +5373,7 @@ def webhooks_delete(wid):
 @app.route("/api/webhooks/<int:wid>/toggle", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def webhooks_toggle(wid):
     if not WEBHOOK_AVAILABLE:
         return jsonify({"error": "Webhook Engine indisponível"}), 503
@@ -5376,6 +5383,7 @@ def webhooks_toggle(wid):
 @app.route("/api/webhooks/<int:wid>/test", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def webhooks_test(wid):
     if not WEBHOOK_AVAILABLE:
         return jsonify({"error": "Webhook Engine indisponível"}), 503
@@ -5384,6 +5392,7 @@ def webhooks_test(wid):
 
 @app.route("/api/webhooks/<int:wid>/logs", methods=["GET"])
 @auth
+@require_role("analyst", "admin")
 def webhooks_logs(wid):
     if not WEBHOOK_AVAILABLE:
         return jsonify({"error": "Webhook Engine indisponível"}), 503
@@ -5445,6 +5454,7 @@ def ti_lookup():
 @app.route("/api/ti/feeds/<feed_name>/refresh", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def ti_refresh_feed(feed_name):
     if not TI_AVAILABLE:
         return jsonify({"available": False}), 503
@@ -5459,6 +5469,7 @@ def ti_refresh_feed(feed_name):
 @app.route("/api/ti/feeds/refresh_all", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def ti_refresh_all():
     if not TI_AVAILABLE:
         return jsonify({"available": False}), 503
@@ -5502,6 +5513,7 @@ def playbooks_incidents():
 @app.route("/api/playbooks/incidents", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def playbooks_open_incident():
     if not PLAYBOOK_AVAILABLE:
         return jsonify({"available": False}), 503
@@ -5532,6 +5544,7 @@ def playbooks_get_incident(incident_id):
 @app.route("/api/playbooks/incidents/<incident_id>/status", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def playbooks_update_status(incident_id):
     if not PLAYBOOK_AVAILABLE:
         return jsonify({"available": False}), 503
@@ -5544,6 +5557,7 @@ def playbooks_update_status(incident_id):
 @app.route("/api/playbooks/incidents/<incident_id>/steps/<int:step_order>", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def playbooks_update_step(incident_id, step_order):
     if not PLAYBOOK_AVAILABLE:
         return jsonify({"available": False}), 503
@@ -5573,6 +5587,7 @@ def forensics_list():
 @app.route("/api/forensics/snapshots", methods=["POST"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def forensics_capture():
     if not FORENSICS_AVAILABLE:
         return jsonify({"available": False}), 503
@@ -5604,6 +5619,7 @@ def forensics_get(snapshot_id):
 @app.route("/api/forensics/snapshots/<snapshot_id>", methods=["DELETE"])
 @auth
 @csrf_protect
+@require_role("analyst", "admin")
 def forensics_delete(snapshot_id):
     if not FORENSICS_AVAILABLE:
         return jsonify({"available": False}), 503

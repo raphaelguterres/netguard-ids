@@ -91,9 +91,8 @@ def _extract_token() -> str:
     api_token = request.headers.get("X-API-Token", "").strip()
     if api_token:
         return api_token
-    t = request.args.get("token", "").strip()
-    if t:
-        return t
+    # NOTE: token-in-query-string removed — leaks in server logs + browser history.
+    # Única exceção permitida: ticket opaco de onboarding de uso único (handled separately).
     return request.cookies.get("netguard_token", "").strip()
 
 

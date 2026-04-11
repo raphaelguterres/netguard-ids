@@ -608,5 +608,373 @@ class TestGetBfGuard(unittest.TestCase):
             os.unlink(tmp.name)
 
 
+# ══════════════════════════════════════════════════════════════════
+# 12. SSRF GUARD — _validate_webhook_url
+# ══════════════════════════════════════════════════════════════════
+
+class TestSSRFGuard(unittest.TestCase):
+    """
+    Verifica que _validate_webhook_url levanta ValueError para destinos
+    privados / reservados e aceita URLs públicas legítimas.
+    """
+
+    def _import(self):
+        import importlib, sys
+        sys.path.insert(0, os.path.join(ROOT, "engine"))
+        mod = importlib.import_module("webhook_engine")
+        return mod._validate_webhook_url
+
+    def test_url_publica_https_valida(self):
+        validate = self._import()
+        # Deve não levantar — hooks.slack.com é público
+        try:
+            validate("https://hooks.slack.com/services/T000/B000/XXXX")
+        except ValueError as e:
+            # Aceita falha de DNS em CI sem acesso à rede
+            if "SSRF" in str(e):
+                self.fail(f"URL pública bloqueada por SSRF: {e}")
+
+    def test_localhost_bloqueado(self):
+        validate = self._import()
+        with self.assertRaises(ValueError, msg="localhost deve ser bloqueado"):
+            validate("http://localhost:5000/internal")
+
+    def test_loopback_127_bloqueado(self):
+        validate = self._import()
+        with self.assertRaises(ValueError):
+            validate("http://127.0.0.1:8080/steal")
+
+    def test_rfc1918_10_x_bloqueado(self):
+        validate = self._import()
+        with self.assertRaises(ValueError):
+            validate("http://10.0.0.1/internal")
+
+    def test_rfc1918_192_168_bloqueado(self):
+        validate = self._import()
+        with self.assertRaises(ValueError):
+            validate("http://192.168.1.1/admin")
+
+    def test_rfc1918_172_16_bloqueado(self):
+        validate = self._import()
+        with self.assertRaises(ValueError):
+            validate("http://172.16.0.1/secret")
+
+    def test_link_local_169_254_bloqueado(self):
+        """169.254.169.254 é o endpoint de metadados de cloud (AWS/GCP/Azure)."""
+        validate = self._import()
+        with self.assertRaises(ValueError):
+            validate("http://169.254.169.254/latest/meta-data/iam/security-credentials/")
+
+    def test_scheme_invalido_bloqueado(self):
+        validate = self._import()
+        with self.assertRaises(ValueError):
+            validate("file:///etc/passwd")
+
+    def test_ftp_scheme_bloqueado(self):
+        validate = self._import()
+        with self.assertRaises(ValueError):
+            validate("ftp://example.com/data")
+
+    def test_url_vazia_bloqueada(self):
+        validate = self._import()
+        with self.assertRaises(ValueError):
+            validate("")
+
+    def test_host_local_bloqueado(self):
+        validate = self._import()
+        with self.assertRaises(ValueError):
+            validate("http://myserver.local/webhook")
+
+    def test_sem_hostname_bloqueado(self):
+        validate = self._import()
+        with self.assertRaises(ValueError):
+            validate("https:///no-host")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 13. SECRET MASKING — WebhookEngine._row_safe
+# ══════════════════════════════════════════════════════════════════
+
+class TestWebhookSecretMasking(unittest.TestCase):
+    """
+    Verifica que _row_safe mascara o campo secret e remove a URL completa.
+    """
+
+    def _engine_class(self):
+        import importlib, sys
+        sys.path.insert(0, os.path.join(ROOT, "engine"))
+        mod = importlib.import_module("webhook_engine")
+        return mod.WebhookEngine
+
+    def test_secret_mascarado_em_row_safe(self):
+        WH = self._engine_class()
+        fake_row = {
+            "id": 1, "tenant_id": "t1", "name": "Slack",
+            "url": "https://hooks.slack.com/services/T000/B000/VERYSECRETTOKEN",
+            "type": "slack", "min_severity": "high",
+            "event_types": "[]", "enabled": 1,
+            "secret": "mysupersecret",
+            "created_at": "2024-01-01T00:00:00Z",
+            "last_hit": None, "hit_count": 0, "fail_count": 0,
+        }
+        result = WH._row_safe(fake_row)
+        # Secret deve estar mascarado
+        self.assertNotEqual(result.get("secret"), "mysupersecret")
+        self.assertIn("****", result.get("secret", ""))
+
+    def test_url_completa_removida_de_row_safe(self):
+        WH = self._engine_class()
+        full_url = "https://hooks.slack.com/services/T000/B000/VERYSECRETTOKEN"
+        fake_row = {
+            "id": 1, "tenant_id": "t1", "name": "Slack",
+            "url": full_url, "type": "slack", "min_severity": "high",
+            "event_types": "[]", "enabled": 1, "secret": "s3cr3t",
+            "created_at": "2024-01-01T00:00:00Z",
+            "last_hit": None, "hit_count": 0, "fail_count": 0,
+        }
+        result = WH._row_safe(fake_row)
+        # URL completa não deve estar no resultado
+        self.assertNotIn("url", result)
+        # url_display deve estar presente e não conter o path secreto
+        self.assertIn("url_display", result)
+        self.assertNotIn("/services/T000/B000/VERYSECRETTOKEN", result["url_display"])
+
+    def test_secret_vazio_permanece_vazio(self):
+        WH = self._engine_class()
+        fake_row = {
+            "id": 1, "tenant_id": "t1", "name": "Teams",
+            "url": "https://outlook.office.com/webhook/abc", "type": "teams",
+            "min_severity": "high", "event_types": "[]", "enabled": 1,
+            "secret": "", "created_at": "2024-01-01T00:00:00Z",
+            "last_hit": None, "hit_count": 0, "fail_count": 0,
+        }
+        result = WH._row_safe(fake_row)
+        self.assertEqual(result.get("secret"), "")
+
+    def test_row_real_preserva_secret(self):
+        """_row() (uso interno) NÃO deve mascarar o secret."""
+        WH = self._engine_class()
+        fake_row = {
+            "id": 1, "tenant_id": "t1", "name": "Generic",
+            "url": "https://example.com/hook", "type": "generic",
+            "min_severity": "high", "event_types": "[]", "enabled": 1,
+            "secret": "realtoken123", "created_at": "2024-01-01T00:00:00Z",
+            "last_hit": None, "hit_count": 0, "fail_count": 0,
+        }
+        result = WH._row(fake_row)
+        self.assertEqual(result.get("secret"), "realtoken123")
+        self.assertIn("url", result)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 14. TOKEN EM QUERY STRING — deve ser rejeitado em _extract_token
+# ══════════════════════════════════════════════════════════════════
+
+class TestTokenQueryStringRemoval(unittest.TestCase):
+    """
+    Garante que _extract_token() NÃO lê token de request.args (query param).
+    Token válido só pode vir de Header (Bearer/X-API-Token) ou Cookie.
+    """
+
+    def _import_extract(self):
+        import importlib, sys
+        sys.path.insert(0, ROOT)
+        mod = importlib.import_module("auth")
+        return mod._extract_token
+
+    def test_token_no_bearer_header_e_lido(self):
+        try:
+            from flask import Flask
+        except ImportError:
+            self.skipTest("Flask não disponível")
+        extract = self._import_extract()
+        app = Flask(__name__)
+        with app.test_request_context("/", headers={"Authorization": "Bearer mytoken123"}):
+            self.assertEqual(extract(), "mytoken123")
+
+    def test_token_no_x_api_token_header_e_lido(self):
+        try:
+            from flask import Flask
+        except ImportError:
+            self.skipTest("Flask não disponível")
+        extract = self._import_extract()
+        app = Flask(__name__)
+        with app.test_request_context("/", headers={"X-API-Token": "apitoken456"}):
+            self.assertEqual(extract(), "apitoken456")
+
+    def test_token_no_cookie_e_lido(self):
+        try:
+            from flask import Flask
+        except ImportError:
+            self.skipTest("Flask não disponível")
+        extract = self._import_extract()
+        app = Flask(__name__)
+        with app.test_request_context("/", environ_base={"HTTP_COOKIE": "netguard_token=cookietoken789"}):
+            self.assertEqual(extract(), "cookietoken789")
+
+    def test_token_em_query_string_e_IGNORADO(self):
+        """Segurança crítica: token em query param vaza em logs de servidor."""
+        try:
+            from flask import Flask
+        except ImportError:
+            self.skipTest("Flask não disponível")
+        extract = self._import_extract()
+        app = Flask(__name__)
+        # Apenas query param — nenhum header nem cookie
+        with app.test_request_context("/?token=secretleaked"):
+            result = extract()
+            # Deve retornar string vazia (não leu o query param)
+            self.assertNotEqual(result, "secretleaked",
+                                "_extract_token NÃO deve ler token de query string")
+
+    def test_sem_token_retorna_vazio(self):
+        try:
+            from flask import Flask
+        except ImportError:
+            self.skipTest("Flask não disponível")
+        extract = self._import_extract()
+        app = Flask(__name__)
+        with app.test_request_context("/"):
+            self.assertEqual(extract(), "")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 15. RBAC POR PERFIL — viewer / analyst / admin em endpoints
+# ══════════════════════════════════════════════════════════════════
+
+class TestRBACProfiles(unittest.TestCase):
+    """
+    Testa os perfis viewer/analyst/admin nos decoradores @require_role
+    usando contextos Flask leves (sem app completo).
+    """
+
+    def _make_app(self):
+        try:
+            from flask import Flask
+            return Flask(__name__)
+        except ImportError:
+            self.skipTest("Flask não disponível")
+
+    def _call(self, fn, role):
+        from flask import g as flask_g
+        app = self._make_app()
+        with app.app_context():
+            with app.test_request_context("/"):
+                flask_g.tenant_role = role
+                return fn()
+
+    # ── Endpoint que exige admin ─────────────────────────────────
+
+    def _admin_endpoint(self):
+        @require_role("admin")
+        def fn():
+            return ("ok", 200)
+        return fn
+
+    def test_admin_no_endpoint_admin(self):
+        result = self._call(self._admin_endpoint(), "admin")
+        self.assertEqual(result, ("ok", 200))
+
+    def test_analyst_bloqueado_em_endpoint_admin(self):
+        result = self._call(self._admin_endpoint(), "analyst")
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(result[1], 403)
+
+    def test_viewer_bloqueado_em_endpoint_admin(self):
+        result = self._call(self._admin_endpoint(), "viewer")
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(result[1], 403)
+
+    # ── Endpoint que exige analyst ou admin ─────────────────────
+
+    def _analyst_endpoint(self):
+        @require_role("analyst", "admin")
+        def fn():
+            return ("ok", 200)
+        return fn
+
+    def test_admin_no_endpoint_analyst(self):
+        result = self._call(self._analyst_endpoint(), "admin")
+        self.assertEqual(result, ("ok", 200))
+
+    def test_analyst_no_endpoint_analyst(self):
+        result = self._call(self._analyst_endpoint(), "analyst")
+        self.assertEqual(result, ("ok", 200))
+
+    def test_viewer_bloqueado_em_endpoint_analyst(self):
+        result = self._call(self._analyst_endpoint(), "viewer")
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(result[1], 403)
+
+    # ── CSRF double-submit cookie ────────────────────────────────
+
+    def test_csrf_protect_bloqueia_sem_header(self):
+        """POST sem X-CSRFToken header deve retornar 403 quando CSRF ativado."""
+        try:
+            from flask import Flask
+            from auth import csrf_protect, _CSRF_ENABLED
+        except ImportError:
+            self.skipTest("Flask/auth não disponível")
+        if not _CSRF_ENABLED:
+            self.skipTest("CSRF desativado neste ambiente")
+
+        @csrf_protect
+        def mutate():
+            return ("mutated", 200)
+
+        app = Flask(__name__)
+        with app.test_request_context(
+            "/api/test",
+            method="POST",
+            environ_base={"HTTP_COOKIE": "csrf_token=abc123"},
+            # Intencionalmente sem X-CSRFToken header
+        ):
+            result = mutate()
+            self.assertIsInstance(result, tuple)
+            self.assertEqual(result[1], 403)
+
+    def test_csrf_protect_passa_com_header_correto(self):
+        """POST com X-CSRFToken matching o cookie deve passar."""
+        try:
+            from flask import Flask
+            from auth import csrf_protect, _CSRF_ENABLED
+        except ImportError:
+            self.skipTest("Flask/auth não disponível")
+        if not _CSRF_ENABLED:
+            self.skipTest("CSRF desativado neste ambiente")
+
+        @csrf_protect
+        def mutate():
+            return ("mutated", 200)
+
+        csrf_val = "securecsrftoken_xyz"
+        app = Flask(__name__)
+        with app.test_request_context(
+            "/api/test",
+            method="POST",
+            headers={"X-CSRFToken": csrf_val},
+            environ_base={"HTTP_COOKIE": f"csrf_token={csrf_val}"},
+        ):
+            result = mutate()
+            self.assertEqual(result, ("mutated", 200))
+
+    def test_csrf_protect_ignora_get(self):
+        """GET requests não precisam de CSRF token."""
+        try:
+            from flask import Flask
+            from auth import csrf_protect
+        except ImportError:
+            self.skipTest("Flask/auth não disponível")
+
+        @csrf_protect
+        def read_only():
+            return ("ok", 200)
+
+        app = Flask(__name__)
+        with app.test_request_context("/api/test", method="GET"):
+            result = read_only()
+            self.assertEqual(result, ("ok", 200))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

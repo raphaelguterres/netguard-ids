@@ -4,17 +4,90 @@ Envia alertas críticos para Slack, Teams, Discord, Telegram, WhatsApp ou qualqu
 """
 from __future__ import annotations  # noqa: F401
 
+import ipaddress
 import json
 import logging
+import socket
 import sqlite3
 import threading
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger("netguard.webhook")
+
+# ── SSRF Guard ────────────────────────────────────────────────
+# Blocos de IP privados / reservados que nunca devem ser destinos de webhook.
+_BLOCKED_NETS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),   # link-local / cloud metadata
+    ipaddress.ip_network("100.64.0.0/10"),     # shared address space (RFC 6598)
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+_BLOCKED_HOSTS = {"localhost", "metadata.google.internal"}
+
+
+def _validate_webhook_url(url: str) -> None:
+    """
+    Valida uma URL de destino de webhook contra SSRF.
+    Levanta ValueError se a URL for interna, privada ou inválida.
+
+    Regras:
+    - Apenas https:// e http:// permitidos (não file://, ftp://, etc.)
+    - Hostname não pode ser localhost, .local, IPs privados ou link-local
+    - Resolve o hostname para verificar o IP resultante
+    """
+    if not url:
+        raise ValueError("URL do webhook é obrigatória")
+
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        raise ValueError("URL inválida")
+
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Scheme inválido '{parsed.scheme}': use https:// ou http://")
+
+    host = parsed.hostname or ""
+    if not host:
+        raise ValueError("Hostname ausente na URL")
+
+    # Bloquear hostnames internos conhecidos
+    if host.lower() in _BLOCKED_HOSTS or host.lower().endswith(".local"):
+        raise ValueError(f"Destino não permitido (host interno): {host}")
+
+    # Resolver hostname e verificar IP resultante
+    try:
+        infos = socket.getaddrinfo(host, None)
+        for _family, _type, _proto, _canonname, sockaddr in infos:
+            raw_ip = sockaddr[0]
+            try:
+                addr = ipaddress.ip_address(raw_ip)
+                for blocked in _BLOCKED_NETS:
+                    if addr in blocked:
+                        raise ValueError(
+                            f"Destino bloqueado por política SSRF: "
+                            f"{host} resolve para {raw_ip} (range privado/reservado)"
+                        )
+            except ValueError:
+                raise
+            except Exception:
+                pass
+    except ValueError:
+        raise
+    except Exception:
+        # Falha na resolução DNS não bloqueia (pode ser hostname externo válido
+        # sem DNS disponível no servidor — a tentativa de envio falhará depois)
+        logger.debug("SSRF check: falha ao resolver '%s' — permitindo provisoriamente", host)
+
 
 # ── Constantes ────────────────────────────────────────────────
 SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
@@ -241,6 +314,8 @@ class WebhookEngine:
             raise ValueError(f"type inválido: {wtype}")
         if min_sev not in SEVERITY_ORDER:
             raise ValueError(f"min_severity inválido: {min_sev}")
+        # SSRF validation — raises ValueError on private/reserved destinations
+        _validate_webhook_url(url)
 
         with self._db() as c:
             cur = c.execute(
@@ -248,17 +323,35 @@ class WebhookEngine:
                 "VALUES(?,?,?,?,?,?,?)",
                 (self.tenant_id, name, url, wtype, min_sev, event_types, secret)
             )
-            return self.get_webhook(cur.lastrowid)
+            return self._row_safe(self._get_raw(cur.lastrowid))
 
-    def get_webhook(self, wid: int) -> Optional[dict]:
+    def _get_raw(self, wid: int) -> Optional[sqlite3.Row]:
+        """Retorna a row crua do banco (com secret) — uso interno apenas."""
         with self._db() as c:
-            row = c.execute(
+            return c.execute(
                 "SELECT * FROM webhooks WHERE id=? AND tenant_id=?",
                 (wid, self.tenant_id)
             ).fetchone()
-        return self._row(row)
+
+    def get_webhook(self, wid: int) -> Optional[dict]:
+        """Retorna webhook com secret real — uso interno (_send, dispatch)."""
+        return self._row(self._get_raw(wid))
+
+    def get_webhook_safe(self, wid: int) -> Optional[dict]:
+        """Retorna webhook com secret mascarado — uso em respostas de API."""
+        return self._row_safe(self._get_raw(wid))
 
     def list_webhooks(self) -> list:
+        """Retorna lista com secrets mascarados — seguro para retornar em API."""
+        with self._db() as c:
+            rows = c.execute(
+                "SELECT * FROM webhooks WHERE tenant_id=? ORDER BY id DESC",
+                (self.tenant_id,)
+            ).fetchall()
+        return [self._row_safe(r) for r in rows]
+
+    def _list_webhooks_raw(self) -> list:
+        """Retorna lista com secrets reais — uso interno (dispatch)."""
         with self._db() as c:
             rows = c.execute(
                 "SELECT * FROM webhooks WHERE tenant_id=? ORDER BY id DESC",
@@ -269,17 +362,20 @@ class WebhookEngine:
     def update_webhook(self, wid: int, data: dict) -> dict:
         fields, vals = [], []
         for k, v in data.items():
+            if k == "url":
+                # SSRF validation on URL updates
+                _validate_webhook_url(str(v).strip())
             if k == "event_types":
                 v = json.dumps(v)
             if k in ("name","url","type","min_severity","event_types","enabled","secret"):
                 fields.append(f"{k}=?")
                 vals.append(v)
         if not fields:
-            return self.get_webhook(wid)
+            return self.get_webhook_safe(wid)
         vals += [wid, self.tenant_id]
         with self._db() as c:
             c.execute(f"UPDATE webhooks SET {','.join(fields)} WHERE id=? AND tenant_id=?", vals)
-        return self.get_webhook(wid)
+        return self.get_webhook_safe(wid)
 
     def delete_webhook(self, wid: int) -> bool:
         with self._db() as c:
@@ -305,7 +401,8 @@ class WebhookEngine:
     def dispatch(self, event: dict):
         """Verifica todos os webhooks ativos e dispara em background se o evento qualificar."""
         try:
-            webhooks = self.list_webhooks()
+            # _list_webhooks_raw retorna secrets reais — necessário para _send()
+            webhooks = self._list_webhooks_raw()
         except Exception:
             return
         for wh in webhooks:
@@ -440,6 +537,7 @@ class WebhookEngine:
 
     @staticmethod
     def _row(row) -> Optional[dict]:
+        """Converte Row em dict com secret real — uso interno apenas."""
         if row is None:
             return None
         d = dict(row)
@@ -447,6 +545,35 @@ class WebhookEngine:
             d["event_types"] = json.loads(d.get("event_types", "[]"))
         except Exception:
             d["event_types"] = []
+        return d
+
+    @staticmethod
+    def _row_safe(row) -> Optional[dict]:
+        """Converte Row em dict com secret mascarado — seguro para respostas de API."""
+        if row is None:
+            return None
+        d = dict(row)
+        try:
+            d["event_types"] = json.loads(d.get("event_types", "[]"))
+        except Exception:
+            d["event_types"] = []
+        # Mascara o secret: mostra apenas que existe (ou não)
+        raw_secret = d.get("secret") or ""
+        if raw_secret:
+            d["secret"] = raw_secret[:4] + "****"  # mostra primeiros 4 chars
+        else:
+            d["secret"] = ""
+        # Remove URL completa do payload de lista (evita vazar tokens embutidos)
+        # Mantém apenas o host para display
+        raw_url = d.get("url", "")
+        if raw_url:
+            try:
+                import urllib.parse as _up
+                parsed = _up.urlparse(raw_url)
+                d["url_display"] = f"{parsed.scheme}://{parsed.netloc}/..."
+            except Exception:
+                d["url_display"] = raw_url[:40] + "..."
+            del d["url"]
         return d
 
 
