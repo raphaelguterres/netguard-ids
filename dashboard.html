@@ -1953,6 +1953,10 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
     <div class="tab" onclick="goPage('custom-rules',this)" title="Regras Customizadas">⚙ My Rules</div>
     <div class="tab" onclick="goPage('webhooks',this)" title="Webhook Alerts">🔔 Webhooks</div>
     <div class="tab" onclick="goPage('trials',this)" title="Trials de Clientes">🔗 Trials</div>
+    <div class="tab" onclick="goPage('mitre',this)" title="MITRE ATT&CK">🗺 ATT&CK</div>
+    <div class="tab" onclick="goPage('threat-intel',this)" title="Threat Intelligence Feeds">🌐 Threat Intel</div>
+    <div class="tab" onclick="goPage('playbooks',this)" title="Incident Response Playbooks">📋 Playbooks</div>
+    <div class="tab" onclick="goPage('forensics',this)" title="Forensics Snapshots">🔬 Forensics</div>
     <div class="tab tab-admin" id="tab-admin-btn" data-group="control"
          style="display:none"
          onclick="location.href='/admin'" title="Painel de Administração — planos pagos">⚡ Admin</div>
@@ -2978,6 +2982,10 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 <div class="page" id="p-custom-rules"></div>
 <div class="page" id="p-webhooks"></div>
 <div class="page" id="p-trials"></div>
+<div class="page" id="p-mitre"></div>
+<div class="page" id="p-threat-intel"></div>
+<div class="page" id="p-playbooks"></div>
+<div class="page" id="p-forensics"></div>
 
 <!-- ── STATS ───────────────────────────────────────────────────────── -->
 <div class="page" id="p-stats">
@@ -3403,8 +3411,12 @@ function goPage(name,el){
   if(name==='ml-anomaly')  loadMLAnomaly();
   if(name==='compliance')  loadCompliance();
   if(name==='custom-rules') loadCustomRules();
-  if(name==='webhooks')    loadWebhooks();
-  if(name==='trials')      loadTrials();
+  if(name==='webhooks')      loadWebhooks();
+  if(name==='trials')        loadTrials();
+  if(name==='mitre')         loadMitre();
+  if(name==='threat-intel')  loadThreatIntel();
+  if(name==='playbooks')     loadPlaybooks();
+  if(name==='forensics')     loadForensics();
   if(name==='geomap'){
     loadGeo();
     if(liveInterval)clearInterval(liveInterval);
@@ -6115,13 +6127,13 @@ async function loadWebhooks(){
   const pg = document.getElementById('p-webhooks');
   if(!pg) return;
   pg.innerHTML = `
-  <div style="padding:20px;width:100%;max-width:900px;margin:0 auto;overflow-y:auto">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+  <div class="page-shell narrow">
+    <div class="page-header">
       <div>
-        <div style="font-size:1.1rem;font-weight:700">🔔 Webhook Alerts</div>
-        <div style="font-size:.8rem;color:var(--txt3);margin-top:2px">Envie alertas críticos para Slack, Teams, Discord ou qualquer URL HTTP.</div>
+        <div class="page-title">🔔 Webhook Alerts</div>
+        <div class="page-subtitle">Envie alertas críticos para Slack, Teams, Discord ou qualquer URL HTTP.</div>
       </div>
-      <button class="fbtn" onclick="showAddWebhook()" style="background:var(--blu);color:#fff;padding:6px 14px">+ Novo Webhook</button>
+      <button class="fbtn primary-action" onclick="showAddWebhook()">+ Novo Webhook</button>
     </div>
     <div id="wh-form-area"></div>
     <div id="wh-list"><div class="empty"><span>Carregando…</span></div></div>
@@ -6132,7 +6144,7 @@ async function loadWebhooks(){
   if(!list) return;
   const whs = r?.webhooks || [];
   if(!whs.length){
-    list.innerHTML = `<div class="empty" style="height:120px"><span>Nenhum webhook configurado. Clique em "+ Novo Webhook" para começar.</span></div>`;
+    list.innerHTML = `<div class="panel-card module-empty tall"><span>Nenhum webhook configurado. Clique em "+ Novo Webhook" para começar.</span></div>`;
     return;
   }
   const typeIcon = {
@@ -6143,19 +6155,19 @@ async function loadWebhooks(){
     generic: '🌐'
   };
   list.innerHTML = whs.map(w=>`
-  <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:14px 16px;margin-bottom:10px">
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <span style="font-size:1.1rem">${typeIcon[w.type]||'🌐'}</span>
-      <span style="font-weight:600;flex:1">${w.name}</span>
-      <span style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:${w.enabled?'rgba(63,185,80,.15)':'rgba(139,148,158,.12)'};color:${w.enabled?'var(--grn)':'var(--txt3)'}">${w.enabled?'● Ativo':'○ Pausado'}</span>
-      <span style="font-size:.72rem;color:var(--txt3)">min: <b style="color:var(--ora)">${w.min_severity}</b></span>
-      <span style="font-size:.72rem;color:var(--txt3)">hits: ${w.hit_count||0} · falhas: ${w.fail_count||0}</span>
+  <div class="panel-card">
+    <div class="panel-head">
+      <span class="panel-icon">${typeIcon[w.type]||'🌐'}</span>
+      <span class="panel-title">${w.name}</span>
+      <span class="status-pill" style="background:${w.enabled?'rgba(63,185,80,.15)':'rgba(139,148,158,.12)'};color:${w.enabled?'var(--grn)':'var(--txt3)'}">${w.enabled?'● Ativo':'○ Pausado'}</span>
+      <span class="meta-text">min: <b class="tone-orange">${w.min_severity}</b></span>
+      <span class="meta-text">hits: ${w.hit_count||0} · falhas: ${w.fail_count||0}</span>
       <button class="fbtn" onclick="testWebhook(${w.id})" title="Testar">⚡ Teste</button>
       <button class="fbtn" onclick="toggleWebhook(${w.id})">${w.enabled?'Pausar':'Ativar'}</button>
       <button class="fbtn" onclick="showWHLogs(${w.id})" title="Ver logs">📋</button>
-      <button class="fbtn" style="color:var(--red)" onclick="deleteWebhook(${w.id})">✕</button>
+      <button class="fbtn danger-text" onclick="deleteWebhook(${w.id})">✕</button>
     </div>
-    <div style="font-size:.72rem;color:var(--txt3);margin-top:6px;font-family:var(--mono);word-break:break-all">${w.url}</div>
+    <div class="meta-text mono break-all" style="margin-top:6px">${w.url}</div>
     <div id="wh-logs-${w.id}"></div>
   </div>`).join('');
 }
@@ -6166,16 +6178,16 @@ function showAddWebhook(){
   if(whFormOpen){ area.innerHTML=''; whFormOpen=false; return; }
   whFormOpen = true;
   area.innerHTML = `
-  <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:16px;margin-bottom:16px">
-    <div style="font-weight:600;margin-bottom:12px">Novo Webhook</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+  <div class="panel-card accent">
+    <div class="panel-title" style="margin-bottom:12px">Novo Webhook</div>
+    <div class="form-grid-2">
       <div>
-        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Nome</div>
-        <input id="wh-name" class="finput" placeholder="ex: Slack #alertas" style="width:100%">
+        <div class="field-label">Nome</div>
+        <input id="wh-name" class="form-control full-width" placeholder="ex: Slack #alertas">
       </div>
       <div>
-        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Tipo</div>
-        <select id="wh-type" class="fsel" style="width:100%" onchange="whTypeChanged()">
+        <div class="field-label">Tipo</div>
+        <select id="wh-type" class="form-control full-width" onchange="whTypeChanged()">
           <option value="telegram">📱 Telegram</option>
           <option value="whatsapp">💬 WhatsApp (Z-API / Twilio)</option>
           <option value="slack">🟩 Slack</option>
@@ -6184,14 +6196,14 @@ function showAddWebhook(){
           <option value="generic">🌐 HTTP Genérico</option>
         </select>
       </div>
-      <div style="grid-column:1/-1">
-        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">URL do Webhook</div>
-        <input id="wh-url" class="finput" placeholder="https://api.telegram.org/bot{TOKEN}/sendMessage" style="width:100%">
-        <div id="wh-url-hint" style="font-size:.7rem;color:var(--acc);margin-top:3px"></div>
+      <div class="span-full">
+        <div class="field-label">URL do Webhook</div>
+        <input id="wh-url" class="form-control full-width" placeholder="https://api.telegram.org/bot{TOKEN}/sendMessage">
+        <div id="wh-url-hint" class="hint-accent"></div>
       </div>
       <div>
-        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Severidade mínima</div>
-        <select id="wh-sev" class="fsel" style="width:100%">
+        <div class="field-label">Severidade mínima</div>
+        <select id="wh-sev" class="form-control full-width">
           <option value="critical">CRITICAL</option>
           <option value="high" selected>HIGH</option>
           <option value="medium">MEDIUM</option>
@@ -6199,15 +6211,15 @@ function showAddWebhook(){
         </select>
       </div>
       <div>
-        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px"><span id="wh-secret-label">Secret / Chat ID</span></div>
-        <input id="wh-secret" class="finput" placeholder="chat_id (ex: -1001234567890)" style="width:100%">
-        <div id="wh-secret-hint" style="font-size:.7rem;color:var(--txt3);margin-top:3px">Para Telegram: cole o chat_id do grupo ou usuário</div>
+        <div class="field-label"><span id="wh-secret-label">Secret / Chat ID</span></div>
+        <input id="wh-secret" class="form-control full-width" placeholder="chat_id (ex: -1001234567890)">
+        <div id="wh-secret-hint" class="hint-muted">Para Telegram: cole o chat_id do grupo ou usuário</div>
       </div>
     </div>
-    <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="fbtn" style="background:var(--blu);color:#fff" onclick="saveWebhook()">Salvar</button>
+    <div class="action-row">
+      <button class="fbtn primary-action" onclick="saveWebhook()">Salvar</button>
       <button class="fbtn" onclick="document.getElementById('wh-form-area').innerHTML='';whFormOpen=false">Cancelar</button>
-      <a id="wh-doc-link" href="ALERTAS_NOTIFICACOES.md" target="_blank" style="font-size:.75rem;color:var(--acc);margin-left:auto;align-self:center">📖 Ver guia de configuração</a>
+      <a id="wh-doc-link" class="webhook-doc-link push-right" href="ALERTAS_NOTIFICACOES.md" target="_blank">📖 Ver guia de configuração</a>
     </div>
   </div>`;
 }
@@ -6400,15 +6412,15 @@ async function loadTrials(){
   const pg = document.getElementById('p-trials');
   if(!pg) return;
   pg.innerHTML = `
-  <div style="padding:20px;width:100%;max-width:960px;margin:0 auto;overflow-y:auto">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+  <div class="page-shell">
+    <div class="page-header tight">
       <div>
-        <div style="font-size:1.1rem;font-weight:700">🔗 Trial de Clientes</div>
-        <div style="font-size:.8rem;color:var(--txt3);margin-top:2px">Gere links de acesso com tempo limitado para clientes em potencial.</div>
+        <div class="page-title">🔗 Trial de Clientes</div>
+        <div class="page-subtitle">Gere links de acesso com tempo limitado para clientes em potencial.</div>
       </div>
-      <button class="fbtn" onclick="showNewTrial()" style="background:var(--blu);color:#fff;padding:6px 14px">+ Novo Trial</button>
+      <button class="fbtn primary-action" onclick="showNewTrial()">+ Novo Trial</button>
     </div>
-    <div id="trial-stats-row" style="display:flex;gap:10px;margin-bottom:16px"></div>
+    <div id="trial-stats-row" class="stats-row"></div>
     <div id="trial-form-area"></div>
     <div id="trial-list"><div class="empty"><span>Carregando…</span></div></div>
   </div>`;
@@ -6423,15 +6435,15 @@ async function loadTrials(){
     ['Ativos',  s.active  || 0, 'var(--grn)'],
     ['Expirados',s.expired|| 0, 'var(--ora)'],
     ['Revogados',s.revoked|| 0, 'var(--red)'],
-  ].map(([l,v,c])=>`<div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:10px 16px;flex:1;text-align:center">
-    <div style="font-size:1.4rem;font-weight:800;color:${c}">${v}</div>
-    <div style="font-size:.72rem;color:var(--txt3)">${l}</div>
+  ].map(([l,v,c])=>`<div class="summary-card">
+    <div class="summary-value" style="color:${c}">${v}</div>
+    <div class="summary-label">${l}</div>
   </div>`).join('');
 
   const trials = r.trials || [];
   const list = document.getElementById('trial-list');
   if(!trials.length){
-    list.innerHTML='<div class="empty" style="height:120px"><span>Nenhum trial gerado ainda. Clique em "+ Novo Trial" para começar.</span></div>';
+    list.innerHTML='<div class="panel-card module-empty tall"><span>Nenhum trial gerado ainda. Clique em "+ Novo Trial" para começar.</span></div>';
     return;
   }
 
@@ -6439,23 +6451,23 @@ async function loadTrials(){
   const statusLabel = {active:'● Ativo', expired:'○ Expirado', revoked:'✕ Revogado'};
 
   list.innerHTML = trials.map(t => `
-  <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:14px 16px;margin-bottom:10px">
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <span style="font-weight:700;flex:1;min-width:120px">${t.company||t.name||t.email}</span>
-      <span style="font-size:.72rem;color:var(--txt3)">${t.email}</span>
-      <span style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:rgba(0,0,0,.2);color:${statusColor[t.status]||'var(--txt3)'}">${statusLabel[t.status]||t.status}</span>
-      ${t.status==='active'?`<span style="font-size:.72rem;color:var(--txt3)">⏱ ${t.remaining_h}h restantes</span>`:''}
-      <span style="font-size:.72rem;color:var(--txt3)">${t.access_count} acessos</span>
+  <div class="panel-card">
+    <div class="panel-head">
+      <span class="panel-title">${t.company||t.name||t.email}</span>
+      <span class="meta-text">${t.email}</span>
+      <span class="status-pill" style="background:rgba(0,0,0,.2);color:${statusColor[t.status]||'var(--txt3)'}">${statusLabel[t.status]||t.status}</span>
+      ${t.status==='active'?`<span class="meta-text">⏱ ${t.remaining_h}h restantes</span>`:''}
+      <span class="meta-text">${t.access_count} acessos</span>
       <button class="fbtn" onclick="copyTrialLink('${t.trial_url}')" title="Copiar link">🔗 Copiar link</button>
       ${t.status!=='revoked'?`<button class="fbtn" onclick="extendTrial('${t.token}')" title="Estender +24h">+24h</button>`:''}
-      ${t.status==='active'?`<button class="fbtn" style="color:var(--red)" onclick="revokeTrial('${t.token}')">Revogar</button>`:''}
+      ${t.status==='active'?`<button class="fbtn danger-text" onclick="revokeTrial('${t.token}')">Revogar</button>`:''}
     </div>
-    <div style="font-size:.7rem;color:var(--txt3);margin-top:6px;display:flex;gap:16px;flex-wrap:wrap">
+    <div class="meta-row">
       <span>Criado: ${t.created_at?.replace('T',' ').replace('Z','')}</span>
       <span>Expira: ${t.expires_at?.replace('T',' ').replace('Z','')}</span>
       ${t.first_access?`<span>1º acesso: ${t.first_access?.replace('T',' ').replace('Z','')}</span>`:''}
     </div>
-    <div style="margin-top:8px;font-size:.7rem;font-family:var(--mono);background:var(--s1);border-radius:4px;padding:5px 8px;word-break:break-all;color:var(--blu)">${t.trial_url}</div>
+    <div class="mono-url">${t.trial_url}</div>
   </div>`).join('');
 }
 
@@ -6465,24 +6477,24 @@ function showNewTrial(){
   if(trialFormOpen){ area.innerHTML=''; trialFormOpen=false; return; }
   trialFormOpen = true;
   area.innerHTML = `
-  <div style="background:var(--s2);border:1px solid var(--blu);border-radius:8px;padding:16px;margin-bottom:16px">
-    <div style="font-weight:600;margin-bottom:12px">Novo Trial</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+  <div class="panel-card accent">
+    <div class="panel-title" style="margin-bottom:12px">Novo Trial</div>
+    <div class="form-grid-2">
       <div>
-        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Nome do contato *</div>
-        <input id="tr-name" class="finput" placeholder="João Silva" style="width:100%">
+        <div class="field-label">Nome do contato *</div>
+        <input id="tr-name" class="form-control full-width" placeholder="João Silva">
       </div>
       <div>
-        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Empresa *</div>
-        <input id="tr-company" class="finput" placeholder="ACME Ltda" style="width:100%">
+        <div class="field-label">Empresa *</div>
+        <input id="tr-company" class="form-control full-width" placeholder="ACME Ltda">
       </div>
       <div>
-        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">E-mail *</div>
-        <input id="tr-email" class="finput" placeholder="joao@acme.com" type="email" style="width:100%">
+        <div class="field-label">E-mail *</div>
+        <input id="tr-email" class="form-control full-width" placeholder="joao@acme.com" type="email">
       </div>
       <div>
-        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Duração</div>
-        <select id="tr-hours" class="fsel" style="width:100%">
+        <div class="field-label">Duração</div>
+        <select id="tr-hours" class="form-control full-width">
           <option value="24">24 horas</option>
           <option value="48">48 horas</option>
           <option value="72" selected>72 horas (3 dias)</option>
@@ -6490,13 +6502,13 @@ function showNewTrial(){
           <option value="336">14 dias</option>
         </select>
       </div>
-      <div style="grid-column:1/-1">
-        <div style="font-size:.75rem;color:var(--txt3);margin-bottom:4px">Observações</div>
-        <input id="tr-notes" class="finput" placeholder="Prospect via LinkedIn, interesse em MSSP..." style="width:100%">
+      <div class="span-full">
+        <div class="field-label">Observações</div>
+        <input id="tr-notes" class="form-control full-width" placeholder="Prospect via LinkedIn, interesse em MSSP...">
       </div>
     </div>
-    <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="fbtn" style="background:var(--blu);color:#fff" onclick="createTrial()">Gerar link de trial</button>
+    <div class="action-row">
+      <button class="fbtn primary-action" onclick="createTrial()">Gerar link de trial</button>
       <button class="fbtn" onclick="document.getElementById('trial-form-area').innerHTML='';trialFormOpen=false">Cancelar</button>
     </div>
     <div id="tr-result" style="margin-top:12px;display:none"></div>
@@ -6519,10 +6531,10 @@ async function createTrial(){
   const res = document.getElementById('tr-result');
   if(res){
     res.style.display='block';
-    res.innerHTML=`<div style="background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);border-radius:6px;padding:10px 12px">
-      <div style="font-size:.78rem;color:var(--grn);font-weight:600;margin-bottom:6px">✔ Trial criado! Link de acesso:</div>
-      <div style="font-family:var(--mono);font-size:.75rem;word-break:break-all;color:var(--blu)">${url}</div>
-      <button class="fbtn" style="margin-top:8px;background:var(--grn);color:#000" onclick="copyTrialLink('${url}')">📋 Copiar link</button>
+    res.innerHTML=`<div class="success-note">
+      <div class="success-title">✔ Trial criado! Link de acesso:</div>
+      <div class="mono-url">${url}</div>
+      <button class="fbtn success-copy-btn" onclick="copyTrialLink('${url}')">📋 Copiar link</button>
     </div>`;
   }
   loadTrials();
@@ -6553,19 +6565,669 @@ async function showWHLogs(id){
   if(el.innerHTML){ el.innerHTML=''; return; }
   const r = await api(`/webhooks/${id}/logs`);
   const logs = r?.logs || [];
-  if(!logs.length){ el.innerHTML='<div style="font-size:.72rem;color:var(--txt3);margin-top:8px">Sem logs ainda.</div>'; return; }
-  el.innerHTML = `<div style="margin-top:10px;border-top:1px solid var(--b2);padding-top:8px">
-    <div style="font-size:.72rem;color:var(--txt3);margin-bottom:6px">Últimos ${logs.length} disparos</div>
+  if(!logs.length){ el.innerHTML='<div class="log-empty">Sem logs ainda.</div>'; return; }
+  el.innerHTML = `<div class="log-drawer">
+    <div class="log-title">Últimos ${logs.length} disparos</div>
     ${logs.map(l=>`
-    <div style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--b1);font-size:.72rem">
+    <div class="log-row">
       <span style="color:${l.status==='ok'?'var(--grn)':'var(--red)'}">${l.status==='ok'?'✔':'✗'}</span>
-      <span style="color:var(--txt3)">${l.sent_at?.replace('T',' ').replace('Z','')}</span>
-      <span style="color:var(--ora)">${l.severity||'—'}</span>
-      <span style="flex:1;color:var(--txt2)">${l.event_type||'—'}</span>
+      <span class="meta-text">${l.sent_at?.replace('T',' ').replace('Z','')}</span>
+      <span class="meta-text warn">${l.severity||'—'}</span>
+      <span class="meta-text soft flex-1">${l.event_type||'—'}</span>
       <span style="color:${l.status_code&&l.status_code<300?'var(--grn)':'var(--red)'}">HTTP ${l.status_code||'—'}</span>
       ${l.error?`<span style="color:var(--red)" title="${l.error}">⚠</span>`:''}
     </div>`).join('')}
   </div>`;
+}
+
+// ══════════════════════════════════════════════ MITRE ATT&CK ════════
+
+let _mitreData = null;
+let _mitreDays = 30;
+
+async function loadMitre(days){
+  if(days) _mitreDays = days;
+  const pg = document.getElementById('p-mitre');
+  if(!pg) return;
+
+  pg.innerHTML = `
+  <div style="padding:20px;width:100%;max-width:1200px;margin:0 auto;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-size:1.15rem;font-weight:700">🗺 MITRE ATT&amp;CK Coverage</div>
+        <div style="font-size:.8rem;color:var(--txt3);margin-top:2px">Mapeamento de detecções para o framework MITRE ATT&amp;CK Enterprise.</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="mitre-days-sel" onchange="loadMitre(+this.value)"
+          style="background:var(--b2);color:var(--txt1);border:1px solid var(--b3);border-radius:6px;padding:5px 10px;font-size:.8rem">
+          <option value="7" ${_mitreDays===7?'selected':''}>7 dias</option>
+          <option value="30" ${_mitreDays===30?'selected':''}>30 dias</option>
+          <option value="90" ${_mitreDays===90?'selected':''}>90 dias</option>
+        </select>
+        <a id="mitre-nav-btn" href="/api/mitre/navigator?days=${_mitreDays}" target="_blank"
+          style="background:var(--b2);color:var(--txt1);border:1px solid var(--b3);border-radius:6px;padding:6px 12px;font-size:.8rem;text-decoration:none">
+          ⬇ Navigator JSON
+        </a>
+      </div>
+    </div>
+    <!-- Stats row -->
+    <div id="mitre-stats-row" style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap"></div>
+    <!-- Tactic columns -->
+    <div id="mitre-matrix" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:10px;min-height:220px">
+      <div style="color:var(--txt3);font-size:.8rem;margin:auto">Carregando…</div>
+    </div>
+    <!-- Top 10 table -->
+    <div style="margin-top:20px">
+      <div style="font-size:.85rem;font-weight:600;margin-bottom:8px;color:var(--txt2)">🏆 Top 10 Técnicas Detectadas</div>
+      <div id="mitre-top10" style="display:flex;flex-direction:column;gap:4px"></div>
+    </div>
+  </div>`;
+
+  const [hm, stats] = await Promise.all([
+    api(`/mitre/heatmap?days=${_mitreDays}`),
+    api('/mitre/stats'),
+  ]);
+  _mitreData = hm;
+
+  // Stats cards
+  if(stats){
+    const row = document.getElementById('mitre-stats-row');
+    if(row) row.innerHTML = [
+      {label:'Técnicas mapeadas', val:`${stats.unique_techniques_hit||0}/${stats.total_techniques||0}`, sub:'ATT&CK techniques'},
+      {label:'Táticas cobertas',  val:`${stats.unique_tactics_hit||0}/12`,  sub:'kill chain phases'},
+      {label:'Cobertura',         val:`${stats.coverage_pct||0}%`,          sub:'do framework ATT&CK'},
+      {label:'Total de hits',     val:stats.total_hits||0,                  sub:`últimos ${_mitreDays} dias`},
+    ].map(c=>`
+      <div style="background:var(--b2);border:1px solid var(--b3);border-radius:8px;padding:10px 16px;min-width:130px">
+        <div style="font-size:1.3rem;font-weight:700;color:var(--txt1)">${c.val}</div>
+        <div style="font-size:.72rem;color:var(--ora);font-weight:600;margin-top:2px">${c.label}</div>
+        <div style="font-size:.68rem;color:var(--txt3)">${c.sub}</div>
+      </div>`).join('');
+  }
+
+  // Matrix
+  if(hm?.matrix){
+    renderMitreMatrix(hm.matrix);
+  }
+
+  // Top 10
+  if(hm?.top10?.length){
+    renderMitreTop10(hm.top10);
+  }
+}
+
+function renderMitreMatrix(matrix){
+  const el = document.getElementById('mitre-matrix');
+  if(!el) return;
+  // Group by tactic
+  const tactics = {};
+  for(const [techId, techData] of Object.entries(matrix)){
+    const tac = techData.tactic_id;
+    if(!tactics[tac]) tactics[tac] = {name: techData.tactic_name, techs: []};
+    tactics[tac].techs.push({id: techId, ...techData});
+  }
+  el.innerHTML = Object.entries(tactics).map(([tacId, tac])=>{
+    const cells = tac.techs.map(t=>{
+      const bg = t.count > 0 ? t.color || '#f0883e' : 'var(--b2)';
+      const txt = t.count > 0 ? '#000' : 'var(--txt3)';
+      return `<div title="${t.name} (${t.count} hits)"
+        onclick="showMitreTech('${t.id}')"
+        style="background:${bg};color:${txt};border-radius:4px;padding:5px 6px;font-size:.65rem;
+               cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+               max-width:130px;border:1px solid var(--b3);transition:.15s"
+        onmouseenter="this.style.opacity='.8'" onmouseleave="this.style.opacity='1'">
+        ${t.name.length>18?t.name.slice(0,17)+'…':t.name}
+        ${t.count>0?`<span style="font-size:.6rem;opacity:.8;margin-left:3px">${t.count}</span>`:''}
+      </div>`;
+    }).join('');
+    return `<div style="min-width:140px;display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:.68rem;font-weight:700;color:var(--ora);text-transform:uppercase;
+                  letter-spacing:.03em;padding:4px 0;border-bottom:1px solid var(--b3);margin-bottom:2px">
+        ${tac.name}
+      </div>
+      ${cells}
+    </div>`;
+  }).join('');
+}
+
+function renderMitreTop10(top10){
+  const el = document.getElementById('mitre-top10');
+  if(!el) return;
+  const max = top10[0]?.count || 1;
+  el.innerHTML = top10.map((t,i)=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--b1)">
+      <span style="color:var(--txt3);font-size:.72rem;width:18px;text-align:right">${i+1}</span>
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:.78rem;font-weight:600">${t.name}</span>
+          <span style="font-size:.65rem;color:var(--txt3)">${t.id}</span>
+          <span style="font-size:.65rem;background:var(--b3);border-radius:4px;padding:1px 5px;color:var(--ora)">${t.tactic_name}</span>
+        </div>
+        <div style="margin-top:4px;height:4px;background:var(--b2);border-radius:2px;overflow:hidden">
+          <div style="height:100%;width:${Math.round(t.count/max*100)}%;background:${t.color||'var(--ora)'};border-radius:2px;transition:.4s"></div>
+        </div>
+      </div>
+      <span style="font-size:.8rem;font-weight:700;color:var(--txt1);min-width:30px;text-align:right">${t.count}</span>
+    </div>`).join('');
+}
+
+async function showMitreTech(techId){
+  const r = await api(`/mitre/technique/${techId}`);
+  if(!r) return;
+  const existing = document.getElementById('mitre-tech-modal');
+  if(existing) existing.remove();
+  const m = document.createElement('div');
+  m.id = 'mitre-tech-modal';
+  m.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center';
+  m.innerHTML = `
+    <div style="background:var(--bg2);border:1px solid var(--b3);border-radius:10px;padding:24px;max-width:500px;width:90%;position:relative">
+      <button onclick="document.getElementById('mitre-tech-modal').remove()"
+        style="position:absolute;top:10px;right:12px;background:none;border:none;color:var(--txt3);font-size:1.1rem;cursor:pointer">✕</button>
+      <div style="font-size:.7rem;color:var(--ora);font-weight:700;margin-bottom:4px">${r.tactic_name} · ${r.id}</div>
+      <div style="font-size:1rem;font-weight:700;margin-bottom:10px">${r.name}</div>
+      <div style="font-size:.78rem;color:var(--txt2);line-height:1.5;margin-bottom:12px">${r.description||'Sem descrição disponível.'}</div>
+      <div style="font-size:.72rem;color:var(--txt3);margin-bottom:6px">🔍 Keywords detectadas:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:14px">
+        ${(r.keywords||[]).map(k=>`<span style="background:var(--b3);border-radius:4px;padding:2px 7px;font-size:.68rem">${k}</span>`).join('')}
+      </div>
+      <a href="${r.url}" target="_blank" style="font-size:.75rem;color:var(--blu);text-decoration:none">
+        🔗 Ver no MITRE ATT&amp;CK →
+      </a>
+    </div>`;
+  m.addEventListener('click', e=>{ if(e.target===m) m.remove(); });
+  document.body.appendChild(m);
+}
+
+// ══════════════════════════════════════ THREAT INTEL FEED ════════
+
+let _tiSource = null;
+let _tiType   = null;
+
+async function loadThreatIntel(){
+  const pg = document.getElementById('p-threat-intel');
+  if(!pg) return;
+
+  pg.innerHTML = `
+  <div style="flex:1;overflow-y:auto;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-size:1.1rem;font-weight:700">🌐 Threat Intelligence Feeds</div>
+        <div style="font-size:.8rem;color:var(--txt3);margin-top:2px">IOCs automáticos de Abuse.ch URLhaus, ThreatFox e Feodo Tracker</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="tiRefreshAll()" class="btn-s" style="background:var(--grn);color:#000">⟳ Atualizar Todos</button>
+      </div>
+    </div>
+    <div id="ti-stats-row" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+      <div style="color:var(--txt3);font-size:.8rem">Carregando…</div>
+    </div>
+    <!-- Feed status cards -->
+    <div id="ti-feeds-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:18px"></div>
+    <!-- Filter + table -->
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+      <select id="ti-filter-source" onchange="_tiSource=this.value||null;tiLoadTable()"
+        style="background:var(--b2);color:var(--txt1);border:1px solid var(--b3);border-radius:6px;padding:4px 10px;font-size:.8rem">
+        <option value="">Todas as fontes</option>
+        <option value="urlhaus">URLhaus</option>
+        <option value="threatfox_ip">ThreatFox IPs</option>
+        <option value="threatfox_domain">ThreatFox Domínios</option>
+        <option value="feodo">Feodo Tracker</option>
+      </select>
+      <select id="ti-filter-type" onchange="_tiType=this.value||null;tiLoadTable()"
+        style="background:var(--b2);color:var(--txt1);border:1px solid var(--b3);border-radius:6px;padding:4px 10px;font-size:.8rem">
+        <option value="">Todos os tipos</option>
+        <option value="ip">IP</option>
+        <option value="domain">Domínio</option>
+        <option value="url">URL</option>
+      </select>
+      <span id="ti-table-status" style="font-size:.75rem;color:var(--txt3)"></span>
+    </div>
+    <div style="background:var(--b2);border:1px solid var(--b3);border-radius:8px;overflow:hidden">
+      <table style="width:100%;border-collapse:collapse;font-size:.78rem">
+        <thead>
+          <tr style="background:var(--b3)">
+            <th style="padding:8px 12px;text-align:left;color:var(--txt3);font-weight:600">Tipo</th>
+            <th style="padding:8px 12px;text-align:left;color:var(--txt3);font-weight:600">IOC</th>
+            <th style="padding:8px 12px;text-align:left;color:var(--txt3);font-weight:600">Fonte</th>
+            <th style="padding:8px 12px;text-align:left;color:var(--txt3);font-weight:600">Ameaça</th>
+            <th style="padding:8px 12px;text-align:left;color:var(--txt3);font-weight:600">Severidade</th>
+            <th style="padding:8px 12px;text-align:right;color:var(--txt3);font-weight:600">Conf.</th>
+            <th style="padding:8px 12px;text-align:right;color:var(--txt3);font-weight:600">Visto</th>
+          </tr>
+        </thead>
+        <tbody id="ti-table-body">
+          <tr><td colspan="7" style="padding:20px;text-align:center;color:var(--txt3)">Carregando…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+
+  const stats = await api('/ti/stats');
+  if(stats){
+    const row = document.getElementById('ti-stats-row');
+    if(row) row.innerHTML = [
+      {label:'Total IOCs',     val:stats.total_iocs||0,                   sub:'na base TI',  color:'var(--acc)'},
+      {label:'IPs maliciosos', val:stats.by_type?.ip||0,                  sub:'Feodo/ThreatFox', color:'var(--red)'},
+      {label:'Domínios C2',    val:stats.by_type?.domain||0,              sub:'ThreatFox',   color:'var(--ora)'},
+      {label:'URLs malware',   val:stats.by_type?.url||0,                 sub:'URLhaus',     color:'var(--pur)'},
+    ].map(c=>`
+      <div style="background:var(--b2);border:1px solid var(--b3);border-radius:8px;padding:10px 16px;min-width:130px">
+        <div style="font-size:1.3rem;font-weight:700;color:${c.color}">${c.val.toLocaleString()}</div>
+        <div style="font-size:.78rem;font-weight:600;margin-top:2px">${c.label}</div>
+        <div style="font-size:.68rem;color:var(--txt3)">${c.sub}</div>
+      </div>`).join('');
+
+    const feedCards = document.getElementById('ti-feeds-cards');
+    if(feedCards && stats.feeds){
+      feedCards.innerHTML = Object.entries(stats.feeds).map(([k,f])=>{
+        const cnt = stats.by_source?.[k] || 0;
+        const ago = f.last_run_ago_h != null ? `${f.last_run_ago_h}h atrás` : 'Nunca';
+        return `<div style="background:var(--b2);border:1px solid var(--b3);border-radius:8px;padding:12px">
+          <div style="font-size:.78rem;font-weight:700;margin-bottom:4px">${f.label||k}</div>
+          <div style="font-size:.7rem;color:var(--txt3);margin-bottom:8px">${f.description||''}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:.9rem;font-weight:700;color:var(--acc)">${cnt.toLocaleString()} IOCs</span>
+            <div style="display:flex;gap:6px;align-items:center">
+              <span style="font-size:.68rem;color:var(--txt3)">${ago}</span>
+              <button onclick="tiRefreshFeed('${k}')"
+                style="font-size:.68rem;padding:2px 8px;border-radius:4px;background:var(--b3);color:var(--txt1);border:none;cursor:pointer">⟳</button>
+            </div>
+          </div>
+          <div style="font-size:.65rem;color:var(--txt3);margin-top:4px">Atualiza a cada ${f.interval_h}h</div>
+        </div>`;
+      }).join('');
+    }
+  }
+  tiLoadTable();
+}
+
+async function tiLoadTable(){
+  const tbody = document.getElementById('ti-table-body');
+  const status= document.getElementById('ti-table-status');
+  if(!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--txt3)">Carregando…</td></tr>`;
+
+  const params = new URLSearchParams({limit:300});
+  if(_tiSource) params.set('source', _tiSource);
+  if(_tiType)   params.set('type',   _tiType);
+
+  const r = await api(`/ti/iocs?${params}`);
+  const iocs = r?.iocs || [];
+  if(status) status.textContent = `${iocs.length} IOCs encontrados`;
+
+  const SEV_COL = {critical:'var(--red)',high:'var(--ora)',medium:'var(--yel)',low:'var(--grn)'};
+  const TYPE_ICON = {ip:'🖥',domain:'🌐',url:'🔗',md5:'#️⃣',sha256:'#️⃣'};
+
+  tbody.innerHTML = iocs.length ? iocs.map(ioc=>`
+    <tr style="border-top:1px solid var(--b1)" onclick="tiLookup('${ioc.ioc_value.replace(/'/g,"\\'")}')">
+      <td style="padding:6px 12px;color:var(--txt2)">${TYPE_ICON[ioc.ioc_type]||'?'} ${ioc.ioc_type}</td>
+      <td style="padding:6px 12px;font-family:var(--mono);font-size:.72rem;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${ioc.ioc_value}">${ioc.ioc_value}</td>
+      <td style="padding:6px 12px;font-size:.72rem;color:var(--txt3)">${ioc.source}</td>
+      <td style="padding:6px 12px;font-size:.72rem">${ioc.threat_type||'—'}</td>
+      <td style="padding:6px 12px"><span style="font-size:.68rem;font-weight:600;color:${SEV_COL[ioc.severity]||'var(--txt2)'}">${(ioc.severity||'').toUpperCase()}</span></td>
+      <td style="padding:6px 12px;text-align:right;font-size:.72rem;color:var(--txt3)">${ioc.confidence}%</td>
+      <td style="padding:6px 12px;text-align:right;font-size:.68rem;color:var(--txt3)">${ioc.last_seen?.slice(5,16)||'—'}</td>
+    </tr>`).join('')
+  : `<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--txt3)">Nenhum IOC encontrado. Clique em "Atualizar Todos" para puxar feeds.</td></tr>`;
+}
+
+async function tiRefreshFeed(feed){
+  toast(`Atualizando feed ${feed}…`, 'info');
+  const r = await api(`/ti/feeds/${feed}/refresh`, {method:'POST'});
+  if(r?.ok) { toast(`Feed ${feed} em atualização!`, 'ok'); setTimeout(loadThreatIntel, 3000); }
+}
+
+async function tiRefreshAll(){
+  toast('Atualizando todos os feeds TI…', 'info');
+  const r = await api('/ti/feeds/refresh_all', {method:'POST'});
+  if(r?.ok) { toast('Feeds em atualização — aguarde ~30s', 'ok'); setTimeout(loadThreatIntel, 5000); }
+}
+
+async function tiLookup(value){
+  const r = await api(`/ti/lookup?value=${encodeURIComponent(value)}`);
+  if(!r) return;
+  const m = document.createElement('div');
+  m.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center';
+  const match = r.match;
+  m.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--b3);border-radius:10px;padding:24px;max-width:480px;width:90%;position:relative">
+    <button onclick="this.closest('div[style]').remove()"
+      style="position:absolute;top:10px;right:12px;background:none;border:none;color:var(--txt3);font-size:1.1rem;cursor:pointer">✕</button>
+    <div style="font-size:.8rem;color:${r.found?'var(--red)':'var(--grn)'};font-weight:700;margin-bottom:8px">
+      ${r.found ? '🔴 IOC MALICIOSO DETECTADO' : '🟢 IOC limpo — não encontrado na base TI'}
+    </div>
+    <div style="font-family:var(--mono);font-size:.85rem;margin-bottom:12px;word-break:break-all">${r.value}</div>
+    ${match ? `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:.75rem">
+        <div><span style="color:var(--txt3)">Fonte:</span> ${match.source}</div>
+        <div><span style="color:var(--txt3)">Tipo:</span> ${match.ioc_type}</div>
+        <div><span style="color:var(--txt3)">Ameaça:</span> ${match.threat_type||'—'}</div>
+        <div><span style="color:var(--txt3)">Confiança:</span> ${match.confidence}%</div>
+        <div><span style="color:var(--txt3)">Severidade:</span> ${match.severity}</div>
+        <div><span style="color:var(--txt3)">Visto:</span> ${match.last_seen?.slice(0,10)||'—'}</div>
+      </div>` : ''}
+  </div>`;
+  m.addEventListener('click', e=>{ if(e.target===m) m.remove(); });
+  document.body.appendChild(m);
+}
+
+// ══════════════════════════════════════ PLAYBOOKS ════════════════
+
+let _pbIncidents = [];
+
+async function loadPlaybooks(){
+  const pg = document.getElementById('p-playbooks');
+  if(!pg) return;
+
+  pg.innerHTML = `
+  <div style="flex:1;overflow-y:auto;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-size:1.1rem;font-weight:700">📋 Incident Response Playbooks</div>
+        <div style="font-size:.8rem;color:var(--txt3);margin-top:2px">Playbooks automáticos disparados por detecções críticas</div>
+      </div>
+      <button onclick="pbOpenManual()" class="btn-s" style="background:var(--acc);color:#000">+ Abrir Incidente</button>
+    </div>
+    <div id="pb-stats-row" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px"></div>
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <div style="flex:1;min-width:260px">
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:8px;color:var(--txt2)">Playbooks disponíveis</div>
+        <div id="pb-library" style="display:flex;flex-direction:column;gap:6px"></div>
+      </div>
+      <div style="flex:2;min-width:300px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:.85rem;font-weight:600;color:var(--txt2)">Incidentes ativos</span>
+          <select id="pb-filter-status" onchange="pbFilterIncidents(this.value)"
+            style="background:var(--b2);color:var(--txt1);border:1px solid var(--b3);border-radius:6px;padding:3px 8px;font-size:.75rem">
+            <option value="">Todos</option>
+            <option value="open">Aberto</option>
+            <option value="in_progress">Em andamento</option>
+            <option value="resolved">Resolvido</option>
+          </select>
+        </div>
+        <div id="pb-incidents-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
+    </div>
+  </div>`;
+
+  const r = await api('/playbooks');
+  if(!r) return;
+
+  // Stats
+  const st = r.stats || {};
+  const statsRow = document.getElementById('pb-stats-row');
+  if(statsRow) statsRow.innerHTML = [
+    {label:'Total',       val:st.total||0,       color:'var(--acc)'},
+    {label:'Abertos',     val:st.open||0,        color:'var(--red)'},
+    {label:'Em andamento',val:st.in_progress||0, color:'var(--ora)'},
+    {label:'Resolvidos',  val:st.resolved||0,    color:'var(--grn)'},
+  ].map(c=>`<div style="background:var(--b2);border:1px solid var(--b3);border-radius:8px;padding:8px 14px;min-width:100px">
+    <div style="font-size:1.2rem;font-weight:700;color:${c.color}">${c.val}</div>
+    <div style="font-size:.72rem;color:var(--txt3)">${c.label}</div>
+  </div>`).join('');
+
+  // Library
+  const lib = document.getElementById('pb-library');
+  if(lib) lib.innerHTML = (r.playbooks||[]).map(pb=>`
+    <div style="background:var(--b2);border:1px solid var(--b3);border-radius:7px;padding:10px;cursor:pointer"
+      onclick="pbOpenManualWith('${pb.key}')">
+      <div style="font-size:.82rem;font-weight:600">${pb.label}</div>
+      <div style="font-size:.7rem;color:var(--txt3);margin-top:2px">${pb.description}</div>
+      <div style="font-size:.65rem;color:var(--txt3);margin-top:4px">${pb.steps_count} etapas · mín. ${pb.severity_threshold}</div>
+    </div>`).join('');
+
+  // Incidents
+  await pbLoadIncidents();
+}
+
+async function pbLoadIncidents(){
+  const r = await api('/playbooks/incidents?limit=50');
+  _pbIncidents = r?.incidents || [];
+  pbRenderIncidents(_pbIncidents);
+}
+
+function pbFilterIncidents(status){
+  const filtered = status ? _pbIncidents.filter(i=>i.status===status) : _pbIncidents;
+  pbRenderIncidents(filtered);
+}
+
+function pbRenderIncidents(incidents){
+  const el = document.getElementById('pb-incidents-list');
+  if(!el) return;
+  const STATUS_COL = {open:'var(--red)',in_progress:'var(--ora)',contained:'var(--yel)',resolved:'var(--grn)',false_positive:'var(--txt3)'};
+  const STATUS_LBL = {open:'Aberto',in_progress:'Em andamento',contained:'Contido',resolved:'Resolvido',false_positive:'Falso positivo'};
+
+  el.innerHTML = incidents.length ? incidents.map(inc=>`
+    <div style="background:var(--b2);border:1px solid ${STATUS_COL[inc.status]||'var(--b3)'};border-radius:8px;padding:12px;cursor:pointer"
+      onclick="pbShowIncident('${inc.incident_id}')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-size:.82rem;font-weight:700">${inc.playbook_meta?.label||inc.playbook}</div>
+          <div style="font-size:.68rem;color:var(--txt3);font-family:var(--mono)">${inc.incident_id} · ${inc.opened_at?.slice(0,16)||''}</div>
+        </div>
+        <span style="font-size:.68rem;padding:2px 8px;border-radius:4px;background:${STATUS_COL[inc.status]||'var(--b3)'}22;color:${STATUS_COL[inc.status]||'var(--txt2)'};border:1px solid ${STATUS_COL[inc.status]||'var(--b3)'};white-space:nowrap">
+          ${STATUS_LBL[inc.status]||inc.status}
+        </span>
+      </div>
+    </div>`).join('')
+  : `<div style="padding:20px;text-align:center;color:var(--txt3);font-size:.8rem">Nenhum incidente. Detecções críticas abrem incidentes automaticamente.</div>`;
+}
+
+function pbOpenManual(){
+  pbOpenManualWith('');
+}
+
+function pbOpenManualWith(defaultKey){
+  const m = document.createElement('div');
+  m.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center';
+  const PB_KEYS = ['brute_force','web_attack','malware_detected','data_exfiltration','ransomware','apt_lateral','generic_critical'];
+  m.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--b3);border-radius:10px;padding:24px;max-width:440px;width:90%;position:relative">
+    <button onclick="this.closest('div[style]').remove()" style="position:absolute;top:10px;right:12px;background:none;border:none;color:var(--txt3);font-size:1.1rem;cursor:pointer">✕</button>
+    <div style="font-size:.95rem;font-weight:700;margin-bottom:14px">Abrir Incidente Manual</div>
+    <label style="font-size:.78rem;color:var(--txt3);display:block;margin-bottom:3px">Playbook</label>
+    <select id="pb-manual-key" style="width:100%;background:var(--b2);color:var(--txt1);border:1px solid var(--b3);border-radius:6px;padding:6px 10px;margin-bottom:10px;font-size:.8rem">
+      ${PB_KEYS.map(k=>`<option value="${k}" ${k===defaultKey?'selected':''}>${k.replace(/_/g,' ')}</option>`).join('')}
+    </select>
+    <label style="font-size:.78rem;color:var(--txt3);display:block;margin-bottom:3px">IP/Host envolvido (opcional)</label>
+    <input id="pb-manual-ip" placeholder="ex: 192.168.1.50" style="width:100%;background:var(--b2);color:var(--txt1);border:1px solid var(--b3);border-radius:6px;padding:6px 10px;margin-bottom:14px;font-size:.8rem;box-sizing:border-box">
+    <button onclick="pbCreateManual()" style="width:100%;padding:8px;border-radius:6px;background:var(--acc);color:#000;border:none;font-weight:700;cursor:pointer">Abrir Incidente</button>
+  </div>`;
+  m.addEventListener('click', e=>{ if(e.target===m) m.remove(); });
+  document.body.appendChild(m);
+}
+
+async function pbCreateManual(){
+  const key = document.getElementById('pb-manual-key')?.value;
+  const ip  = document.getElementById('pb-manual-ip')?.value;
+  if(!key) return;
+  const r = await api('/playbooks/incidents', {method:'POST', body:JSON.stringify({
+    playbook: key,
+    trigger_event: {source_ip:ip, threat_name:'Manual', severity:'critical', timestamp: new Date().toISOString()},
+  })});
+  if(r?.ok){
+    document.querySelector('div[style*="rgba(0,0,0,.7)"]')?.remove();
+    toast('Incidente aberto!', 'ok');
+    await pbLoadIncidents();
+  }
+}
+
+async function pbShowIncident(incidentId){
+  const r = await api(`/playbooks/incidents/${incidentId}`);
+  if(!r) return;
+  const STATUS_LBL = {open:'Aberto',in_progress:'Em andamento',contained:'Contido',resolved:'Resolvido',false_positive:'Falso positivo'};
+  const STEP_ICON = {collect:'📦',block:'🛡',notify:'📢',manual:'👤',auto:'🤖'};
+  const STEP_COL  = {pending:'var(--txt3)',running:'var(--yel)',done:'var(--grn)',failed:'var(--red)',skipped:'var(--txt3)'};
+
+  const m = document.createElement('div');
+  m.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:20px';
+  m.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--b3);border-radius:10px;padding:24px;max-width:600px;width:100%;position:relative;max-height:80vh;overflow-y:auto">
+    <button onclick="this.closest('div[style*=\\"rgba(0,0,0,.7)\\"]').remove()" style="position:absolute;top:10px;right:12px;background:none;border:none;color:var(--txt3);font-size:1.1rem;cursor:pointer">✕</button>
+    <div style="font-size:1rem;font-weight:700;margin-bottom:2px">${r.playbook_meta?.label||r.playbook}</div>
+    <div style="font-size:.72rem;color:var(--txt3);font-family:var(--mono);margin-bottom:12px">${r.incident_id} · aberto ${r.opened_at?.slice(0,16)}</div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      ${['open','in_progress','contained','resolved','false_positive'].map(s=>
+        `<button onclick="pbSetStatus('${r.incident_id}','${s}',this)"
+          style="font-size:.7rem;padding:3px 10px;border-radius:4px;background:${s===r.status?'var(--acc)':'var(--b3)'};color:${s===r.status?'#000':'var(--txt1)'};border:none;cursor:pointer">
+          ${STATUS_LBL[s]||s}</button>`
+      ).join('')}
+    </div>
+    <div style="font-size:.82rem;font-weight:600;margin-bottom:8px;color:var(--txt2)">Etapas do Playbook</div>
+    ${(r.steps||[]).map(s=>`
+      <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--b1)">
+        <span style="font-size:.85rem;min-width:20px;text-align:center">${STEP_ICON[s.step_type]||'•'}</span>
+        <div style="flex:1">
+          <div style="font-size:.78rem;font-weight:600;color:${STEP_COL[s.status]||'var(--txt1)'}">${s.step_name}</div>
+          <div style="font-size:.7rem;color:var(--txt3)">${s.description}</div>
+          ${s.output ? `<div style="font-size:.68rem;color:var(--txt2);margin-top:2px;font-style:italic">${s.output}</div>` : ''}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <button onclick="pbMarkStep('${r.incident_id}',${s.step_order},'done',this)"
+            style="font-size:.65rem;padding:2px 6px;border-radius:3px;background:var(--grn);color:#000;border:none;cursor:pointer;opacity:${s.status==='done'?'.5':'1'}">✓</button>
+          <button onclick="pbMarkStep('${r.incident_id}',${s.step_order},'skipped',this)"
+            style="font-size:.65rem;padding:2px 6px;border-radius:3px;background:var(--b3);color:var(--txt1);border:none;cursor:pointer">→</button>
+        </div>
+      </div>`).join('')}
+  </div>`;
+  m.addEventListener('click', e=>{ if(e.target===m) m.remove(); });
+  document.body.appendChild(m);
+}
+
+async function pbMarkStep(incidentId, stepOrder, status, btn){
+  btn.disabled=true;
+  await api(`/playbooks/incidents/${incidentId}/steps/${stepOrder}`, {method:'POST', body:JSON.stringify({status})});
+  btn.style.opacity='.5';
+}
+
+async function pbSetStatus(incidentId, status, btn){
+  await api(`/playbooks/incidents/${incidentId}/status`, {method:'POST', body:JSON.stringify({status})});
+  toast(`Incidente ${status}`, 'ok');
+  await pbLoadIncidents();
+}
+
+// ══════════════════════════════════════ FORENSICS ════════════════
+
+async function loadForensics(){
+  const pg = document.getElementById('p-forensics');
+  if(!pg) return;
+
+  pg.innerHTML = `
+  <div style="flex:1;overflow-y:auto;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-size:1.1rem;font-weight:700">🔬 Forensics Snapshots</div>
+        <div style="font-size:.8rem;color:var(--txt3);margin-top:2px">Captura automática de evidências em alertas críticos: processos, conexões, hashes</div>
+      </div>
+      <button onclick="forensicsCapture()" class="btn-s" style="background:var(--ora);color:#000">📸 Capturar Agora</button>
+    </div>
+    <div id="forensics-stats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px"></div>
+    <div id="forensics-list" style="display:flex;flex-direction:column;gap:8px">
+      <div style="color:var(--txt3);font-size:.8rem;padding:20px;text-align:center">Carregando…</div>
+    </div>
+  </div>`;
+
+  const r = await api('/forensics/snapshots');
+  const snaps = r?.snapshots || [];
+  const stats = r?.stats || {};
+
+  const statsEl = document.getElementById('forensics-stats');
+  if(statsEl) statsEl.innerHTML = [
+    {label:'Total snapshots', val:stats.total||0,                         color:'var(--acc)'},
+    {label:'Críticos',        val:stats.by_severity?.critical||0,         color:'var(--red)'},
+    {label:'Altos',           val:stats.by_severity?.high||0,             color:'var(--ora)'},
+    {label:'Manuais',         val:snaps.filter(s=>s.trigger_type==='manual').length, color:'var(--txt2)'},
+  ].map(c=>`<div style="background:var(--b2);border:1px solid var(--b3);border-radius:8px;padding:8px 14px;min-width:110px">
+    <div style="font-size:1.2rem;font-weight:700;color:${c.color}">${c.val}</div>
+    <div style="font-size:.72rem;color:var(--txt3)">${c.label}</div>
+  </div>`).join('');
+
+  const list = document.getElementById('forensics-list');
+  if(!list) return;
+  const SEV_COL = {critical:'var(--red)',high:'var(--ora)',medium:'var(--yel)',low:'var(--grn)'};
+  const TRIG_ICON = {auto:'🤖',manual:'👤',alert:'🔔'};
+
+  list.innerHTML = snaps.length ? snaps.map(s=>`
+    <div style="background:var(--b2);border:1px solid ${SEV_COL[s.severity]||'var(--b3)'};border-radius:8px;padding:12px;cursor:pointer"
+      onclick="forensicsShowSnap('${s.snapshot_id}')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px">
+        <div>
+          <div style="font-size:.82rem;font-weight:700">${TRIG_ICON[s.trigger_type]||'📸'} ${s.snapshot_id}</div>
+          <div style="font-size:.7rem;color:var(--txt3)">Host: ${s.hostname||'—'} · ${s.os_info||''}</div>
+          <div style="font-size:.7rem;color:var(--txt2);margin-top:3px">${s.summary||'—'}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:.72rem;color:${SEV_COL[s.severity]||'var(--txt2)'};font-weight:700">${(s.severity||'').toUpperCase()}</div>
+          <div style="font-size:.68rem;color:var(--txt3)">${s.captured_at?.slice(0,16)||'—'}</div>
+        </div>
+      </div>
+    </div>`).join('')
+  : `<div style="padding:24px;text-align:center;color:var(--txt3);font-size:.8rem">
+      Nenhum snapshot. Snapshots são capturados automaticamente em alertas críticos,<br>ou clique em "Capturar Agora".
+    </div>`;
+}
+
+async function forensicsCapture(){
+  toast('Iniciando captura forense…', 'info');
+  const r = await api('/forensics/snapshots', {method:'POST', body:JSON.stringify({severity:'high'})});
+  if(r?.ok) { toast('Captura em andamento! Aguarde ~10s', 'ok'); setTimeout(loadForensics, 12000); }
+}
+
+async function forensicsShowSnap(snapId){
+  const r = await api(`/forensics/snapshots/${snapId}`);
+  if(!r) return;
+
+  const procs   = r.processes   || [];
+  const conns   = r.connections || [];
+  const hashes  = r.hash_artifacts || [];
+  const users   = r.users_logged || [];
+
+  const suspProcs = procs.filter(p=>p.suspicious);
+
+  const m = document.createElement('div');
+  m.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:20px';
+  m.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--b3);border-radius:10px;padding:24px;max-width:700px;width:100%;position:relative;max-height:85vh;overflow-y:auto">
+    <button onclick="this.closest('div[style*=\\"rgba(0,0,0,.7)\\"]').remove()" style="position:absolute;top:10px;right:12px;background:none;border:none;color:var(--txt3);font-size:1.1rem;cursor:pointer">✕</button>
+    <div style="font-size:.95rem;font-weight:700;margin-bottom:2px">🔬 ${r.snapshot_id}</div>
+    <div style="font-size:.72rem;color:var(--txt3);font-family:var(--mono);margin-bottom:12px">${r.hostname} · ${r.os_info} · ${r.captured_at?.slice(0,16)}</div>
+    <div style="font-size:.8rem;color:var(--txt2);margin-bottom:14px">${r.summary||''}</div>
+
+    ${suspProcs.length ? `
+    <div style="font-size:.82rem;font-weight:600;color:var(--red);margin-bottom:6px">⚠ Processos Suspeitos (${suspProcs.length})</div>
+    <div style="background:var(--b1);border-radius:6px;padding:8px;margin-bottom:12px;font-family:var(--mono);font-size:.7rem;max-height:120px;overflow-y:auto">
+      ${suspProcs.map(p=>`<div style="padding:2px 0;border-bottom:1px solid var(--b2)">${p.name} (PID:${p.pid||'?'}) — ${p.cmdline?.slice(0,80)||'—'}</div>`).join('')}
+    </div>` : ''}
+
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:6px">🔌 Conexões externas (${conns.filter(c=>c.raddr&&!c.raddr?.startsWith('127.')).length})</div>
+    <div style="background:var(--b1);border-radius:6px;padding:8px;margin-bottom:12px;font-family:var(--mono);font-size:.7rem;max-height:120px;overflow-y:auto">
+      ${conns.filter(c=>c.raddr).slice(0,30).map(c=>`<div style="padding:2px 0;border-bottom:1px solid var(--b2)">${c.laddr||'—'} → ${c.raddr} [${c.status||''}] PID:${c.pid||'?'}</div>`).join('') || '<div style="color:var(--txt3)">Nenhuma conexão externa detectada</div>'}
+    </div>
+
+    ${hashes.length ? `
+    <div style="font-size:.82rem;font-weight:600;color:var(--ora);margin-bottom:6px">🔐 Hashes de artefatos suspeitos</div>
+    <div style="background:var(--b1);border-radius:6px;padding:8px;margin-bottom:12px;font-family:var(--mono);font-size:.65rem;max-height:100px;overflow-y:auto">
+      ${hashes.map(h=>`<div style="padding:3px 0;border-bottom:1px solid var(--b2)"><span style="color:var(--txt3)">${h.path?.split(/[/\\]/).pop()}</span><br>MD5: ${h.md5}<br>SHA256: ${h.sha256}</div>`).join('')}
+    </div>` : ''}
+
+    ${users.length ? `
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:6px">👤 Usuários logados</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      ${users.map(u=>`<span style="background:var(--b3);border-radius:4px;padding:2px 8px;font-size:.72rem">${u.name||u.raw||'?'}</span>`).join('')}
+    </div>` : ''}
+
+    <button onclick="forensicsDeleteSnap('${r.snapshot_id}',this)"
+      style="font-size:.75rem;padding:4px 12px;border-radius:5px;background:var(--b3);color:var(--red);border:1px solid var(--red);cursor:pointer">
+      🗑 Excluir snapshot
+    </button>
+  </div>`;
+  m.addEventListener('click', e=>{ if(e.target===m) m.remove(); });
+  document.body.appendChild(m);
+}
+
+async function forensicsDeleteSnap(snapId, btn){
+  if(!confirm('Excluir este snapshot?')) return;
+  btn.disabled=true;
+  await api(`/forensics/snapshots/${snapId}`, {method:'DELETE'});
+  toast('Snapshot excluído', 'ok');
+  document.querySelector('div[style*="rgba(0,0,0,.7)"]')?.remove();
+  loadForensics();
 }
 </script>
 
@@ -6653,7 +7315,8 @@ async function showWHLogs(id){
 <!-- ── Módulos: sistema de design ─────────────────────────────── -->
 <style>
 /* ── Página container ────────────────────────────────────────── */
-#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules,#p-webhooks,#p-trials{
+#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules,#p-webhooks,#p-trials,#p-mitre,
+#p-threat-intel,#p-playbooks,#p-forensics{
   flex-direction:column;overflow:hidden;
 }
 
@@ -7241,3 +7904,4 @@ async function showWHLogs(id){
 </style>
 </body>
 </html>
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 

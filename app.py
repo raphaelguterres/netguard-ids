@@ -257,6 +257,16 @@ except ImportError:
     def enrich_ip(ip): return {}
     def enrich_async(ip, cb=None): pass
 
+# MITRE ATT&CK Engine
+try:
+    from engine.mitre_engine import get_mitre_engine
+    MITRE_AVAILABLE = True
+    logger.info("MITRE ATT&CK Engine disponível") if False else None  # lazy-init
+except Exception as _me:
+    get_mitre_engine = None
+    MITRE_AVAILABLE = False
+    print(f"[WARN] MITRE Engine: {_me}")
+
 # ── Logging ───────────────────────────────────────────────────────
 import uuid as _uuid_mod
 
@@ -732,6 +742,25 @@ def resolve_ip(ip: str) -> str:
         _dns_cache[ip] = ip
         return ip
 
+_GRAPH_CACHE_TTL = 5.0
+_GEO_CACHE_TTL = 15.0
+_graph_cache: dict = {}
+_geo_cache: dict = {}
+_graph_cache_lock = threading.Lock()
+_geo_cache_lock = threading.Lock()
+
+def _ttl_cache_get(cache: dict, lock: threading.Lock, key: str, ttl: float):
+    now = time.time()
+    with lock:
+        entry = cache.get(key)
+        if entry and now - entry["ts"] < ttl:
+            return entry["data"]
+    return None
+
+def _ttl_cache_set(cache: dict, lock: threading.Lock, key: str, data):
+    with lock:
+        cache[key] = {"ts": time.time(), "data": data}
+
 # ── Descoberta de dispositivos ────────────────────────────────────
 _dispositivos: list = []
 _ultimo_scan: float = 0.0
@@ -1112,6 +1141,26 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = "", ten
     _ids_inst = _get_ids(tenant_id or _resolve_tenant_id())
     eventos = _ids_inst.analyze(log, ip, ctx)
 
+    # Threat Intel — checar IP contra feeds TI (não bloqueia pipeline)
+    if TI_AVAILABLE and ip and ip not in ("—", ""):
+        try:
+            match = _get_ti_feed().lookup(ip, tenant_id=tenant_id or "global")
+            if match:
+                from ids_engine import Detection
+                ti_evt = Detection(
+                    threat_name=f"[TI] {match['threat_type'] or match['source']} — {ip}",
+                    severity="critical" if match["severity"] == "critical" else "high",
+                    source_ip=ip,
+                    log_entry=log[:300],
+                    method="threat_intel",
+                    confidence=match["confidence"] / 100.0,
+                )
+                if hasattr(ti_evt, "mitre_tactic"):
+                    ti_evt.mitre_tactic = "command_and_control"
+                eventos.append(ti_evt)
+        except Exception:
+            pass
+
     # OWASP CRS — análise de payload web
     if owasp_engine and field in ("url","body","query_string","raw","apache"):
         owasp_matches = owasp_engine.analyze(log)
@@ -1208,6 +1257,46 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = "", ten
                 })
             except Exception:
                 pass
+
+        # Incident Response Playbook — auto-trigger em detecções críticas
+        if PLAYBOOK_AVAILABLE and e.severity in ("critical", "high"):
+            try:
+                _get_playbook_engine().auto_trigger({
+                    "threat_name":     e.threat_name,
+                    "severity":        e.severity,
+                    "source_ip":       ip or "",
+                    "mitre_tactic":    e.mitre_tactic if hasattr(e, "mitre_tactic") else "",
+                    "log_entry":       log[:400],
+                    "timestamp":       datetime.now().isoformat() + "Z",
+                }, tenant_id=tenant_id or "default")
+            except Exception:
+                pass
+
+        # Forensics Snapshot — captura automática em alertas críticos
+        if FORENSICS_AVAILABLE and e.severity == "critical":
+            try:
+                _get_forensics_engine().capture_async(
+                    trigger_type="alert",
+                    trigger_event={
+                        "threat_name": e.threat_name,
+                        "source_ip":   ip or "",
+                        "log_entry":   log[:400],
+                    },
+                    severity="critical",
+                    tenant_id=tenant_id or "default",
+                )
+            except Exception:
+                pass
+
+    # MITRE ATT&CK — mapeia log para técnicas e registra hits
+    if MITRE_AVAILABLE and log:
+        try:
+            me = _get_mitre_engine()
+            techniques = me.map_event(log)
+            if techniques:
+                me.record_hit({"raw": log[:300], "source_ip": ip or "", "origem": origem}, techniques)
+        except Exception:
+            pass
 
     return eventos
 
@@ -1932,7 +2021,12 @@ def events_stream():
 @app.route("/api/graph")
 @auth
 def connection_graph():
-    """Retorna grafo de conexões: nós (processos + IPs) e arestas."""
+    tenant_id = _resolve_tenant_id()
+    cached = _ttl_cache_get(_graph_cache, _graph_cache_lock, tenant_id, _GRAPH_CACHE_TTL)
+    if cached is not None:
+        return jsonify(cached)
+
+    # Retorna grafo de conexões: nós (processos + IPs) e arestas.
     # Busca conexões em tempo real (não depende do cache do monitor)
     live = []
     try:
@@ -2008,11 +2102,13 @@ def connection_graph():
                     "port":   port,
                 })
 
-    return jsonify({
+    payload = {
         "nodes":     list(nodes.values()),
         "edges":     edges,
         "timestamp": datetime.now().isoformat() + "Z",
-    })
+    }
+    _ttl_cache_set(_graph_cache, _graph_cache_lock, tenant_id, payload)
+    return jsonify(payload)
 
 
 # ── SOC Engine initialization (after log_ao_vivo is defined) ────────
@@ -2783,7 +2879,12 @@ def feeds_stats():
 @app.route("/api/geo")
 @auth
 def geo_ips():
-    """Retorna geolocalização dos IPs externos ativos."""
+    tenant_id = _resolve_tenant_id()
+    cached = _ttl_cache_get(_geo_cache, _geo_cache_lock, tenant_id, _GEO_CACHE_TTL)
+    if cached is not None:
+        return jsonify(cached)
+
+    # Retorna geolocalização dos IPs externos ativos.
     try:
         from geo_ip import lookup
     except ImportError:
@@ -2843,11 +2944,13 @@ def geo_ips():
                     "hostname": ip,
                 }
 
-    return jsonify({
+    payload = {
         "points":    list(seen.values()),
         "total":     len(seen),
         "timestamp": datetime.now().isoformat() + "Z",
-    })
+    }
+    _ttl_cache_set(_geo_cache, _geo_cache_lock, tenant_id, payload)
+    return jsonify(payload)
 
 
 # ── /metrics — Prometheus Exposition Format ───────────────────────
@@ -3449,6 +3552,7 @@ def pricing():
     cancelled     = request.args.get("cancelled") == "1"
     contact_ok    = request.args.get("contact") == "ok"
     error         = request.args.get("error", "")
+    upgrade       = request.args.get("upgrade", "")
     contact_email = CONTACT_EMAIL if BILLING_OK else "contato@netguard.io"
     stripe_active = BILLING_OK and billing_active()
     return render_template(
@@ -3456,6 +3560,7 @@ def pricing():
         cancelled     = cancelled,
         contact_ok    = contact_ok,
         error         = error,
+        upgrade       = upgrade,
         contact_email = contact_email,
         plans         = PLANS if BILLING_OK else {},
         stripe_active = stripe_active,
@@ -3940,6 +4045,7 @@ def demo_access():
     html = dashboard_path.read_text(encoding="utf-8")
     resp = make_response(html, 200)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    _set_no_cache_headers(resp)
     _clear_preview_cookies(resp)
     resp.set_cookie(
         "netguard_token", demo_token,
@@ -3980,6 +4086,7 @@ def demo_access():
     html = dashboard_path.read_text(encoding="utf-8")
     resp = make_response(html, 200)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    _set_no_cache_headers(resp)
     resp.set_cookie(
         "netguard_token", DEMO_TOKEN,
         httponly=True, samesite="Lax",
@@ -4601,7 +4708,7 @@ def _render_trial_dashboard(trial: dict, remaining_seconds: int) -> str:
     """Serve o dashboard com metadados do trial injetados."""
     p = pathlib.Path(__file__).parent / "dashboard.html"
     html = p.read_text(encoding="utf-8")
-    # Injeta variáveis do trial logo após <body>
+    # Injeta variáveis do trial logo após a abertura do <body>.
     inject = f"""<script>
 window.__TRIAL__ = {{
   token:     "{trial['token']}",
@@ -4613,8 +4720,15 @@ window.__TRIAL__ = {{
   durationH: {trial.get('duration_h', 72)}
 }};
 </script>"""
-    html = html.replace("<body>", f"<body>{inject}", 1)
+    html = re.sub(r"(<body\b[^>]*>)", rf"\1{inject}", html, count=1, flags=re.IGNORECASE)
     return html
+
+
+def _set_no_cache_headers(resp):
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 def _render_trial_expired(trial: dict) -> str:
     company = trial.get("company") or trial.get("name") or trial.get("email","")
@@ -4692,6 +4806,7 @@ def trial_access(token):
     html = _render_trial_dashboard(trial, result["remaining_seconds"])
     resp = make_response(html, 200)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    _set_no_cache_headers(resp)
     _clear_preview_cookies(resp)
     resp.set_cookie("netguard_token", trial_token_cookie,
                     httponly=True, samesite="Lax", max_age=result["remaining_seconds"],
@@ -4967,6 +5082,87 @@ def admin_security_stats():
     })
 
 
+# ═══════════════════════════════════════ MITRE ATT&CK ══════════════
+
+def _get_mitre_engine():
+    db  = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+    tid = _resolve_tenant_id()
+    return get_mitre_engine(db, tid)
+
+@app.route("/api/mitre/stats", methods=["GET"])
+@auth
+def mitre_stats():
+    """Estatísticas de cobertura MITRE ATT&CK."""
+    if not MITRE_AVAILABLE:
+        return jsonify({"error": "MITRE Engine indisponível"}), 503
+    try:
+        return jsonify(_get_mitre_engine().stats())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/mitre/heatmap", methods=["GET"])
+@auth
+def mitre_heatmap():
+    """Heat map de técnicas ATT&CK detectadas nos últimos N dias."""
+    if not MITRE_AVAILABLE:
+        return jsonify({"error": "MITRE Engine indisponível"}), 503
+    try:
+        days = int(request.args.get("days", 30))
+        return jsonify(_get_mitre_engine().heat_map(days))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/mitre/hits", methods=["GET"])
+@auth
+def mitre_hits():
+    """Últimas N detecções mapeadas no ATT&CK."""
+    if not MITRE_AVAILABLE:
+        return jsonify({"error": "MITRE Engine indisponível"}), 503
+    try:
+        limit = int(request.args.get("limit", 50))
+        days  = int(request.args.get("days", 30))
+        hm    = _get_mitre_engine().heat_map(days)
+        return jsonify({
+            "hits":  hm.get("top10", []),
+            "total": hm.get("total_hits", 0),
+            "days":  days,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/mitre/navigator", methods=["GET"])
+@auth
+def mitre_navigator():
+    """Exporta layer JSON compatível com ATT&CK Navigator."""
+    if not MITRE_AVAILABLE:
+        return jsonify({"error": "MITRE Engine indisponível"}), 503
+    try:
+        days  = int(request.args.get("days", 30))
+        layer = _get_mitre_engine().navigator_layer(days)
+        resp  = Response(
+            json.dumps(layer, indent=2),
+            mimetype="application/json",
+        )
+        resp.headers["Content-Disposition"] = "attachment; filename=netguard_mitre_layer.json"
+        return resp
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/mitre/technique/<tid_param>", methods=["GET"])
+@auth
+def mitre_technique(tid_param: str):
+    """Detalhe de uma técnica ATT&CK específica."""
+    if not MITRE_AVAILABLE:
+        return jsonify({"error": "MITRE Engine indisponível"}), 503
+    try:
+        detail = _get_mitre_engine().technique_detail(tid_param.upper())
+        if not detail:
+            return jsonify({"error": "Técnica não encontrada"}), 404
+        return jsonify(detail)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ═══════════════════════════════════════ WEBHOOK ALERTS ════════════
 
 try:
@@ -4976,6 +5172,36 @@ try:
 except Exception as _we:
     WEBHOOK_AVAILABLE = False
     logger.warning("Webhook Engine indisponível: %s", _we)
+
+# Threat Intel Feed
+try:
+    from engine.threat_intel_feed import get_ti_feed
+    TI_AVAILABLE = True
+    logger.info("Threat Intel Feed carregado")
+except Exception as _ti_err:
+    TI_AVAILABLE = False
+    get_ti_feed = None
+    logger.warning("Threat Intel Feed indisponível: %s", _ti_err)
+
+# Incident Response Playbooks
+try:
+    from engine.playbook_engine import get_playbook_engine
+    PLAYBOOK_AVAILABLE = True
+    logger.info("Playbook Engine carregado")
+except Exception as _pb_err:
+    PLAYBOOK_AVAILABLE = False
+    get_playbook_engine = None
+    logger.warning("Playbook Engine indisponível: %s", _pb_err)
+
+# Forensics Snapshot
+try:
+    from engine.forensics_engine import get_forensics_engine
+    FORENSICS_AVAILABLE = True
+    logger.info("Forensics Engine carregado")
+except Exception as _fo_err:
+    FORENSICS_AVAILABLE = False
+    get_forensics_engine = None
+    logger.warning("Forensics Engine indisponível: %s", _fo_err)
 
 def _get_webhook_engine():
     db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
@@ -5054,6 +5280,217 @@ def webhooks_types():
     return jsonify({"types": _get_webhook_engine().supported_types()})
 
 
+# ── Threat Intel Feed ────────────────────────────────────────────────────────
+
+def _get_ti_feed():
+    db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+    feed = get_ti_feed(db)
+    # Start scheduler on first call
+    feed.start_scheduler(interval_check_s=300)
+    return feed
+
+@app.route("/api/ti/stats")
+@auth
+def ti_stats():
+    if not TI_AVAILABLE:
+        return jsonify({"available": False}), 503
+    tenant_id = _resolve_tenant_id()
+    return jsonify({"available": True, **_get_ti_feed().stats(tenant_id=tenant_id)})
+
+@app.route("/api/ti/iocs")
+@auth
+def ti_iocs():
+    if not TI_AVAILABLE:
+        return jsonify({"available": False}), 503
+    tenant_id = _resolve_tenant_id()
+    source    = request.args.get("source")
+    ioc_type  = request.args.get("type")
+    limit     = min(int(request.args.get("limit", 200)), 1000)
+    offset    = int(request.args.get("offset", 0))
+    iocs = _get_ti_feed().list_iocs(source=source, ioc_type=ioc_type,
+                                     limit=limit, offset=offset, tenant_id=tenant_id)
+    return jsonify({"iocs": iocs, "count": len(iocs)})
+
+@app.route("/api/ti/lookup")
+@auth
+def ti_lookup():
+    if not TI_AVAILABLE:
+        return jsonify({"available": False}), 503
+    value     = request.args.get("value", "").strip()
+    tenant_id = _resolve_tenant_id()
+    if not value:
+        return jsonify({"error": "value required"}), 400
+    match = _get_ti_feed().lookup(value, tenant_id=tenant_id)
+    return jsonify({"value": value, "match": match, "found": match is not None})
+
+@app.route("/api/ti/feeds/<feed_name>/refresh", methods=["POST"])
+@auth
+@csrf_protect
+def ti_refresh_feed(feed_name):
+    if not TI_AVAILABLE:
+        return jsonify({"available": False}), 503
+    def _run():
+        try:
+            _get_ti_feed().refresh_feed(feed_name)
+        except Exception as e:
+            logger.error("TI refresh error: %s", e)
+    threading.Thread(target=_run, daemon=True, name=f"ti-refresh-{feed_name}").start()
+    return jsonify({"ok": True, "feed": feed_name, "status": "refresh_started"})
+
+@app.route("/api/ti/feeds/refresh_all", methods=["POST"])
+@auth
+@csrf_protect
+def ti_refresh_all():
+    if not TI_AVAILABLE:
+        return jsonify({"available": False}), 503
+    def _run():
+        try:
+            _get_ti_feed().refresh_all()
+        except Exception as e:
+            logger.error("TI refresh_all error: %s", e)
+    threading.Thread(target=_run, daemon=True, name="ti-refresh-all").start()
+    return jsonify({"ok": True, "status": "refresh_all_started"})
+
+# ── Incident Response Playbooks ───────────────────────────────────────────────
+
+def _get_playbook_engine():
+    db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+    return get_playbook_engine(db)
+
+@app.route("/api/playbooks")
+@auth
+def playbooks_list_route():
+    if not PLAYBOOK_AVAILABLE:
+        return jsonify({"available": False}), 503
+    pbe = _get_playbook_engine()
+    return jsonify({
+        "available": True,
+        "playbooks": pbe.playbooks_list(),
+        "stats":     pbe.stats(_resolve_tenant_id()),
+    })
+
+@app.route("/api/playbooks/incidents")
+@auth
+def playbooks_incidents():
+    if not PLAYBOOK_AVAILABLE:
+        return jsonify({"available": False}), 503
+    tenant_id = _resolve_tenant_id()
+    status    = request.args.get("status")
+    limit     = min(int(request.args.get("limit", 50)), 200)
+    incidents = _get_playbook_engine().list_incidents(tenant_id=tenant_id, status=status, limit=limit)
+    return jsonify({"incidents": incidents, "count": len(incidents)})
+
+@app.route("/api/playbooks/incidents", methods=["POST"])
+@auth
+@csrf_protect
+def playbooks_open_incident():
+    if not PLAYBOOK_AVAILABLE:
+        return jsonify({"available": False}), 503
+    data = request.get_json(force=True) or {}
+    pb_key = data.get("playbook")
+    if not pb_key:
+        return jsonify({"error": "playbook required"}), 400
+    try:
+        inc = _get_playbook_engine().open_incident(
+            pb_key,
+            trigger_event=data.get("trigger_event", {}),
+            tenant_id=_resolve_tenant_id(),
+        )
+        return jsonify({"ok": True, "incident": inc}), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/playbooks/incidents/<incident_id>")
+@auth
+def playbooks_get_incident(incident_id):
+    if not PLAYBOOK_AVAILABLE:
+        return jsonify({"available": False}), 503
+    inc = _get_playbook_engine().get_incident(incident_id)
+    if not inc:
+        return jsonify({"error": "Incidente não encontrado"}), 404
+    return jsonify(inc)
+
+@app.route("/api/playbooks/incidents/<incident_id>/status", methods=["POST"])
+@auth
+@csrf_protect
+def playbooks_update_status(incident_id):
+    if not PLAYBOOK_AVAILABLE:
+        return jsonify({"available": False}), 503
+    data   = request.get_json(force=True) or {}
+    status = data.get("status", "")
+    notes  = data.get("notes", "")
+    _get_playbook_engine().update_incident_status(incident_id, status, notes)
+    return jsonify({"ok": True})
+
+@app.route("/api/playbooks/incidents/<incident_id>/steps/<int:step_order>", methods=["POST"])
+@auth
+@csrf_protect
+def playbooks_update_step(incident_id, step_order):
+    if not PLAYBOOK_AVAILABLE:
+        return jsonify({"available": False}), 503
+    data   = request.get_json(force=True) or {}
+    status = data.get("status", "done")
+    output = data.get("output", "")
+    _get_playbook_engine().update_step(incident_id, step_order, status, output)
+    return jsonify({"ok": True})
+
+# ── Forensics Snapshots ───────────────────────────────────────────────────────
+
+def _get_forensics_engine():
+    db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+    return get_forensics_engine(db)
+
+@app.route("/api/forensics/snapshots")
+@auth
+def forensics_list():
+    if not FORENSICS_AVAILABLE:
+        return jsonify({"available": False}), 503
+    tenant_id = _resolve_tenant_id()
+    limit     = min(int(request.args.get("limit", 50)), 200)
+    snaps = _get_forensics_engine().list_snapshots(tenant_id=tenant_id, limit=limit)
+    stats = _get_forensics_engine().stats(tenant_id=tenant_id)
+    return jsonify({"snapshots": snaps, "stats": stats, "available": True})
+
+@app.route("/api/forensics/snapshots", methods=["POST"])
+@auth
+@csrf_protect
+def forensics_capture():
+    if not FORENSICS_AVAILABLE:
+        return jsonify({"available": False}), 503
+    data      = request.get_json(force=True) or {}
+    tenant_id = _resolve_tenant_id()
+    def _run():
+        try:
+            _get_forensics_engine().capture(
+                trigger_type="manual",
+                trigger_event=data,
+                severity=data.get("severity", "high"),
+                tenant_id=tenant_id,
+            )
+        except Exception as e:
+            logger.error("Forensics capture error: %s", e)
+    threading.Thread(target=_run, daemon=True, name="forensics-manual").start()
+    return jsonify({"ok": True, "status": "capture_started"}), 202
+
+@app.route("/api/forensics/snapshots/<snapshot_id>")
+@auth
+def forensics_get(snapshot_id):
+    if not FORENSICS_AVAILABLE:
+        return jsonify({"available": False}), 503
+    snap = _get_forensics_engine().get_snapshot(snapshot_id)
+    if not snap:
+        return jsonify({"error": "Snapshot não encontrado"}), 404
+    return jsonify(snap)
+
+@app.route("/api/forensics/snapshots/<snapshot_id>", methods=["DELETE"])
+@auth
+@csrf_protect
+def forensics_delete(snapshot_id):
+    if not FORENSICS_AVAILABLE:
+        return jsonify({"available": False}), 503
+    _get_forensics_engine().delete_snapshot(snapshot_id)
+    return jsonify({"ok": True})
+
 # ═══════════════════════════════════════════════════════════════════
 
 @app.route("/")
@@ -5069,7 +5506,11 @@ def index():
 def dashboard():
     p = pathlib.Path(__file__).parent/"dashboard.html"
     if not p.exists(): return "dashboard.html nao encontrado",404
-    return p.read_text(encoding="utf-8"),200,{"Content-Type":"text/html;charset=utf-8"}
+    from flask import make_response
+    resp = make_response(p.read_text(encoding="utf-8"), 200)
+    resp.headers["Content-Type"] = "text/html;charset=utf-8"
+    _set_no_cache_headers(resp)
+    return resp
 
 # ── Inicialização ─────────────────────────────────────────────────
 def iniciar_monitoramento():
