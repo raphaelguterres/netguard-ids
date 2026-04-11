@@ -1,288 +1,108 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Bem-vindo ao NetGuard IDS!</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-      background: #0d1117;
-      color: #e6edf3;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 2rem 1rem;
-    }
-    .card {
-      background: #161b22;
-      border: 1px solid #21262d;
-      border-radius: 14px;
-      padding: 2.5rem;
-      max-width: 600px;
-      width: 100%;
-    }
-    .success-icon {
-      width: 60px;
-      height: 60px;
-      background: #1a3a1f;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 0 auto 1.5rem;
-    }
-    .success-icon svg { width: 30px; height: 30px; }
-
-    h1 { text-align: center; font-size: 1.7rem; margin-bottom: 0.5rem; }
-    .subtitle { text-align: center; color: #8b949e; font-size: 0.95rem; margin-bottom: 2rem; }
-
-    .plan-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      background: #1f3a4f;
-      color: #58a6ff;
-      font-size: 0.8rem;
-      font-weight: 600;
-      padding: 0.3rem 0.8rem;
-      border-radius: 999px;
-      margin: 0 auto 2rem;
-      display: flex;
-      justify-content: center;
-      width: fit-content;
-      margin: 0 auto 2rem;
-    }
-
-    /* Token box */
-    .token-section { margin-bottom: 2rem; }
-    .token-label {
-      font-size: 0.8rem;
-      font-weight: 700;
-      color: #8b949e;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 0.6rem;
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-    }
-    .token-label::before { content: "🔑"; }
-    .token-box {
-      display: flex;
-      align-items: center;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .token-value {
-      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-      font-size: 0.85rem;
-      padding: 0.8rem 1rem;
-      flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: #79c0ff;
-    }
-    .copy-btn {
-      background: #21262d;
-      border: none;
-      border-left: 1px solid #30363d;
-      color: #8b949e;
-      padding: 0.8rem 1rem;
-      cursor: pointer;
-      font-size: 0.8rem;
-      font-weight: 600;
-      transition: background .2s, color .2s;
-      white-space: nowrap;
-    }
-    .copy-btn:hover { background: #30363d; color: #e6edf3; }
-    .copy-btn.copied { color: #3fb950; }
-
-    .token-warning {
-      margin-top: 0.6rem;
-      font-size: 0.8rem;
-      color: #f0883e;
-      display: flex;
-      align-items: flex-start;
-      gap: 0.4rem;
-    }
-
-    /* Steps */
-    .steps-title {
-      font-size: 0.85rem;
-      font-weight: 700;
-      color: #8b949e;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 1rem;
-    }
-    .steps { display: flex; flex-direction: column; gap: 0.8rem; margin-bottom: 2rem; }
-    .step {
-      display: flex;
-      align-items: flex-start;
-      gap: 1rem;
-      padding: 0.9rem 1rem;
-      background: #0d1117;
-      border: 1px solid #21262d;
-      border-radius: 8px;
-    }
-    .step-num {
-      width: 28px;
-      height: 28px;
-      background: #1f3a4f;
-      color: #58a6ff;
-      border-radius: 50%;
-      font-size: 0.75rem;
-      font-weight: 800;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-    .step-content { flex: 1; }
-    .step-title { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem; }
-    .step-desc { color: #8b949e; font-size: 0.82rem; line-height: 1.5; }
-    pre {
-      background: #0d1117;
-      border: 1px solid #21262d;
-      border-radius: 6px;
-      padding: 0.5rem 0.8rem;
-      margin-top: 0.5rem;
-      font-family: 'Cascadia Code', 'Fira Code', monospace;
-      font-size: 0.78rem;
-      color: #79c0ff;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-
-    /* Actions */
-    .actions { display: flex; gap: 0.8rem; flex-wrap: wrap; }
-    .btn {
-      flex: 1;
-      min-width: 140px;
-      padding: 0.75rem;
-      border-radius: 8px;
-      font-weight: 700;
-      font-size: 0.9rem;
-      cursor: pointer;
-      border: none;
-      text-align: center;
-      display: inline-block;
-      transition: opacity .2s;
-    }
-    .btn:hover { opacity: 0.85; }
-    .btn-primary { background: #238636; color: #fff; }
-    .btn-outline  { background: transparent; border: 1px solid #30363d; color: #e6edf3; }
-    #btn-dashboard,
-    .actions a[href="/billing/portal"] { display: none; }
-    .actions-note {
-      margin-top: 0.9rem;
-      font-size: 0.82rem;
-      color: #8b949e;
-      line-height: 1.5;
-    }
-
-    .demo-notice {
-      background: #1c1e12;
-      border: 1px solid #9e6a0344;
-      border-radius: 8px;
-      padding: 0.8rem 1rem;
-      color: #e3b341;
-      font-size: 0.82rem;
-      margin-bottom: 1.5rem;
-      display: flex;
-      gap: 0.5rem;
-      align-items: flex-start;
-    }
-  </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NetGuard IDS | Secure onboarding</title>
+  <link rel="stylesheet" href="/static/enterprise.css">
 </head>
-<body>
-
-<div class="card">
-  <div class="success-icon">
-    <svg viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-      <polyline points="20 6 9 17 4 12"/>
-    </svg>
-  </div>
-
-  <h1>Tudo certo, {{ name or 'bem-vindo' }}! 🎉</h1>
-  <p class="subtitle">Sua conta NetGuard IDS foi criada com sucesso.</p>
-
-  <div class="plan-badge">
-    🛡️ Plano {{ plan_label or 'Pro' }} ativo
-  </div>
-
-  {% if demo %}
-  <div class="demo-notice">
-    ⚠️ <span><strong>Modo demo</strong> — Stripe não está configurado. Este é um token de teste, nenhuma cobrança foi feita.</span>
-  </div>
-  {% endif %}
-
-  <div class="token-section">
-    <div class="token-label">Seu token de API</div>
-    <div class="token-box">
-      <span class="token-value" id="token-val">{{ token }}</span>
-      <button class="copy-btn" id="copy-btn" onclick="copyToken()">Copiar</button>
-    </div>
-    <p class="token-warning">
-      ⚠️ Guarde este token agora. Por segurança, ele não será exibido novamente.
-    </p>
-  </div>
-
-  <div class="steps-title">Como começar</div>
-  <div class="steps">
-    <div class="step">
-      <div class="step-num">1</div>
-      <div class="step-content">
-        <div class="step-title">Instale o agente no seu servidor</div>
-        <div class="step-desc">Rode o comando abaixo em cada host que deseja monitorar:</div>
-        <pre>pip install netguard-agent
-netguard-agent --token {{ token }} --server {{ server_url }}</pre>
+<body class="welcome-page">
+  <header class="site-header">
+    <div class="page-frame header-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark">NG</span>
+        <span class="brand-stack">
+          <strong>NetGuard IDS</strong>
+          <small>secure onboarding</small>
+        </span>
+      </a>
+      <div class="site-actions">
+        <span class="pill">Provisioning complete</span>
       </div>
     </div>
+  </header>
 
-    <div class="step">
-      <div class="step-num">2</div>
-      <div class="step-content">
-        <div class="step-title">Ou use via variável de ambiente</div>
-        <div class="step-desc">Ideal para Docker / systemd:</div>
-        <pre>export NETGUARD_TOKEN="{{ token }}"
+  <main class="section">
+    <div class="page-frame onboarding-shell">
+      <section class="vault-card">
+        <span class="panel-kicker">ACCOUNT READY</span>
+        <h1 class="vault-title">Tudo pronto, {{ name or 'operador' }}.</h1>
+        <p class="vault-copy">
+          Sua conta foi provisionada com sucesso. O fluxo abaixo entrega acesso rapido,
+          token seguro e caminho direto para avaliacao do painel.
+        </p>
+
+        <div class="metric-strip" style="margin-top:1.2rem;">
+          <span class="trust-item"><span class="trust-dot"></span><strong>Plano ativo:</strong> {{ plan_label or 'Pro' }}</span>
+          <span class="trust-item"><span class="trust-dot"></span><strong>Modo:</strong> onboarding premium</span>
+        </div>
+
+        {% if demo %}
+        <div class="banner warning" style="margin-top:1.2rem;">
+          Modo demo ativo. Este token usa dados de avaliacao e nao representa uma cobranca real.
+        </div>
+        {% endif %}
+
+        <div style="margin-top:1.4rem;">
+          <span class="field-label">Token de API</span>
+          <div class="token-vault">
+            <span class="token-value" id="token-val">{{ token }}</span>
+            <button class="button-primary copy-btn" id="copy-btn" onclick="copyToken()">Copiar token</button>
+          </div>
+          <p class="token-warning" style="margin-top:0.75rem;">
+            Guarde este token agora. Por seguranca, ele nao volta a ser exibido depois.
+          </p>
+        </div>
+
+        <div class="action-cluster" style="margin-top:1.4rem;">
+          <a id="btn-preview" href="/dashboard" class="button-primary">Testar painel agora</a>
+          <a id="btn-login" href="/dashboard" class="button-secondary">Entrar com meu token</a>
+          <a id="btn-dashboard" href="/login" class="button-primary is-hidden">Acessar painel</a>
+          <a href="/billing/portal" class="button-tertiary is-hidden">Gerenciar billing</a>
+        </div>
+
+        <p class="actions-note" style="margin-top:1rem;">
+          O preview abre um ambiente temporario com dados de exemplo. Para acessar sua conta real
+          imediatamente, use o login com token.
+        </p>
+      </section>
+
+      <aside class="panel" style="padding:1.6rem;">
+        <span class="panel-kicker">NEXT STEPS</span>
+        <h2 class="section-title" style="font-size:1.8rem; margin-top:0.8rem;">Entrar em operacao sem perder contexto.</h2>
+        <p class="section-copy">O onboarding foi reorganizado para parecer um runbook de produto enterprise: claro, direto e acionavel.</p>
+
+        <div class="step-list" style="margin-top:1.2rem;">
+          <article class="step-card">
+            <span class="step-index">STEP 01</span>
+            <h3 class="step-title">Instale o agente</h3>
+            <p class="step-copy">Rode o comando abaixo no host que deseja monitorar:</p>
+            <pre>pip install netguard-agent
+netguard-agent --token {{ token }} --server {{ server_url }}</pre>
+          </article>
+
+          <article class="step-card">
+            <span class="step-index">STEP 02</span>
+            <h3 class="step-title">Padronize por ambiente</h3>
+            <p class="step-copy">Use variaveis de ambiente para Docker, systemd ou automacao:</p>
+            <pre>export NETGUARD_TOKEN="{{ token }}"
 export NETGUARD_SERVER="{{ server_url }}"
 netguard-agent</pre>
-      </div>
+          </article>
+
+          <article class="step-card">
+            <span class="step-index">STEP 03</span>
+            <h3 class="step-title">Valide o command center</h3>
+            <p class="step-copy">Os primeiros eventos aparecem no painel em ate 60 segundos apos o agente subir.</p>
+          </article>
+        </div>
+      </aside>
     </div>
-
-    <div class="step">
-      <div class="step-num">3</div>
-      <div class="step-content">
-        <div class="step-title">Acesse o dashboard</div>
-        <div class="step-desc">Eventos aparecerão no dashboard em até 60 segundos após o agente iniciar.</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="actions">
-    <a id="btn-preview" href="/dashboard" class="btn btn-primary">Testar painel agora (15 min) -></a>
-    <a id="btn-login" href="/dashboard" class="btn btn-outline">Entrar com meu token</a>
-    <a id="btn-dashboard" href="/login" class="btn btn-primary">Acessar painel →</a>
-    <a href="/billing/portal" class="btn btn-outline">Gerenciar billing</a>
-  </div>
-
-  <p class="actions-note">
-    O teste rapido abre um modo free temporario com dados de exemplo. Para entrar na sua conta real imediatamente, use o login com token.
-  </p>
+  </main>
 
   <script>
-    // Login via POST — token nunca vai na URL (segurança)
     function loginAndRedirect() {
-      const btn   = document.getElementById('btn-dashboard');
+      const btn = document.getElementById('btn-dashboard');
       const token = document.getElementById('token-val').textContent.trim();
       if (!token) { window.location.href = '/login'; return; }
 
@@ -306,7 +126,6 @@ netguard-agent</pre>
       .catch(() => { window.location.href = '/login'; });
     }
 
-    // Substitui o href do botão por chamada segura
     (function() {
       const btn = document.getElementById('btn-dashboard');
       if (btn) {
@@ -386,22 +205,19 @@ netguard-agent</pre>
       }
     })();
   </script>
-</div>
-
-<script>
-  function copyToken() {
-    const val = document.getElementById('token-val').textContent.trim();
-    navigator.clipboard.writeText(val).then(() => {
-      const btn = document.getElementById('copy-btn');
-      btn.textContent = '✓ Copiado!';
-      btn.classList.add('copied');
-      setTimeout(() => {
-        btn.textContent = 'Copiar';
-        btn.classList.remove('copied');
-      }, 2500);
-    });
-  }
-</script>
-
+  <script>
+    function copyToken() {
+      const val = document.getElementById('token-val').textContent.trim();
+      navigator.clipboard.writeText(val).then(() => {
+        const btn = document.getElementById('copy-btn');
+        btn.textContent = 'Token copiado';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = 'Copiar token';
+          btn.classList.remove('copied');
+        }, 2500);
+      });
+    }
+  </script>
 </body>
 </html>

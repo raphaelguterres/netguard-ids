@@ -148,8 +148,9 @@
     /* Scrollbar */
     ::-webkit-scrollbar { width:6px; } ::-webkit-scrollbar-track { background:transparent; } ::-webkit-scrollbar-thumb { background:var(--s3); border-radius:3px; }
   </style>
+  <link rel="stylesheet" href="/static/admin-enterprise.css">
 </head>
-<body>
+<body class="admin-enterprise">
 
 <header>
   <div class="logo">
@@ -168,6 +169,31 @@
 <div class="container">
   <h1>Painel de Administração</h1>
   <p class="subtitle" id="last-refresh">Carregando dados...</p>
+
+  <section class="admin-hero">
+    <div>
+      <span class="admin-tag">CONTROL TOWER</span>
+      <h2>Governanca premium para trials, tenants e auditoria.</h2>
+      <p>
+        Esta camada agora conversa com operacao, produto e receita com a mesma linguagem:
+        leitura rapida, postura enterprise e visibilidade que sustenta decisoes de alto nivel.
+      </p>
+    </div>
+    <div class="admin-hero-grid">
+      <article class="admin-hero-card">
+        <strong>Trials</strong>
+        <span>Fluxo comercial e onboarding com mais peso visual e melhor leitura de status.</span>
+      </article>
+      <article class="admin-hero-card">
+        <strong>Tenants</strong>
+        <span>Controle unificado para criacao, rotacao de token e postura de crescimento.</span>
+      </article>
+      <article class="admin-hero-card">
+        <strong>Auditoria</strong>
+        <span>Trilha de eventos com acabamento de console executivo, sem perder densidade tecnica.</span>
+      </article>
+    </div>
+  </section>
 
   <!-- Stats -->
   <div class="stats-grid" id="stats-grid">

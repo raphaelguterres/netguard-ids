@@ -19,7 +19,7 @@ except ImportError:
     psutil = None
     PSUTIL_OK = False
     logging.getLogger("ids.api").warning("psutil não instalado — instale com: pip install psutil")
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 from ids_engine import IDSEngine, LogProcessor
@@ -273,6 +273,10 @@ import uuid as _uuid_mod
 # Contexto de request local (thread-safe)
 _request_ctx = threading.local()
 
+
+def _utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
 class JSONFormatter(logging.Formatter):
     """Logs estruturados em JSON — compatível com Datadog, Loki, CloudWatch e ELK."""
 
@@ -283,7 +287,7 @@ class JSONFormatter(logging.Formatter):
 
     def format(self, r: logging.LogRecord) -> str:
         record: dict = {
-            "ts":      datetime.now().isoformat() + "Z",
+            "ts":      _utc_iso(),
             "level":   r.levelname,
             "logger":  r.name,
             "msg":     r.getMessage(),
@@ -650,6 +654,7 @@ try:
     )
     # Atalhos de decorator reutilizáveis
     _limit_login    = limiter.limit("10 per minute", exempt_when=_skip_rate_limit)
+    _limit_validate = limiter.limit("10 per minute", exempt_when=_skip_rate_limit)
     _limit_trial    = limiter.limit("3 per hour", exempt_when=_skip_rate_limit)
     _limit_contact  = limiter.limit("5 per hour", exempt_when=_skip_rate_limit)
     _limit_report   = limiter.limit("5 per minute", exempt_when=_skip_rate_limit)
@@ -666,7 +671,7 @@ except ImportError:
             return decorator
         def exempt(self, f): return f
     limiter       = _NoopLimiter()
-    _limit_login  = _limit_trial = _limit_contact = _noop = limiter.limit("")
+    _limit_login  = _limit_validate = _limit_trial = _limit_contact = _noop = limiter.limit("")
     _limit_report = _limit_ioc_check = _limit_train = _noop
 
 # ── Whitelist ─────────────────────────────────────────────────────
@@ -713,6 +718,7 @@ def _get_ids(tid: str = None) -> "IDSEngine":
 # ── Event Repository (multi-tenant storage) ───────────────────────
 from storage.event_repository import EventRepository
 repo = EventRepository()
+app._repo = repo
 
 # ── Auth ──────────────────────────────────────────────────────────
 # Nota: auth() importado de auth.py (token-based) tem prioridade.
@@ -1162,9 +1168,10 @@ _TI_CACHE_TTL = 3600          # segundos
 _TI_CACHE_MAX = 2000          # evita crescimento ilimitado
 _ti_cache_lock = threading.Lock()
 
-def ti_lookup(ip: str) -> dict:
+def _ti_lookup_ip(ip: str) -> dict:
     """Consulta threat intel com cache TTL de 1h.
     Evita chamadas repetidas a APIs externas (VirusTotal, AbuseIPDB).
+    NOTA: nome com _ para não colidir com a Flask route ti_lookup().
     """
     now = time.time()
     with _ti_cache_lock:
@@ -1281,7 +1288,7 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = "", ten
                     "threat_name": e.threat_name,
                     "severity":    e.severity,
                     "method":      "ids",
-                    "timestamp":   datetime.now().isoformat() + "Z",
+                    "timestamp":   _utc_iso(),
                 })
                 if ban:
                     log_ao_vivo({
@@ -1307,7 +1314,7 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = "", ten
                     "method":        "ids",
                     "log_entry":     log[:200],
                     "confidence":    e.confidence if hasattr(e,'confidence') else 1.0,
-                    "timestamp":     datetime.now().isoformat() + "Z",
+                    "timestamp":     _utc_iso(),
                 })
             except Exception:
                 pass
@@ -1321,7 +1328,7 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = "", ten
                     "event_type": "detection",
                     "source_ip":  ip or "—",
                     "hostname":   os.environ.get("COMPUTERNAME", "netguard-host"),
-                    "timestamp":  datetime.now().isoformat() + "Z",
+                    "timestamp":  _utc_iso(),
                     "details":    {"raw": log[:300]},
                 })
             except Exception:
@@ -1336,7 +1343,7 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = "", ten
                     "source_ip":       ip or "",
                     "mitre_tactic":    e.mitre_tactic if hasattr(e, "mitre_tactic") else "",
                     "log_entry":       log[:400],
-                    "timestamp":       datetime.now().isoformat() + "Z",
+                    "timestamp":       _utc_iso(),
                 }, tenant_id=tenant_id or "default")
             except Exception:
                 pass
@@ -1628,6 +1635,7 @@ def before():
     rid = request.headers.get("X-Request-ID") or _uuid_mod.uuid4().hex[:16]
     request._rid = rid
     _request_ctx.request_id = rid
+    g._repo = repo
     # Resolve tenant + role e expõe via flask.g (para require_role() funcionar)
     _tid, _role = _resolve_tenant_with_role()
     _request_ctx.tenant_id = _tid
@@ -1897,7 +1905,7 @@ def get_devices():
         "devices":   enriched,
         "total":     len(enriched),
         "rede":      "192.168.15.0/24",
-        "timestamp": datetime.now().isoformat() + "Z",
+        "timestamp": _utc_iso(),
     })
 
 @app.route("/api/connections")
@@ -1907,7 +1915,7 @@ def get_connections():
     return jsonify({
         "connections": conexoes_ativas,
         "total":       len(conexoes_ativas),
-        "timestamp":   datetime.now().isoformat() + "Z",
+        "timestamp":   _utc_iso(),
     })
 
 @app.route("/api/system")
@@ -2035,7 +2043,7 @@ def live_log():
     return jsonify({
         "entries":   entries,
         "total":     len(entries),
-        "timestamp": datetime.now().isoformat() + "Z",
+        "timestamp": _utc_iso(),
     })
 
 @app.route("/api/events/stream")
@@ -2148,7 +2156,7 @@ def _compute_graph_data(tenant_id: str) -> dict:
             hn   = conn.get("hostname", ip)
             iid  = f"ip:{ip}"
             if iid not in nodes:
-                r2 = ti_lookup(ip)
+                r2 = _ti_lookup_ip(ip)
                 nodes[iid] = {
                     "id":       iid,
                     "label":    hn if hn != ip else ip,
@@ -2166,7 +2174,7 @@ def _compute_graph_data(tenant_id: str) -> dict:
     payload = {
         "nodes":     list(nodes.values()),
         "edges":     edges,
-        "timestamp": datetime.now().isoformat() + "Z",
+        "timestamp": _utc_iso(),
         "cached":    False,
     }
     _ttl_cache_set(_graph_cache, _graph_cache_lock, tenant_id, payload)
@@ -2800,7 +2808,7 @@ def f2b_bans():
     return jsonify({
         "bans":      fail2ban.get_active_bans(),
         "history":   fail2ban.get_history(limit=50),
-        "timestamp": datetime.now().isoformat() + "Z",
+        "timestamp": _utc_iso(),
     })
 
 @app.route("/api/fail2ban/unban/<ip>", methods=["POST"])
@@ -2877,7 +2885,7 @@ def kc_incidents():
     return jsonify({
         "incidents":  kc_correlator.get_incidents(min_events=min_e),
         "stats":      kc_correlator.stats(),
-        "timestamp":  datetime.now().isoformat() + "Z",
+        "timestamp":  _utc_iso(),
     })
 
 @app.route("/api/killchain/report/<ip>")
@@ -2903,7 +2911,7 @@ def kc_inject():
     if not KC_AVAILABLE:
         return jsonify({"error": "Kill Chain não disponível"}), 503
     body = request.get_json(force=True) or {}
-    kc_correlator.ingest({**body, "timestamp": datetime.now().isoformat()+"Z"})
+    kc_correlator.ingest({**body, "timestamp": _utc_iso()})
     return jsonify({"ok": True})
 
 @app.route("/api/owasp/stats")
@@ -3028,7 +3036,7 @@ def _compute_geo_data(tenant_id: str) -> dict:
     payload = {
         "points":    list(seen.values()),
         "total":     len(seen),
-        "timestamp": datetime.now().isoformat() + "Z",
+        "timestamp": _utc_iso(),
         "cached":    False,
     }
     _ttl_cache_set(_geo_cache, _geo_cache_lock, tenant_id, payload)
@@ -3301,11 +3309,14 @@ def _health_inner():
         db_backend = "sqlite"
 
     # ── Monitor loop ───────────────────────────────────────────────
-    monitor_ok  = monitor_status.get("rodando", False)
+    monitor_disabled = monitor_status.get("captura") == "desativada"
+    monitor_ok  = monitor_status.get("rodando", False) or monitor_disabled
     monitor_info = (
+        "desativado"
+        if monitor_disabled else
         f"ciclo #{monitor_status.get('ciclo', 0)} | "
         f"ultimo={monitor_status.get('ultimo_ciclo', 'nunca')}"
-        if monitor_ok else "parado"
+        if monitor_status.get("rodando", False) else "parado"
     )
 
     # ── Captura de pacotes ─────────────────────────────────────────
@@ -3582,6 +3593,7 @@ def logout():
 
 
 @app.route("/api/auth/validate", methods=["POST"])
+@_limit_validate
 def auth_validate():
     """Valida token e retorna dados do tenant (sem setar cookie)."""
     data  = request.get_json(silent=True) or {}
@@ -3919,10 +3931,9 @@ def welcome():
     Dois modos:
       ?onboarding=<ticket> → mostra onboarding seguro de uso único
       ?session_id=cs_...   → pagamento real via Stripe
-      ?demo=1&...          → compatibilidade legada
+      ?demo=1&...          → fluxo legado descontinuado por segurança
     """
     from flask import redirect
-    import uuid
 
     onboarding = request.args.get("onboarding", "").strip()
     if onboarding:
@@ -3933,44 +3944,12 @@ def welcome():
 
     demo       = request.args.get("demo") == "1"
     session_id = request.args.get("session_id", "")
-    plan_key   = request.args.get("plan", "pro")
-    token      = request.args.get("token", "")
-    name       = request.args.get("name", "")
-    email      = request.args.get("email", "")
 
     if demo:
-        # Compatibilidade legada: recebe onboarding sensível via query string.
-        # Normalizamos imediatamente para um ticket opaco.
-        if not token:
-            return redirect("/pricing?error=welcome_expired")
-        plan_info = get_plan(plan_key)
-        existing = repo.get_tenant_by_token(token)
-        if not existing:
-            tenant_id = str(uuid.uuid4())
-            try:
-                repo.create_tenant(
-                    tenant_id = tenant_id,
-                    name      = name or email or "Demo Tenant",
-                    token     = token,
-                    plan      = plan_key,
-                    max_hosts = plan_info["max_hosts"],
-                )
-                logger.info("Tenant demo criado: %s | plan=%s | token=%s…",
-                            tenant_id, plan_key, token[:12])
-                audit("TENANT_CREATE", actor=email or name or tenant_id,
-                      ip=request.remote_addr or "-",
-                      detail=f"plan={plan_key} mode=demo tenant_id={tenant_id}")
-            except Exception as exc:
-                logger.error("Erro ao criar tenant demo: %s", exc)
-
-        welcome_ticket = _issue_welcome_ticket(_build_welcome_context(
-            demo=True,
-            token=token,
-            name=name,
-            plan_label=plan_info["name"],
-            server_url=request.host_url.rstrip("/"),
-        ))
-        return redirect(f"/welcome?onboarding={welcome_ticket}", code=303)
+        logger.warning("Onboarding demo legado bloqueado | ip=%s", request.remote_addr or "-")
+        audit("WELCOME_LEGACY_BLOCKED", ip=request.remote_addr or "-",
+              detail="legacy demo query rejected")
+        return redirect("/pricing?error=welcome_expired", code=303)
 
     # Pagamento real: busca dados no Stripe
     if not session_id:
@@ -5649,6 +5628,10 @@ def dashboard():
 
 # ── Inicialização ─────────────────────────────────────────────────
 def iniciar_monitoramento():
+    if os.environ.get("IDS_DISABLE_BACKGROUND", "false").lower() == "true" or "pytest" in sys.modules:
+        monitor_status["captura"] = "desativada"
+        logger.info("Monitoramento em background desativado neste contexto")
+        return
     threading.Thread(target=loop_monitor, kwargs={"intervalo":30},
                      daemon=True, name="ids-monitor").start()
     try:

@@ -1,255 +1,136 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NetGuard IDS — Login</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-      background: #0d1117;
-      color: #e6edf3;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 1.5rem;
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      font-size: 1.1rem;
-      font-weight: 700;
-      color: #58a6ff;
-      margin-bottom: 2rem;
-      text-decoration: none;
-    }
-    .logo svg { width: 30px; height: 30px; }
-
-    .card {
-      background: #161b22;
-      border: 1px solid #21262d;
-      border-radius: 12px;
-      padding: 2.5rem;
-      width: 100%;
-      max-width: 400px;
-    }
-
-    h1 {
-      font-size: 1.35rem;
-      font-weight: 700;
-      margin-bottom: 0.4rem;
-    }
-    .subtitle {
-      color: #8b949e;
-      font-size: 0.875rem;
-      margin-bottom: 2rem;
-      line-height: 1.5;
-    }
-
-    label {
-      display: block;
-      margin-bottom: 1.2rem;
-    }
-    .label-text {
-      font-size: 0.78rem;
-      font-weight: 700;
-      color: #8b949e;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 0.45rem;
-      display: block;
-    }
-    .input-wrap {
-      position: relative;
-    }
-    input[type="text"], input[type="password"] {
-      width: 100%;
-      padding: 0.7rem 2.5rem 0.7rem 0.9rem;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #e6edf3;
-      font-size: 0.88rem;
-      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-      outline: none;
-      transition: border-color .2s;
-    }
-    input:focus {
-      border-color: #388bfd;
-    }
-    .toggle-vis {
-      position: absolute;
-      right: 0.7rem;
-      top: 50%;
-      transform: translateY(-50%);
-      background: none;
-      border: none;
-      color: #8b949e;
-      cursor: pointer;
-      font-size: 0.9rem;
-      padding: 0;
-      line-height: 1;
-    }
-    .toggle-vis:hover { color: #e6edf3; }
-
-    .btn {
-      width: 100%;
-      padding: 0.8rem;
-      background: #238636;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      font-size: 0.95rem;
-      font-weight: 700;
-      cursor: pointer;
-      transition: opacity .2s;
-      margin-top: 0.4rem;
-    }
-    .btn:hover { opacity: 0.88; }
-    .btn:active { transform: scale(0.98); }
-
-    .error-msg {
-      background: #1c1212;
-      border: 1px solid #f8514955;
-      border-radius: 6px;
-      color: #f85149;
-      font-size: 0.82rem;
-      padding: 0.65rem 0.9rem;
-      margin-bottom: 1.2rem;
-      display: none;
-    }
-    .error-msg.show { display: block; }
-
-    .divider {
-      border: none;
-      border-top: 1px solid #21262d;
-      margin: 1.5rem 0;
-    }
-
-    .footer-links {
-      text-align: center;
-      font-size: 0.8rem;
-      color: #8b949e;
-    }
-    .footer-links a {
-      color: #58a6ff;
-      text-decoration: none;
-    }
-    .footer-links a:hover { text-decoration: underline; }
-
-    .token-hint {
-      font-size: 0.78rem;
-      color: #8b949e;
-      margin-top: 0.4rem;
-    }
-    .token-hint code {
-      color: #79c0ff;
-      font-family: monospace;
-    }
-  </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NetGuard IDS | Secure operator login</title>
+  <link rel="stylesheet" href="/static/enterprise.css">
 </head>
-<body>
-
-<a href="/" class="logo">
-  <svg viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-  </svg>
-  NetGuard IDS
-</a>
-
-<div class="card">
-  <h1>Entrar no painel</h1>
-  <p class="subtitle">Use seu token de API para acessar o dashboard de monitoramento.</p>
-
-  <div class="error-msg" id="error-msg">
-    Token inválido ou expirado. Verifique e tente novamente.
-  </div>
-
-  <form id="login-form" onsubmit="doLogin(event)">
-    <label>
-      <span class="label-text">Token de API</span>
-      <div class="input-wrap">
-        <input type="password" id="token-input" name="token"
-               placeholder="ng_..."
-               autocomplete="off"
-               autofocus />
-        <button type="button" class="toggle-vis" onclick="toggleVis()" title="Mostrar/ocultar">👁</button>
+<body class="auth-page">
+  <header class="site-header">
+    <div class="page-frame header-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark">NG</span>
+        <span class="brand-stack">
+          <strong>NetGuard IDS</strong>
+          <small>secure operator access</small>
+        </span>
+      </a>
+      <div class="site-actions">
+        <a class="ghost-link" href="/pricing">Planos</a>
+        <a class="button-secondary" href="/">Voltar</a>
       </div>
-      <p class="token-hint">Começa com <code>ng_</code> — recebido ao criar sua conta.</p>
-    </label>
+    </div>
+  </header>
 
-    <button type="submit" class="btn" id="submit-btn">Entrar →</button>
-  </form>
+  <main class="section">
+    <div class="page-frame auth-shell">
+      <section class="panel auth-aside">
+        <span class="eyebrow">AUTH GATE</span>
+        <h1 class="display">Acesso limpo para operacao blindada.</h1>
+        <p class="lead">
+          O login foi redesenhado para transmitir confianca, clareza e postura enterprise.
+          O operador entra rapido, com contexto suficiente e sem ruido visual.
+        </p>
+        <div class="security-list">
+          <article class="security-item">
+            <strong>Token first</strong>
+            <span class="list-copy">Fluxo direto para acesso seguro com validacao server-side e cookie protegido.</span>
+          </article>
+          <article class="security-item">
+            <strong>Leitura imediata</strong>
+            <span class="list-copy">Hierarquia visual pronta para uso interno, demo comercial e suporte senior.</span>
+          </article>
+          <article class="security-item">
+            <strong>Sem improviso</strong>
+            <span class="list-copy">Experiencia com cara de produto corporativo, do primeiro clique ao dashboard.</span>
+          </article>
+        </div>
+      </section>
 
-  <hr class="divider">
+      <section class="auth-card">
+        <span class="panel-kicker">OPERATOR LOGIN</span>
+        <h2 class="auth-title">Entrar no painel</h2>
+        <p class="auth-subtitle">Use seu token de API para acessar o command center de monitoramento.</p>
 
-  <div class="footer-links">
-    Não tem conta? <a href="/pricing">Ver planos</a>
-    &nbsp;·&nbsp;
-    <a href="/">Entrar sem token</a>
-  </div>
-</div>
+        <div class="error-msg" id="error-msg">
+          Token invalido ou expirado. Revise o valor informado e tente novamente.
+        </div>
 
-<script>
-  function toggleVis() {
-    const inp = document.getElementById('token-input');
-    inp.type = inp.type === 'password' ? 'text' : 'password';
-  }
+        <form class="auth-form" id="login-form" onsubmit="doLogin(event)">
+          <label>
+            <span class="field-label">Token de API</span>
+            <div class="input-shell">
+              <input class="input-field" type="password" id="token-input" name="token" placeholder="ng_..." autocomplete="off" autofocus>
+              <button type="button" class="toggle-vis" onclick="toggleVis()" title="Mostrar ou ocultar">Ver</button>
+            </div>
+            <p class="field-note">Comeca com <code>ng_</code> e e entregue ao criar sua conta.</p>
+          </label>
 
-  function doLogin(e) {
-    e.preventDefault();
-    const token = document.getElementById('token-input').value.trim();
-    if (!token) return;
-    validateAndRedirect(token);
-  }
+          <button type="submit" class="auth-submit" id="submit-btn">Entrar no dashboard</button>
+        </form>
 
-  function validateAndRedirect(token) {
-    const btn = document.getElementById('submit-btn');
-    btn.textContent = 'Verificando...';
-    btn.disabled = true;
+        <div class="divider-line"></div>
 
-    // Lê CSRF token do cookie (double-submit pattern)
-    const csrfToken = document.cookie.split(';')
-      .map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
+        <div class="button-row" style="margin-top:1rem;">
+          <a class="button-secondary" href="/pricing">Criar conta</a>
+          <a class="button-tertiary" href="/">Conhecer a plataforma</a>
+        </div>
+      </section>
+    </div>
+  </main>
 
-    // POST para /api/auth/login — valida e seta cookie httponly server-side
-    fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      credentials: 'same-origin',
-      body: JSON.stringify({ token })
-    })
-    .then(r => {
-      if (r.ok) return r.json();
-      throw new Error('invalid');
-    })
-    .then(data => {
-      if (data.valid) {
-        // Cookie já foi setado pelo servidor — redireciona
-        const next = new URLSearchParams(location.search).get('next') || '/dashboard';
-        window.location.href = next;
-      } else {
+  <script>
+    function toggleVis() {
+      const inp = document.getElementById('token-input');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+    }
+
+    function doLogin(e) {
+      e.preventDefault();
+      const token = document.getElementById('token-input').value.trim();
+      if (!token) return;
+      validateAndRedirect(token);
+    }
+
+    function validateAndRedirect(token) {
+      const btn = document.getElementById('submit-btn');
+      btn.textContent = 'Validando acesso...';
+      btn.disabled = true;
+
+      const csrfToken = document.cookie.split(';')
+        .map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
+
+      fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        credentials: 'same-origin',
+        body: JSON.stringify({ token })
+      })
+      .then(r => {
+        if (r.ok) return r.json();
+        throw new Error('invalid');
+      })
+      .then(data => {
+        if (data.valid) {
+          const next = new URLSearchParams(location.search).get('next') || '/dashboard';
+          window.location.href = next;
+        } else {
+          showError();
+          btn.textContent = 'Entrar no dashboard';
+          btn.disabled = false;
+        }
+      })
+      .catch(() => {
         showError();
-        btn.textContent = 'Entrar →';
+        btn.textContent = 'Entrar no dashboard';
         btn.disabled = false;
-      }
-    })
-    .catch(() => {
-      showError();
-      btn.textContent = 'Entrar →';
-      btn.disabled = false;
-    });
-  }
+      });
+    }
 
-  function showError() {
-    document.getElementById('error-msg').classList.add('show');
-  }
-</script>
-
+    function showError() {
+      document.getElementById('error-msg').classList.add('show');
+    }
+  </script>
 </body>
 </html>

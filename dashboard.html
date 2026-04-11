@@ -3133,7 +3133,48 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 .primary-action { background:var(--blu) !important; color:#fff !important; font-weight:600; }
 .primary-action:hover { background:var(--acc) !important; }
 
-/* ── Trial & Webhook page layout ─────────────────────────────────── */
+/* ── Page shell layout (Webhooks, Trials, etc.) ─────────────────── */
+.page-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 24px 40px;
+  overflow-y: auto;
+  height: 100%;
+  box-sizing: border-box;
+}
+.page-shell.narrow { max-width: 860px; }
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--b2);
+}
+.page-header.tight { margin-bottom: 14px; padding-bottom: 12px; }
+
+.page-title {
+  font-family: var(--head);
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  color: var(--txt1);
+}
+.page-subtitle {
+  font-size: .78rem;
+  color: var(--txt3);
+  margin-top: 3px;
+  max-width: 520px;
+  line-height: 1.5;
+}
+
+/* ── Trial & Webhook page layout (legacy selectors) ──────────────── */
 #p-trials .page-inner,
 #p-webhooks .page-inner {
   padding:20px; width:100%; max-width:960px; margin:0 auto; overflow-y:auto;
@@ -3470,8 +3511,23 @@ function goPage(name,el){
 }
 
 // ── API ───────────────────────────────────────────────────────────
+function _csrfToken(){
+  // Double-submit cookie: lê o valor do cookie csrf_token
+  const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
 async function api(path,opts={}){
-  try{const r=await fetch('/api'+path,opts);return await r.json();}catch{return null;}
+  try{
+    const method=(opts.method||'GET').toUpperCase();
+    if(!['GET','HEAD','OPTIONS'].includes(method)){
+      opts.headers=Object.assign(
+        {'X-CSRFToken':_csrfToken(),'Content-Type':'application/json'},
+        opts.headers||{}
+      );
+    }
+    const r=await fetch('/api'+path,opts);
+    return await r.json();
+  }catch{return null;}
 }
 
 // ── Intel ─────────────────────────────────────────────────────────
@@ -5876,7 +5932,7 @@ async function importIOC(input){
   const file=input.files[0];if(!file)return;
   const fd=new FormData();fd.append('file',file);
   toast('Importando IOCs...','ok');
-  const r=await fetch('/api/ioc/import',{method:'POST',body:fd});
+  const r=await fetch('/api/ioc/import',{method:'POST',body:fd,headers:{'X-CSRFToken':_csrfToken()}});
   const d=await r.json();
   toast(`✓ ${d.imported} importados, ${d.skipped} ignorados`,'ok');
   input.value='';
