@@ -14,7 +14,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://python.org)
 [![Architecture](https://img.shields.io/badge/Architecture-Event--Driven-green)]()
 [![MITRE ATT&CK](https://img.shields.io/badge/MITRE-ATT%26CK%20Aligned-red)](https://attack.mitre.org)
-[![Tests](https://github.com/raphaelguterres/netguard-ids/actions/workflows/tests.yml/badge.svg)](https://github.com/raphaelguterres/netguard-ids/actions/workflows/tests.yml)
+[![CI](https://github.com/raphaelguterres/netguard-ids/actions/workflows/tests.yml/badge.svg)](https://github.com/raphaelguterres/netguard-ids/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey)]()
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](DOCKER.md)
 
@@ -22,8 +22,21 @@
 
 ---
 
-## Quick Start (Docker)
+## Quick Start
 
+### One-liner installers
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/raphaelguterres/netguard-ids/main/install.ps1 | iex
+```
+
+**Linux / macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/raphaelguterres/netguard-ids/main/install.sh | bash
+```
+
+### Docker
 ```bash
 git clone https://github.com/raphaelguterres/netguard-ids.git
 cd netguard-ids
@@ -35,13 +48,23 @@ docker run -d --name netguard --network host \
 
 Dashboard: **http://localhost:5000** · [Full Docker Guide](DOCKER.md)
 
+### Manual (Windows / Linux / macOS)
+```bash
+git clone https://github.com/raphaelguterres/netguard-ids.git
+cd netguard-ids
+python -m venv venv
+source venv/bin/activate         # Windows: .\venv\Scripts\activate
+pip install -r requirements.txt
+python app.py
+```
+
 ---
 
 ## What is NetGuard?
 
-NetGuard is a fully functional **Security Operations Center (SOC)** platform that runs locally on Windows and monitors your system in real-time. It captures real network packets, detects process anomalies, correlates multi-event attack patterns, and displays everything in a professional dark-mode dashboard — no cloud, no agents, no subscriptions.
+NetGuard is a fully functional **Security Operations Center (SOC)** platform that runs locally and monitors your system in real time. It captures live network connections, detects process anomalies, correlates multi-event attack patterns, fires webhook alerts to Slack / Teams / Telegram / WhatsApp, and displays everything in a professional dark-mode dashboard — no cloud, no agents, no subscriptions.
 
-Built as a personal cybersecurity project, it implements the same architectural concepts used by enterprise tools like **Elastic SIEM**, **Splunk**, **Wazuh**, and **CrowdStrike Falcon**.
+Architecturally it implements the same concepts used by enterprise tools like **Elastic SIEM**, **Splunk**, **Wazuh**, and **CrowdStrike Falcon** — at a fraction of the cost and zero vendor lock-in.
 
 ---
 
@@ -49,48 +72,50 @@ Built as a personal cybersecurity project, it implements the same architectural 
 
 ```
 Raw Data Sources
-├── Network (Scapy packet capture)
+├── Network connections (netstat / psutil)
 ├── Processes (psutil)
-├── Ports / Connections
+├── Ports / Connections (platform_utils)
 └── Web Payloads (OWASP CRS)
         │
         ▼
   Event Pipeline
-  ┌─────────────────────────────────────────────────┐
-  │  normalize → validate → enrich → run_rules      │
-  │  → classify_severity → generate_alerts          │
-  │  → persist → return                             │
-  └─────────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────────────────┐
+  │  normalize → validate → enrich → run_rules               │
+  │  → classify_severity → generate_alerts                   │
+  │  → persist → dispatch_webhooks → return                  │
+  └──────────────────────────────────────────────────────────┘
         │
-        ├─▶  SOC Engine      (12 behavioral rules)
+        ├─▶  SOC Engine          (12 behavioral rules, MITRE aligned)
         ├─▶  Correlation Engine  (5 multi-event patterns)
-        ├─▶  Risk Engine     (0–100 host score, CrowdStrike-style)
-        ├─▶  Kill Chain      (MITRE ATT&CK progression)
-        ├─▶  Fail2Ban        (auto-block on threshold)
-        └─▶  SQLite Storage  (netguard_soc.db)
+        ├─▶  Risk Engine         (0–100 host score, CrowdStrike-style)
+        ├─▶  Kill Chain          (MITRE ATT&CK progression)
+        ├─▶  Webhook Engine      (Slack / Teams / Discord / Telegram / WhatsApp)
+        ├─▶  IOC Manager         (custom + ThreatFox feed)
+        ├─▶  ML Anomaly          (Isolation Forest)
+        ├─▶  Fail2Ban            (auto-block on threshold)
+        └─▶  SQLite Storage      (netguard_soc.db)
 ```
 
 ---
 
-## Features
+## Feature Matrix
 
-| Module | Description |
-|--------|-------------|
-| **Event Engine** | 7-step pipeline: normalize → validate → enrich → run_rules → classify → generate → persist |
-| **SOC Engine** | 12 behavioral rules (R1–R12), aligned to MITRE ATT&CK |
-| **Correlation Engine** | 5 multi-event patterns: Suspicious Execution, Recon, C2 Beaconing, Lateral Movement, Brute Force |
-| **Risk Score** | Per-host score 0–100 with temporal decay, tactic bonuses, and CrowdStrike-style risk levels |
-| **Kill Chain** | Automatic MITRE ATT&CK kill chain progression tracking per IP |
-| **Process Rules** | 7 rules: unknown process, high CPU, off-hours execution, PowerShell suspicious, suspicious path, shell from Office, external connection |
-| **Network Rules** | 6 rules: connection spike, multi-IP scan, new LISTEN port, new external IP, beaconing (CV < 15%), suspicious DNS |
-| **Web Rules** | 6 rules: SQLi (11 patterns), XSS (13 patterns), path traversal, suspicious UA, RCE/SSRF/XXE/SSTI payload, behavior deviation |
-| **Packet Capture** | Real-time Scapy capture: SYN flood, port scan, ARP spoofing, DNS tunneling |
-| **OWASP Engine** | OWASP CRS + ASVS + Testing Guide rules |
-| **Sigma Rules** | 40 detection rules |
-| **Fail2Ban** | 6 jails with Windows Firewall integration |
-| **GeoIP** | Embedded IP geolocation, world map visualization |
-| **Threat Intel** | ThreatFox IOC lookup, AbuseIPDB reputation score |
-| **Baseline Engine** | In-memory baseline for processes, IPs, ports with storage hook |
+| Feature | Free | Pro | Enterprise |
+|---------|:----:|:---:|:----------:|
+| Real-time SOC dashboard | ✓ | ✓ | ✓ |
+| IDS detection (22 rules) | ✓ | ✓ | ✓ |
+| Correlation engine (5 patterns) | ✓ | ✓ | ✓ |
+| Kill Chain / MITRE ATT&CK | ✓ | ✓ | ✓ |
+| GeoIP world map | ✓ | ✓ | ✓ |
+| Fail2Ban auto-block | ✓ | ✓ | ✓ |
+| Webhook alerts (Slack/Teams/Telegram…) | ✓ | ✓ | ✓ |
+| IOC Manager | — | ✓ | ✓ |
+| Custom detection rules | — | ✓ | ✓ |
+| ML Anomaly Detection | — | ✓ | ✓ |
+| Risk Score (per-host 0–100) | — | ✓ | ✓ |
+| Compliance PDF (SOC2/PCI/HIPAA) | — | — | ✓ |
+| Multi-tenant / MSSP mode | — | — | ✓ |
+| Time-limited trial tokens | — | — | ✓ |
 
 ---
 
@@ -125,72 +150,135 @@ Raw Data Sources
 
 ---
 
-## Getting Started
+## Webhook Alerts
 
-### Requirements
+NetGuard fires real-time alerts to any of these channels. Configure via API — no restart required.
 
-- Windows 10/11
-- Python 3.10+
-- Npcap (for packet capture) — [download](https://npcap.com)
-- Admin privileges recommended (for Fail2Ban firewall rules)
+| Channel | Type token |
+|---------|-----------|
+| 🟩 Slack | `slack` |
+| 🔵 Microsoft Teams | `teams` |
+| 🎮 Discord | `discord` |
+| 📱 Telegram | `telegram` |
+| 💬 WhatsApp (Z-API) | `whatsapp` |
+| 💬 WhatsApp (Twilio) | `whatsapp` |
+| 🌐 Generic HTTP POST | `generic` |
 
-### Installation
+```bash
+# Register a Telegram webhook
+curl -X POST http://localhost:5000/api/webhooks \
+  -H "X-API-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Telegram SOC",
+    "type": "telegram",
+    "url": "https://api.telegram.org/botTOKEN/sendMessage",
+    "secret": "CHAT_ID",
+    "min_severity": "high"
+  }'
 
-```powershell
-# Clone or extract the project
-cd "C:\Users\YourUser\PROJETO SOC"
-
-# Create virtual environment
-python -m venv venv
-.\venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run
-python netguard.py
+# Test it immediately
+curl -X POST http://localhost:5000/api/webhooks/1/test \
+  -H "X-API-Key: YOUR_KEY"
 ```
 
-The dashboard opens automatically at `http://127.0.0.1:5000`.
+See [ALERTAS_NOTIFICACOES.md](ALERTAS_NOTIFICACOES.md) for full per-channel setup guides.
 
-### Optional: Threat Intelligence APIs
+---
 
-```powershell
-# AbuseIPDB (free tier — 1000 checks/day)
-$env:IDS_ABUSEIPDB_KEY = "your_key_here"
+## Trial Token System
 
-# Get key at: https://www.abuseipdb.com/register
+Share a time-limited, branded demo with potential clients — each gets a unique URL with a live countdown and isolated demo data.
+
+```bash
+# Create a 72-hour trial for a client
+curl -X POST http://localhost:5000/api/admin/trials \
+  -H "X-API-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "cto@acme.com",
+    "name": "Alice",
+    "company": "Acme Corp",
+    "duration_h": 72
+  }'
+
+# Returns:
+# { "token": "ng_trial_...", "url": "http://your-server/trial/ng_trial_..." }
 ```
+
+The trial dashboard shows a live countdown banner. When time expires, an upgrade CTA page appears automatically.
+
+---
+
+## API Reference
+
+The server exposes 50+ REST endpoints at `http://localhost:5000`.
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/health` | Server health (opaque errors with `request_id`) |
+| `GET /api/detections` | IDS detections (tenant-scoped) |
+| `GET /api/soc/events` | SOC Engine events |
+| `GET /api/soc/stats` | SOC Engine statistics |
+| `GET /api/correlation/alerts` | Correlation Engine alerts |
+| `GET /api/risk/hosts` | All hosts risk scores (0–100) |
+| `GET /api/risk/report/<host>` | Full risk report for a host |
+| `GET /api/killchain/incidents` | Kill chain incidents |
+| `GET /api/fail2ban/status` | Fail2Ban jail status |
+| `GET /api/connections` | Active network connections |
+| `GET /api/processes` | Running processes |
+| `GET /api/devices` | Local network devices |
+| `GET /api/geo` | GeoIP map (async, stale-while-revalidate) |
+| `GET /api/graph` | Connection graph (async, stale-while-revalidate) |
+| `GET /api/system` | CPU / RAM / disk stats |
+| `GET /api/ioc` | IOC list (tenant-scoped) |
+| `POST /api/ioc` | Add IOC |
+| `GET /api/webhooks` | List configured webhooks |
+| `POST /api/webhooks` | Add webhook |
+| `POST /api/webhooks/<id>/test` | Fire test alert |
+| `POST /api/admin/trials` | Create trial token |
+| `GET /api/admin/trials` | List all trials |
+| `POST /api/admin/trials/<token>/revoke` | Revoke trial |
+| `POST /api/admin/trials/<token>/extend` | Extend trial |
+| `GET /metrics` | Prometheus exposition format |
+| `GET /api/stream` | Server-Sent Events (live feed) |
+| `GET /demo` | Demo mode (no login required) |
+| `GET /trial/<token>` | Time-limited trial dashboard |
+
+---
+
+## Performance
+
+Both `/api/graph` and `/api/geo` use a **stale-while-revalidate** cache pattern:
+
+- Fresh window (30s graph / 60s geo): served from memory, zero I/O
+- Stale window (2min graph / 5min geo): served from memory immediately, background thread silently refreshes
+- First request (cold): computed synchronously, result cached for all future requests
+
+DNS reverse lookups (`socket.gethostbyaddr`) run in a dedicated 6-worker thread pool and never block the request thread. Hostnames appear on the second request cycle.
 
 ---
 
 ## Running Tests
 
-```powershell
-# Install pytest
-pip install pytest
+```bash
+pip install pytest pytest-cov
+pytest tests/ -v --tb=short
 
-# Run all tests
-pytest tests/ -v
-
-# Run specific module
-pytest tests/test_correlation_engine.py -v
-
-# Run with coverage
-pip install pytest-cov
-pytest tests/ --cov=engine --cov=rules --cov-report=term-missing
+# With coverage
+pytest tests/ --cov=engine --cov=rules --cov-report=term-missing --cov-fail-under=40
 ```
 
-**Test coverage: 102 tests across 6 modules**
-
-| File | Tests | Coverage |
-|------|-------|----------|
-| `test_severity_classifier.py` | 20 | `engine/severity_classifier.py` |
-| `test_baseline_engine.py` | 17 | `engine/baseline_engine.py` |
-| `test_rule_executor.py` | 20 | `engine/rule_executor.py` |
-| `test_correlation_engine.py` | 14 | `engine/correlation_engine.py` |
-| `test_web_rules.py` | 16 | `rules/web_rules.py` |
-| `test_risk_engine.py` | 15 | `engine/risk_engine.py` |
+| Test file | Module covered |
+|-----------|---------------|
+| `test_severity_classifier.py` | `engine/severity_classifier.py` |
+| `test_baseline_engine.py` | `engine/baseline_engine.py` |
+| `test_rule_executor.py` | `engine/rule_executor.py` |
+| `test_correlation_engine.py` | `engine/correlation_engine.py` |
+| `test_web_rules.py` | `rules/web_rules.py` |
+| `test_risk_engine.py` | `engine/risk_engine.py` |
+| `test_trial_engine.py` | `engine/trial_engine.py` |
+| `test_api_endpoints.py` | `/api/health`, `/api/graph`, `/api/geo`, compliance |
 
 ---
 
@@ -198,9 +286,11 @@ pytest tests/ --cov=engine --cov=rules --cov-report=term-missing
 
 ```
 PROJETO SOC/
-├── app.py                    # Flask server + 40 API endpoints
-├── dashboard.html            # 12-tab SOC dashboard (single file)
+├── app.py                    # Flask server — 50+ API endpoints
+├── dashboard.html            # 14-tab SOC dashboard (single file)
+├── landing.html              # Product landing page
 ├── netguard.py               # pywebview launcher (native window)
+├── platform_utils.py         # Cross-platform OS abstraction layer
 ├── soc_engine.py             # SOC Engine — 12 behavioral rules
 ├── ids_engine.py             # IDS Engine — 22 signature rules
 ├── packet_capture.py         # Scapy real-time packet capture
@@ -210,6 +300,9 @@ PROJETO SOC/
 ├── owasp_engine.py           # OWASP CRS + ASVS rules
 ├── geo_ip.py                 # Embedded GeoIP database
 ├── threat_feeds.py           # ThreatFox + AbuseIPDB integration
+├── demo_seed.py              # Demo/trial data seeder
+├── install.ps1               # Windows one-click installer
+├── install.sh                # Linux/macOS one-click installer
 │
 ├── engine/
 │   ├── event_engine.py       # Main pipeline orchestrator
@@ -218,12 +311,19 @@ PROJETO SOC/
 │   ├── baseline_engine.py    # In-memory baseline tracking
 │   ├── correlation_engine.py # Multi-event pattern detection
 │   ├── risk_engine.py        # Per-host risk score (0-100)
-│   └── examples.py           # Usage examples + 11 sample rules
+│   ├── webhook_engine.py     # Multi-channel alert dispatcher
+│   ├── trial_engine.py       # Time-limited trial token system
+│   ├── threat_hunter.py      # Advanced threat hunting
+│   ├── lateral_movement.py   # Lateral movement detector
+│   ├── honeypot.py           # Honeypot trap
+│   ├── dns_monitor.py        # DNS anomaly monitoring
+│   ├── enrichment.py         # IP enrichment (Shodan + WHOIS)
+│   └── yara_engine.py        # YARA rule matching
 │
 ├── rules/
 │   ├── process_rules.py      # 7 process detection rules
 │   ├── network_rules.py      # 6 network detection rules
-│   └── web_rules.py          # 6 web detection rules (SQLi, XSS...)
+│   └── web_rules.py          # 6 web detection rules (SQLi, XSS…)
 │
 ├── models/
 │   └── event_model.py        # Event and Alert data models
@@ -231,183 +331,69 @@ PROJETO SOC/
 ├── storage/
 │   └── event_repository.py   # SQLite storage layer
 │
-└── tests/
-    ├── test_severity_classifier.py
-    ├── test_baseline_engine.py
-    ├── test_rule_executor.py
-    ├── test_correlation_engine.py
-    ├── test_web_rules.py
-    └── test_risk_engine.py
+├── tests/
+│   ├── test_severity_classifier.py
+│   ├── test_baseline_engine.py
+│   ├── test_rule_executor.py
+│   ├── test_correlation_engine.py
+│   ├── test_web_rules.py
+│   ├── test_risk_engine.py
+│   ├── test_trial_engine.py
+│   └── test_api_endpoints.py
+│
+└── .github/workflows/
+    └── tests.yml             # CI: tests + lint + pip-audit + mypy
 ```
 
 ---
 
-## API Reference
+## Environment Variables
 
-The server exposes 40+ REST endpoints at `http://127.0.0.1:5000`.
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/health` | Server health check |
-| `GET /api/detections` | IDS detections |
-| `GET /api/soc/events` | SOC Engine events |
-| `GET /api/soc/stats` | SOC Engine statistics |
-| `GET /api/correlation/alerts` | Correlation Engine alerts |
-| `POST /api/correlation/demo` | Inject demo events |
-| `GET /api/risk/hosts` | All hosts risk scores |
-| `GET /api/risk/report/<host>` | Full risk report for host |
-| `GET /api/killchain/incidents` | Kill chain incidents |
-| `GET /api/fail2ban/status` | Fail2Ban status |
-| `GET /api/connections` | Active network connections |
-| `GET /api/processes` | Running processes |
-| `GET /api/devices` | Local network devices |
-| `GET /api/geo` | GeoIP data for external IPs |
-| `GET /api/system` | CPU/RAM/disk stats |
-
----
-
-## Adding a New Detection Rule
-
-```python
-# rules/my_rules.py
-from models.event_model import make_event, Severity
-
-def rule_detect_mimikatz(event: dict):
-    """Detects Mimikatz execution patterns."""
-    proc = event.get("details", {}).get("process", "").lower()
-    cmdline = event.get("details", {}).get("cmdline", "").lower()
-
-    if "mimikatz" in proc or "sekurlsa" in cmdline:
-        return make_event(
-            event_type      = "credential_dump",
-            severity        = Severity.CRITICAL,
-            source          = "agent.process",
-            details         = event.get("details", {}),
-            rule_id         = "CUSTOM-1",
-            rule_name       = "Mimikatz Detectado",
-            mitre_tactic    = "credential_access",
-            mitre_technique = "T1003.001",
-            tags            = ["mimikatz", "credential", "lsass"],
-        )
-    return None
-```
-
-Register in your engine:
-```python
-engine.registry.register(rule_detect_mimikatz, tags=["process", "credential"])
-```
-
----
-
-## Alertas & Notificações
-
-O NetGuard IDS envia alertas em tempo real para os canais abaixo. Configure via API — sem reiniciar o servidor.
-
-| Canal | Tipo | Como configurar |
-|-------|------|----------------|
-| 📱 Telegram | `telegram` | Token do Bot + Chat ID → [ver guia completo](ALERTAS_NOTIFICACOES.md#canal-telegram) |
-| 💬 WhatsApp (Z-API) | `whatsapp` | Instance ID + Token da Z-API → [ver guia](ALERTAS_NOTIFICACOES.md#canal-whatsapp-z-api) |
-| 💬 WhatsApp (Twilio) | `whatsapp` | Account SID + Auth Token → [ver guia](ALERTAS_NOTIFICACOES.md#canal-whatsapp-twilio) |
-| 🟩 Slack | `slack` | Incoming Webhook URL → [ver guia](ALERTAS_NOTIFICACOES.md#canal-slack) |
-| 🎮 Discord | `discord` | Webhook URL do canal → [ver guia](ALERTAS_NOTIFICACOES.md#canal-discord) |
-| 🔵 Microsoft Teams | `teams` | Incoming Webhook do Teams → [ver guia](ALERTAS_NOTIFICACOES.md#canal-microsoft-teams) |
-| 🌐 HTTP Genérico | `generic` | Qualquer endpoint POST JSON → [ver guia](ALERTAS_NOTIFICACOES.md#canal-http-genérico) |
-
-```bash
-# Cadastrar um webhook (exemplo Telegram)
-curl -X POST http://localhost:5000/api/webhooks \
-  -H "X-API-Key: SUA_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Telegram SOC","type":"telegram",
-       "url":"https://api.telegram.org/botTOKEN/sendMessage",
-       "secret":"CHAT_ID","min_severity":"high"}'
-
-# Testar imediatamente
-curl -X POST http://localhost:5000/api/webhooks/1/test -H "X-API-Key: SUA_KEY"
-```
-
-> 📖 **Guia completo:** [ALERTAS_NOTIFICACOES.md](ALERTAS_NOTIFICACOES.md)
-
----
-
-## E-mail Transacional
-
-O NetGuard IDS envia e-mails automáticos (boas-vindas, confirmação de contato) via SMTP padrão — sem dependências externas além da stdlib Python.
-
-Configure as variáveis abaixo no `.env` ou como variáveis de ambiente:
-
-| Variável | Descrição | Padrão |
-|----------|-----------|--------|
-| `SMTP_HOST` | Servidor SMTP | _(sem envio se vazio)_ |
-| `SMTP_PORT` | Porta | `587` |
-| `SMTP_USER` | Usuário/login | — |
-| `SMTP_PASS` | Senha / API Key | — |
-| `SMTP_FROM` | Endereço "De" | igual ao `SMTP_USER` |
-| `SMTP_STARTTLS` | STARTTLS (porta 587) | `true` |
-| `SMTP_SSL` | SSL direto (porta 465) | `false` |
-| `APP_URL` | URL base para links no e-mail | `http://localhost:5000` |
-
-**Provedor recomendado para produção:** [Resend](https://resend.com) — gratuito até 3.000 e-mails/mês, domínio próprio, SPF/DKIM automático.
-
-```bash
-# Exemplo com Resend
-SMTP_HOST=smtp.resend.com
-SMTP_PORT=587
-SMTP_USER=resend
-SMTP_PASS=re_SUA_API_KEY
-SMTP_FROM=noreply@seudominio.com
-APP_URL=https://seudominio.com
-```
-
-Se `SMTP_HOST` não estiver definido, os e-mails são apenas logados (modo dry-run) — a aplicação nunca bloqueia por falta de configuração SMTP.
-
----
-
-## Dashboard
-
-12 monitoring tabs:
-
-1. **Visão Geral** — Network map, IDS feed, live graph, terminal
-2. **Conexões** — Active connections grouped by process
-3. **⬡ Ao Vivo** — Real-time SVG network graph
-4. **🌐 Geo Map** — World map of external IP connections
-5. **Sistema** — CPU/RAM/disk, top processes, open ports
-6. **⚔ OWASP** — OWASP CRS analysis
-7. **Analisar** — Manual analysis: IDS + Sigma + OWASP
-8. **Estatísticas** — Threat distribution, 24h activity
-9. **⛓ Kill Chain** — MITRE ATT&CK kill chain, heatmap, timeline
-10. **🚫 Fail2Ban** — Active bans, jail status, whitelist
-11. **🔎 SOC Events** — SOC Engine events table with filters
-12. **🔗 Correlation** — Multi-event pattern alerts with confidence rings
-13. **🎯 Risk Score** — Per-host risk score, CrowdStrike-style
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `IDS_AUTH` | `true` | Enable API key authentication |
+| `IDS_DASHBOARD_AUTH` | `true` | Protect dashboard with auth |
+| `IDS_API_KEY` | auto-generated | Master API key (shown at startup) |
+| `IDS_HTTPS` | `false` | Enable HTTPS (self-signed cert) |
+| `HTTPS_ONLY` | `false` | Redirect HTTP → HTTPS |
+| `IDS_ABUSEIPDB_KEY` | — | AbuseIPDB API key (free tier: 1000/day) |
+| `IDS_RATE_LIMIT` | `true` | Enable Flask-Limiter rate limiting |
+| `SMTP_HOST` | — | SMTP server (e.g. `smtp.resend.com`) |
+| `SMTP_PORT` | `587` | SMTP port |
+| `SMTP_USER` / `SMTP_PASS` | — | SMTP credentials |
+| `SMTP_FROM` | same as USER | Sender address |
+| `APP_URL` | `http://localhost:5000` | Public URL (used in emails/trials) |
 
 ---
 
 ## Technical Highlights
 
-**For interviews and portfolio:**
-
-- **Event pipeline** inspired by Elastic ECS and MITRE CAR — normalize → enrich → correlate
-- **Correlation engine** uses sliding time windows and statistical methods (coefficient of variation for beaconing detection)
-- **Risk Score** implements temporal decay (half-life 6h) and MITRE tactic weighting — same concept as CrowdStrike Falcon's host score
-- **Baseline engine** follows the same pattern as Wazuh's FIM — track what's normal, alert on deviations
-- **Thread-safe** throughout — multiple monitoring threads share state via RLock
+- **Event pipeline** inspired by Elastic ECS and MITRE CAR — normalize → enrich → correlate → dispatch
+- **Correlation engine** uses sliding time windows and statistical methods (coefficient of variation for beaconing)
+- **Risk Score** implements temporal decay (half-life 6h) and MITRE tactic weighting — same concept as CrowdStrike Falcon
+- **Stale-while-revalidate cache** on heavy endpoints — zero-latency responses after warm-up
+- **Non-blocking DNS** — `socket.gethostbyaddr` runs in a thread pool, never stalls request threads
+- **Thread-safe throughout** — multiple monitoring threads share state via RLock + threading.Lock
+- **Opaque error responses** — no tracebacks in HTTP bodies, all errors carry `request_id` for log correlation
 - **Zero external dependencies** for core detection — runs fully offline
 
 ---
 
 ## Roadmap
 
-- [x] Docker support
-- [x] GitHub Actions CI
+- [x] Docker support + one-click installers (Windows & Linux)
+- [x] GitHub Actions CI (tests + lint + pip-audit + type check)
 - [x] Token authentication (`IDS_AUTH=true`)
-- [x] HTTPS self-signed (`IDS_HTTPS=true`)
-- [x] ML anomaly detection (Isolation Forest)
-- [x] VirusTotal process hash lookup
-- [ ] Telegram alerts for HIGH/CRITICAL events
-- [ ] Daily PDF report (automated at midnight)
+- [x] Rate limiting (Flask-Limiter) + security headers (CSP, HSTS)
+- [x] Webhook alerts (Slack, Teams, Discord, Telegram, WhatsApp)
+- [x] IOC Manager with ThreatFox feed
+- [x] ML Anomaly Detection (Isolation Forest)
+- [x] Compliance PDF reports (SOC2 / PCI / HIPAA)
+- [x] Time-limited trial token system
+- [x] Async stale-while-revalidate cache for graph & geo
 - [ ] Distributed agents (multi-machine monitoring)
 - [ ] Automatic IP blocking by risk score threshold
+- [ ] SAML / SSO authentication
 
 ---
 

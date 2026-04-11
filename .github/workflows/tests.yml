@@ -6,8 +6,13 @@ on:
   pull_request:
     branches: [ main ]
 
+# Cancel in-progress runs on the same branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  # ── Job 1: Testes ─────────────────────────────────────────────────
+  # ── Job 1: Tests ──────────────────────────────────────────────────
   test:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -26,11 +31,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
-      - name: Install test dependencies
+      - name: Install dependencies
         run: |
+          pip install --upgrade pip
+          # Fail the job if requirements cannot be installed
+          pip install -r requirements.docker.txt
           pip install pytest pytest-cov
-          pip install -r requirements.docker.txt --quiet || true
-          python -c "import pytest; print('pytest', pytest.__version__)"
 
       - name: Run tests
         env:
@@ -39,9 +45,9 @@ jobs:
           IDS_CSRF_DISABLED: "true"
           HTTPS_ONLY: "false"
         run: |
-          pytest tests/ -v --tb=short
+          pytest tests/ -v --tb=short --strict-markers
 
-      - name: Run coverage (informational)
+      - name: Coverage report
         if: always()
         env:
           IDS_AUTH: "false"
@@ -49,19 +55,21 @@ jobs:
           IDS_CSRF_DISABLED: "true"
           HTTPS_ONLY: "false"
         run: |
-          pytest tests/ --tb=no -q \
+          pytest tests/ -q --tb=no \
             --cov=. \
-            --cov-omit="tests/*" \
+            --cov-omit="tests/*,venv/*,.venv/*" \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
-            2>&1 | tail -20 || true
+            --cov-fail-under=40 \
+            2>&1 | tail -25
 
-      - name: Upload coverage to GitHub Summary
+      - name: Write coverage to job summary
         if: always()
         run: |
           echo "## Test Results — Python ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          pytest tests/ --tb=no -q 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          pytest tests/ --tb=no -q 2>&1 | tail -10 >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload coverage artifact
         if: matrix.python-version == '3.11'
@@ -69,9 +77,9 @@ jobs:
         with:
           name: coverage-report
           path: coverage.xml
-          retention-days: 7
+          retention-days: 14
 
-  # ── Job 2: Lint (flake8 — erros críticos apenas) ──────────────────
+  # ── Job 2: Lint ───────────────────────────────────────────────────
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -86,22 +94,25 @@ jobs:
           python-version: "3.11"
           cache: 'pip'
 
-      - name: Install flake8
-        run: pip install flake8
+      - name: Install linters
+        run: pip install flake8 flake8-bugbear
 
-      - name: Run flake8 (erros fatais apenas)
+      - name: Run flake8 (fatal errors + common bugs)
         run: |
-          # E9xx = erros de runtime (undefined names, syntax errors)
-          # F401 = imports não usados
-          # F811 = redefinição de função/variável
-          # W605 = invalid escape sequences
+          # E9xx  = runtime errors (syntax, undefined names)
+          # F401  = unused imports
+          # F811  = redefinition of unused name
+          # W605  = invalid escape sequences
+          # B    = flake8-bugbear bug patterns
           flake8 . \
-            --select=E9,F401,F811,W605 \
-            --exclude=.git,__pycache__,*.egg-info,venv,.venv \
+            --select=E9,F401,F811,W605,B \
+            --exclude=.git,__pycache__,*.egg-info,venv,.venv,migrations \
             --max-line-length=120 \
-            --statistics
+            --statistics \
+            --count
+        # Note: B9xx (opinionated bugbear) are warnings, not errors
 
-  # ── Job 3: Security audit (pip-audit) ────────────────────────────
+  # ── Job 3: Security Audit ─────────────────────────────────────────
   security:
     name: Security Audit
     runs-on: ubuntu-latest
@@ -119,9 +130,55 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit
 
+      - name: Install project dependencies for audit
+        run: pip install -r requirements.docker.txt
+
       - name: Audit dependencies for CVEs
+        # Fails CI on any unignored CVE — no silent fallback
         run: |
-          pip install -r requirements.docker.txt --quiet || true
           pip-audit --requirement requirements.docker.txt \
             --ignore-vuln GHSA-jfh8-c2jp-jqjq \
-            || echo "::warning::Vulnerabilidades encontradas — revisar antes do próximo release"
+            --format=columns \
+            --output=pip-audit-report.txt || {
+              echo "::error::pip-audit found vulnerabilities — see artifact for details"
+              cat pip-audit-report.txt
+              exit 1
+            }
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.txt
+          retention-days: 30
+
+  # ── Job 4: Type check (optional, non-blocking) ────────────────────
+  typecheck:
+    name: Type Check (mypy)
+    runs-on: ubuntu-latest
+    continue-on-error: true   # informational until coverage improves
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+
+      - name: Install mypy + stubs
+        run: |
+          pip install mypy types-requests
+          pip install -r requirements.docker.txt
+
+      - name: Run mypy (engine modules only)
+        run: |
+          mypy engine/ \
+            --ignore-missing-imports \
+            --no-strict-optional \
+            --pretty \
+            --show-error-codes \
+            2>&1 | tail -40

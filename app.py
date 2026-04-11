@@ -729,27 +729,61 @@ def _api_key_auth(f):
         return f(*a,**kw)
     return d
 
-# ── DNS cache ─────────────────────────────────────────────────────
+# ── DNS cache (non-blocking, thread-pool resolver) ─────────────────
 _dns_cache: dict = {}
+_dns_lock = threading.Lock()
+
+def _init_dns_executor():
+    from concurrent.futures import ThreadPoolExecutor
+    return ThreadPoolExecutor(max_workers=6, thread_name_prefix="ng-dns")
+
+_dns_executor = _init_dns_executor()
 
 def resolve_ip(ip: str) -> str:
-    if ip in _dns_cache: return _dns_cache[ip]
-    try:
-        host = socket.gethostbyaddr(ip)[0]
-        _dns_cache[ip] = host
-        return host
-    except Exception:
-        _dns_cache[ip] = ip
-        return ip
+    """Non-blocking DNS reverse lookup.
+    Returns cached hostname immediately; if not cached, submits resolution
+    to a thread pool and returns the IP string — caller gets the real hostname
+    on the next cache hit (next request cycle).
+    """
+    with _dns_lock:
+        cached = _dns_cache.get(ip)
+        if cached is not None:
+            return cached
 
-_GRAPH_CACHE_TTL = 5.0
-_GEO_CACHE_TTL = 15.0
+    def _do_resolve(addr: str):
+        try:
+            host = socket.gethostbyaddr(addr)[0]
+        except Exception:
+            host = addr
+        with _dns_lock:
+            _dns_cache[addr] = host
+
+    try:
+        _dns_executor.submit(_do_resolve, ip)
+    except Exception:
+        pass
+    return ip  # return raw IP now; hostname available on next hit
+
+# ── TTL cache with stale-while-revalidate ──────────────────────────
+# Fresh window  → return immediately, no refresh triggered
+# Stale window  → return old data immediately, trigger bg refresh
+# Beyond stale  → data treated as absent (forces sync compute)
+_GRAPH_CACHE_TTL   = 30.0   # seconds until graph snapshot is stale
+_GRAPH_STALE_TTL   = 120.0  # seconds until stale graph is discarded
+_GEO_CACHE_TTL     = 60.0   # seconds until geo snapshot is stale
+_GEO_STALE_TTL     = 300.0  # seconds until stale geo is discarded
+
 _graph_cache: dict = {}
-_geo_cache: dict = {}
-_graph_cache_lock = threading.Lock()
-_geo_cache_lock = threading.Lock()
+_geo_cache: dict   = {}
+_graph_cache_lock  = threading.Lock()
+_geo_cache_lock    = threading.Lock()
+
+# Tracks which tenant bg-refresh jobs are in-flight
+_bg_running: set        = set()
+_bg_running_lock        = threading.Lock()
 
 def _ttl_cache_get(cache: dict, lock: threading.Lock, key: str, ttl: float):
+    """Legacy helper — returns data only within fresh window."""
     now = time.time()
     with lock:
         entry = cache.get(key)
@@ -757,9 +791,44 @@ def _ttl_cache_get(cache: dict, lock: threading.Lock, key: str, ttl: float):
             return entry["data"]
     return None
 
+def _ttl_cache_get_swr(cache: dict, lock: threading.Lock, key: str,
+                       fresh_ttl: float, stale_ttl: float):
+    """Stale-While-Revalidate: returns (data, is_stale).
+    data is None only when no entry exists or entry is beyond stale_ttl.
+    """
+    now = time.time()
+    with lock:
+        entry = cache.get(key)
+    if not entry:
+        return None, False
+    age = now - entry["ts"]
+    if age < fresh_ttl:
+        return entry["data"], False   # fresh — serve as-is
+    if age < stale_ttl:
+        return entry["data"], True    # stale but usable
+    return None, False                # too old — discard
+
 def _ttl_cache_set(cache: dict, lock: threading.Lock, key: str, data):
     with lock:
         cache[key] = {"ts": time.time(), "data": data}
+
+def _trigger_bg_refresh(job_key: str, fn, *args):
+    """Launch fn(*args) in a daemon thread if not already running for job_key."""
+    with _bg_running_lock:
+        if job_key in _bg_running:
+            return
+        _bg_running.add(job_key)
+
+    def _run():
+        try:
+            fn(*args)
+        except Exception as _exc:
+            logging.getLogger("netguard.cache").warning("bg refresh %s failed: %s", job_key, _exc)
+        finally:
+            with _bg_running_lock:
+                _bg_running.discard(job_key)
+
+    threading.Thread(target=_run, daemon=True, name=f"bg-{job_key}").start()
 
 # ── Descoberta de dispositivos ────────────────────────────────────
 _dispositivos: list = []
@@ -2018,32 +2087,28 @@ def events_stream():
         },
     )
 
-@app.route("/api/graph")
-@auth
-def connection_graph():
-    tenant_id = _resolve_tenant_id()
-    cached = _ttl_cache_get(_graph_cache, _graph_cache_lock, tenant_id, _GRAPH_CACHE_TTL)
-    if cached is not None:
-        return jsonify(cached)
-
-    # Retorna grafo de conexões: nós (processos + IPs) e arestas.
-    # Busca conexões em tempo real (não depende do cache do monitor)
+def _compute_graph_data(tenant_id: str) -> dict:
+    """Compute connection graph snapshot and write to cache. Safe to call from bg thread."""
     live = []
     try:
-        r = subprocess.run(["netstat","-n","-o"],capture_output=True,text=True,timeout=8)
+        r = subprocess.run(["netstat", "-n", "-o"], capture_output=True, text=True, timeout=8)
         conn_map = {}
         for linha in r.stdout.strip().split("\n"):
-            if "ESTABLISHED" not in linha: continue
+            if "ESTABLISHED" not in linha:
+                continue
             p = linha.split()
-            if len(p) < 5: continue
+            if len(p) < 5:
+                continue
             end = p[2]
-            if ":" not in end: continue
-            idx = end.rfind(":")
-            ip2 = end[:idx].strip("[]")
+            if ":" not in end:
+                continue
+            idx  = end.rfind(":")
+            ip2  = end[:idx].strip("[]")
             try:
-                porta2 = int(end[idx+1:])
+                porta2 = int(end[idx + 1:])
                 pid2   = p[4]
-            except: continue
+            except Exception:
+                continue
             proc2 = get_pid_name_cached(pid2) or f"pid:{pid2}"
             if proc2 not in conn_map:
                 conn_map[proc2] = {
@@ -2051,6 +2116,7 @@ def connection_graph():
                     "connections": [],
                     "trusted":     any(b in proc2 for b in [x.lower() for x in BROWSERS_E_APPS]),
                 }
+            # resolve_ip is non-blocking: returns cached hostname or raw IP
             conn_map[proc2]["connections"].append({
                 "dst_ip":   ip2,
                 "dst_port": porta2,
@@ -2058,16 +2124,16 @@ def connection_graph():
             })
         live = list(conn_map.values())
     except Exception:
-        live = conexoes_ativas  # fallback para cache
+        live = conexoes_ativas  # fallback to monitor cache
 
-    nodes = {}
-    edges = []
-    seen_edges = set()
+    nodes: dict  = {}
+    edges: list  = []
+    seen_edges   = set()
 
     for proc_data in live:
-        proc = proc_data["process"]
+        proc    = proc_data["process"]
         trusted = proc_data["trusted"]
-        pid = f"proc:{proc}"
+        pid     = f"proc:{proc}"
         if pid not in nodes:
             nodes[pid] = {
                 "id":      pid,
@@ -2077,37 +2143,58 @@ def connection_graph():
                 "conns":   len(proc_data["connections"]),
             }
         for conn in proc_data.get("connections", []):
-            ip  = conn["dst_ip"]
-            port= conn["dst_port"]
-            hn  = conn.get("hostname", ip)
-            iid = f"ip:{ip}"
+            ip   = conn["dst_ip"]
+            port = conn["dst_port"]
+            hn   = conn.get("hostname", ip)
+            iid  = f"ip:{ip}"
             if iid not in nodes:
                 r2 = ti_lookup(ip)
-                i  = {"ip": ip, "score": r2.get("score", 0), "cat": r2.get("categoria", "ok")}
                 nodes[iid] = {
-                    "id":      iid,
-                    "label":   hn if hn != ip else ip,
-                    "ip":      ip,
-                    "type":    "ip",
-                    "score":   i.get("score", 0),
-                    "cat":     i.get("categoria", "ok"),
+                    "id":       iid,
+                    "label":    hn if hn != ip else ip,
+                    "ip":       ip,
+                    "type":     "ip",
+                    "score":    r2.get("score", 0),
+                    "cat":      r2.get("categoria", "ok"),
                     "hostname": hn,
                 }
             eid = f"{pid}->{iid}:{port}"
             if eid not in seen_edges:
                 seen_edges.add(eid)
-                edges.append({
-                    "source": pid,
-                    "target": iid,
-                    "port":   port,
-                })
+                edges.append({"source": pid, "target": iid, "port": port})
 
     payload = {
         "nodes":     list(nodes.values()),
         "edges":     edges,
         "timestamp": datetime.now().isoformat() + "Z",
+        "cached":    False,
     }
     _ttl_cache_set(_graph_cache, _graph_cache_lock, tenant_id, payload)
+    return payload
+
+
+@app.route("/api/graph")
+@auth
+def connection_graph():
+    tenant_id = _resolve_tenant_id()
+
+    data, is_stale = _ttl_cache_get_swr(
+        _graph_cache, _graph_cache_lock, tenant_id,
+        _GRAPH_CACHE_TTL, _GRAPH_STALE_TTL
+    )
+    if data is not None:
+        if is_stale:
+            # Return stale immediately, refresh in background
+            _trigger_bg_refresh(f"graph:{tenant_id}", _compute_graph_data, tenant_id)
+        resp        = dict(data)
+        resp["cached"] = True
+        resp["stale"]  = is_stale
+        return jsonify(resp)
+
+    # No cache at all (first request) — compute synchronously
+    payload = _compute_graph_data(tenant_id)
+    payload["cached"] = False
+    payload["stale"]  = False
     return jsonify(payload)
 
 
@@ -2876,80 +2963,104 @@ def feeds_stats():
     s["abuseipdb_key_set"] = bool(os.environ.get("IDS_ABUSEIPDB_KEY"))
     return jsonify(s)
 
-@app.route("/api/geo")
-@auth
-def geo_ips():
-    tenant_id = _resolve_tenant_id()
-    cached = _ttl_cache_get(_geo_cache, _geo_cache_lock, tenant_id, _GEO_CACHE_TTL)
-    if cached is not None:
-        return jsonify(cached)
+def _is_private_ip(ip: str) -> bool:
+    return (not ip or ip.startswith("127.") or ip.startswith("192.168.")
+            or ip.startswith("10.") or ip.startswith("172."))
 
-    # Retorna geolocalização dos IPs externos ativos.
+def _compute_geo_data(tenant_id: str) -> dict:
+    """Compute geo snapshot and write to cache. Safe to call from bg thread."""
     try:
         from geo_ip import lookup
     except ImportError:
-        return jsonify({"error": "geo_ip module not found"}), 500
+        return {"error": "geo_ip module not found", "points": [], "total": 0}
 
-    seen = {}
-    # Fetch live connections via platform_utils (cross-platform)
-    live_conns = []
+    seen: dict = {}
+
+    # Live connections (cross-platform)
     try:
         for c in platform_get_connections():
-            live_conns.append({
-                "ip":      c.get("ip", ""),
-                "port":    c.get("port", 0),
-                "process": c.get("process", ""),
-            })
+            ip = c.get("ip", "")
+            if _is_private_ip(ip) or ip in seen:
+                continue
+            geo = lookup(ip)
+            if not geo.get("private"):
+                seen[ip] = {
+                    "ip":       ip,
+                    "country":  geo["country"],
+                    "city":     geo["city"],
+                    "lat":      geo["lat"],
+                    "lon":      geo["lon"],
+                    "flag":     geo["flag"],
+                    "org":      geo["org"],
+                    "process":  c.get("process", ""),
+                    "port":     c.get("port", 0),
+                    # Non-blocking: returns cached hostname or raw IP
+                    "hostname": resolve_ip(ip),
+                }
     except Exception:
         pass
 
-    for conn in live_conns:
-        ip = conn["ip"]
-        if not ip or ip.startswith("127.") or ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172."):
-            continue
-        if ip not in seen:
+    # IPs from detections (tenant-scoped)
+    try:
+        for det in _get_ids(tenant_id).get_detections(limit=100):
+            ip = det.get("source_ip", "")
+            if _is_private_ip(ip) or ip in seen:
+                continue
             geo = lookup(ip)
             if not geo.get("private"):
                 seen[ip] = {
-                    "ip":      ip,
-                    "country": geo["country"],
-                    "city":    geo["city"],
-                    "lat":     geo["lat"],
-                    "lon":     geo["lon"],
-                    "flag":    geo["flag"],
-                    "org":     geo["org"],
-                    "process": conn["process"],
-                    "port":    conn["port"],
-                    "hostname": resolve_ip(ip),
-                }
-
-    # Also include IPs from detections (tenant-scoped)
-    for det in _get_ids(_resolve_tenant_id()).get_detections(limit=100):
-        ip = det.get("source_ip","")
-        if ip and not ip.startswith("127.") and not ip.startswith("192.168.") and ip not in seen:
-            geo = lookup(ip)
-            if not geo.get("private"):
-                seen[ip] = {
-                    "ip":      ip,
-                    "country": geo["country"],
-                    "city":    geo["city"],
-                    "lat":     geo["lat"],
-                    "lon":     geo["lon"],
-                    "flag":    geo["flag"],
-                    "org":     geo["org"],
-                    "process": "detection",
-                    "threat":  det.get("threat_name",""),
-                    "severity": det.get("severity",""),
-                    "port":    0,
+                    "ip":       ip,
+                    "country":  geo["country"],
+                    "city":     geo["city"],
+                    "lat":      geo["lat"],
+                    "lon":      geo["lon"],
+                    "flag":     geo["flag"],
+                    "org":      geo["org"],
+                    "process":  "detection",
+                    "threat":   det.get("threat_name", ""),
+                    "severity": det.get("severity", ""),
+                    "port":     0,
                     "hostname": ip,
                 }
+    except Exception:
+        pass
 
     payload = {
         "points":    list(seen.values()),
         "total":     len(seen),
         "timestamp": datetime.now().isoformat() + "Z",
+        "cached":    False,
     }
     _ttl_cache_set(_geo_cache, _geo_cache_lock, tenant_id, payload)
+    return payload
+
+
+@app.route("/api/geo")
+@auth
+def geo_ips():
+    tenant_id = _resolve_tenant_id()
+
+    data, is_stale = _ttl_cache_get_swr(
+        _geo_cache, _geo_cache_lock, tenant_id,
+        _GEO_CACHE_TTL, _GEO_STALE_TTL
+    )
+    if data is not None:
+        if is_stale:
+            _trigger_bg_refresh(f"geo:{tenant_id}", _compute_geo_data, tenant_id)
+        resp           = dict(data)
+        resp["cached"] = True
+        resp["stale"]  = is_stale
+        return jsonify(resp)
+
+    # No cache — first request, compute synchronously
+    try:
+        from geo_ip import lookup as _geo_lookup  # noqa: F401
+    except ImportError:
+        return jsonify({"error": "geo_ip module not found"}), 500
+
+    payload = _compute_geo_data(tenant_id)
+    payload["cached"] = False
+    payload["stale"]  = False
     return jsonify(payload)
 
 
@@ -3146,16 +3257,24 @@ def prometheus_metrics():
 @app.route("/api/health")
 def health():
     """
-    Health check completo — retorna status de todos os subsistemas.
-    Em caso de erro interno, retorna JSON com traceback em vez de 500 HTML.
+    Health check — status de todos os subsistemas.
+    Erros internos retornam JSON opaco com request_id (sem traceback na resposta).
     """
-    import traceback as _tb
+    import uuid as _uuid
+    req_id = _uuid.uuid4().hex[:12]
     try:
-        return _health_inner()
+        resp, code = _health_inner()
+        data = resp.get_json()
+        data["request_id"] = req_id
+        return jsonify(data), code
     except Exception as _ex:
-        logger.error("health error: %s\n%s", _ex, _tb.format_exc())
-        return jsonify({"status": "error", "error": str(_ex),
-                        "traceback": _tb.format_exc()}), 500
+        import traceback as _tb
+        logger.error("health error [%s]: %s\n%s", req_id, _ex, _tb.format_exc())
+        return jsonify({
+            "status":     "error",
+            "request_id": req_id,
+            "error":      "internal_error",  # opaco — sem detalhes para o cliente
+        }), 500
 
 
 def _health_inner():
@@ -3252,7 +3371,7 @@ def _health_inner():
     }
 
     status_code = 200 if critical_ok else 503
-    return jsonify(payload), status_code
+    return jsonify(payload), status_code  # retornado como tupla para health()
 
 
 @app.route("/login")
