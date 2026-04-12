@@ -20,7 +20,7 @@ except ImportError:
     PSUTIL_OK = False
     logging.getLogger("ids.api").warning("psutil não instalado — instale com: pip install psutil")
 from datetime import datetime, timezone
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request, Response, make_response, redirect
 from flask_cors import CORS
 from ids_engine import IDSEngine, LogProcessor
 
@@ -755,6 +755,9 @@ def resolve_ip(ip: str) -> str:
         cached = _dns_cache.get(ip)
         if cached is not None:
             return cached
+        # Cache placeholder immediately so callers/tests never depend on
+        # external DNS timing and repeated misses don't fan out more lookups.
+        _dns_cache[ip] = ip
 
     def _do_resolve(addr: str):
         try:
@@ -1066,7 +1069,7 @@ BROWSERS_E_APPS = {
     "spotify.exe","zoom.exe","skype.exe","outlook.exe",
     "code.exe","cursor.exe","windowsterminal.exe",
     "python.exe","pythonw.exe","node.exe","git.exe",
-    "dropbox.exe","googledrivefs.exe",
+    "dropbox.exe","googledrivefs.exe","steam.exe",
     "obs64.exe","vlc.exe","microsoftedgeupdate.exe",
     "steam.exe","steamwebhelper.exe","steamservice.exe","gameoverlayui.exe",
     "mpdefendercoreservice.exe","mpdefendercoreserv.exe","msmpeng.exe","nissrv.exe",
@@ -1076,9 +1079,9 @@ BROWSERS_E_APPS = {
     "whatsapp.exe","signal.exe","telegram.exe",
     "postman.exe","insomnia.exe","1password.exe",
     "winstore.app.exe","winstoredraftapp.exe","microsoftstore.exe","widgets.exe",
-    "msMpEng.exe","nisssrv.exe",
+    "msMpEng.exe","nisssrv.exe","securityhealthservice.exe",
     "csrss.exe","smss.exe","spoolsv.exe","RuntimeBroker.exe",
-    "Teams.exe","Slack.exe",
+    "Teams.exe","Slack.exe","discord.exe",
 }
 
 PROCESSOS_SUSPEITOS = [
@@ -4884,7 +4887,16 @@ def trial_access(token):
         return _render_trial_expired(result["trial"]), 200, {"Content-Type": "text/html; charset=utf-8"}
 
     if not result["valid"]:
-        return redirect("/pricing")
+        return (
+            "<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'/>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1'/>"
+            "<title>Trial não encontrado</title></head><body>"
+            "<h1>Trial não encontrado</h1>"
+            "<p>Esse link é inválido, expirou ou já foi revogado.</p>"
+            "</body></html>",
+            404,
+            {"Content-Type": "text/html; charset=utf-8"},
+        )
 
     # Seed de dados demo para este trial (tenant isolado por token hash)
     trial    = result["trial"]

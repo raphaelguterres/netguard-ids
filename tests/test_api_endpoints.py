@@ -9,7 +9,8 @@ Integration-style tests for the Flask API endpoints:
   • /trial/<token> — valid / expired / revoked tokens
   • Async cache helpers: _ttl_cache_get_swr, _trigger_bg_refresh
 
-All tests set IDS_AUTH=false so no token auth is needed.
+Auth/CSRF-sensitive endpoints use an explicit admin token so these tests
+stay aligned with the hardened API contract.
 """
 import os
 import sys
@@ -21,7 +22,7 @@ from unittest.mock import patch, MagicMock
 # ── env before app import ─────────────────────────────────────────
 os.environ.setdefault("IDS_AUTH", "false")
 os.environ.setdefault("IDS_DASHBOARD_AUTH", "false")
-os.environ.setdefault("IDS_CSRF_DISABLED", "true")
+os.environ.setdefault("IDS_CSRF_DISABLED", "false")
 os.environ.setdefault("HTTPS_ONLY", "false")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -173,9 +174,11 @@ class TestGraphEndpoint(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import app as _app
+        from auth import get_or_create_token
         _app.app.config["TESTING"] = True
         cls.client  = _app.app.test_client()
         cls.app_mod = _app
+        cls.auth_headers = {"X-API-Token": get_or_create_token()}
 
     def setUp(self):
         # Clear graph cache between tests
@@ -185,13 +188,13 @@ class TestGraphEndpoint(unittest.TestCase):
     @patch("subprocess.run")
     def test_graph_returns_200(self, mock_run):
         mock_run.return_value = MagicMock(stdout="", returncode=0)
-        resp = self.client.get("/api/graph")
+        resp = self.client.get("/api/graph", headers=self.auth_headers)
         self.assertEqual(resp.status_code, 200)
 
     @patch("subprocess.run")
     def test_graph_response_has_nodes_and_edges(self, mock_run):
         mock_run.return_value = MagicMock(stdout="", returncode=0)
-        resp = self.client.get("/api/graph")
+        resp = self.client.get("/api/graph", headers=self.auth_headers)
         data = resp.get_json()
         self.assertIsNotNone(data)
         self.assertIn("nodes", data)
@@ -200,8 +203,8 @@ class TestGraphEndpoint(unittest.TestCase):
     @patch("subprocess.run")
     def test_graph_second_call_is_cached(self, mock_run):
         mock_run.return_value = MagicMock(stdout="", returncode=0)
-        self.client.get("/api/graph")   # cold
-        resp2 = self.client.get("/api/graph")  # should be cached
+        self.client.get("/api/graph", headers=self.auth_headers)   # cold
+        resp2 = self.client.get("/api/graph", headers=self.auth_headers)  # should be cached
         data = resp2.get_json()
         self.assertTrue(data.get("cached"), "Second call should return cached=True")
 
@@ -222,7 +225,7 @@ class TestGraphEndpoint(unittest.TestCase):
             return original_trigger(key, fn, *args)
 
         with patch.object(self.app_mod, "_trigger_bg_refresh", side_effect=fake_trigger):
-            resp = self.client.get("/api/graph")
+            resp = self.client.get("/api/graph", headers=self.auth_headers)
             data = resp.get_json()
 
         self.assertTrue(data.get("stale"), "Stale cache should return stale=True")
@@ -231,7 +234,7 @@ class TestGraphEndpoint(unittest.TestCase):
     @patch("subprocess.run")
     def test_graph_has_timestamp(self, mock_run):
         mock_run.return_value = MagicMock(stdout="", returncode=0)
-        resp = self.client.get("/api/graph")
+        resp = self.client.get("/api/graph", headers=self.auth_headers)
         data = resp.get_json()
         self.assertIn("timestamp", data)
 
@@ -244,9 +247,11 @@ class TestGeoEndpoint(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import app as _app
+        from auth import get_or_create_token
         _app.app.config["TESTING"] = True
         cls.client  = _app.app.test_client()
         cls.app_mod = _app
+        cls.auth_headers = {"X-API-Token": get_or_create_token()}
 
     def setUp(self):
         with self.app_mod._geo_cache_lock:
@@ -254,7 +259,7 @@ class TestGeoEndpoint(unittest.TestCase):
 
     @patch("platform_utils.get_connections", return_value=[])
     def test_geo_returns_200(self, _mock):
-        resp = self.client.get("/api/geo")
+        resp = self.client.get("/api/geo", headers=self.auth_headers)
         self.assertIn(resp.status_code, [200, 500])  # 500 only if geo_ip not installed
 
     @patch("platform_utils.get_connections", return_value=[])
@@ -265,7 +270,7 @@ class TestGeoEndpoint(unittest.TestCase):
                 "ts":   time.time(),
                 "data": {"points": [], "total": 0, "timestamp": "t"},
             }
-        resp = self.client.get("/api/geo")
+        resp = self.client.get("/api/geo", headers=self.auth_headers)
         data = resp.get_json()
         self.assertTrue(data.get("cached"), "Hit on fresh cache should return cached=True")
 
@@ -284,7 +289,7 @@ class TestGeoEndpoint(unittest.TestCase):
             return original(key, fn, *args)
 
         with patch.object(self.app_mod, "_trigger_bg_refresh", side_effect=fake):
-            resp = self.client.get("/api/geo")
+            resp = self.client.get("/api/geo", headers=self.auth_headers)
             data = resp.get_json()
 
         self.assertTrue(data.get("stale"))
@@ -337,15 +342,17 @@ class TestTrialAdminAPI(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import app as _app
+        from auth import get_or_create_token
         _app.app.config["TESTING"] = True
         cls.client  = _app.app.test_client()
         cls.app_mod = _app
+        cls.auth_headers = {"X-API-Token": get_or_create_token()}
 
-    def _api_key_header(self):
-        return {"X-API-Key": os.environ.get("IDS_API_KEY", "dev")}
+    def _auth_header(self):
+        return dict(self.auth_headers)
 
     def test_list_trials_returns_200(self):
-        resp = self.client.get("/api/admin/trials", headers=self._api_key_header())
+        resp = self.client.get("/api/admin/trials", headers=self._auth_header())
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
         self.assertIsNotNone(data)
@@ -355,18 +362,18 @@ class TestTrialAdminAPI(unittest.TestCase):
         resp = self.client.post(
             "/api/admin/trials",
             json=payload,
-            headers=self._api_key_header(),
+            headers=self._auth_header(),
         )
         self.assertEqual(resp.status_code, 201)
         data = resp.get_json()
-        self.assertIn("token", data)
-        self.assertTrue(data["token"].startswith("ng_trial_"))
+        self.assertIn("trial", data)
+        self.assertTrue(data["trial"]["token"].startswith("ng_trial_"))
 
     def test_create_trial_invalid_email_returns_400(self):
         resp = self.client.post(
             "/api/admin/trials",
             json={"email": "notvalid"},
-            headers=self._api_key_header(),
+            headers=self._auth_header(),
         )
         self.assertEqual(resp.status_code, 400)
 
@@ -374,7 +381,7 @@ class TestTrialAdminAPI(unittest.TestCase):
         resp = self.client.post(
             "/api/admin/trials",
             json={"name": "No Email"},
-            headers=self._api_key_header(),
+            headers=self._auth_header(),
         )
         self.assertEqual(resp.status_code, 400)
 
