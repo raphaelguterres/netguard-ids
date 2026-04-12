@@ -11,7 +11,7 @@ flask-limiter==3.8.0
 psutil==5.9.8
 
 # Captura de pacotes
-scapy==2.5.0
+scapy==2.7.0
 
 # Config / utils
 pyyaml==6.0.1

@@ -5,6 +5,7 @@ Um único processo. Sem simulador. Sem dados falsos.
 """
 
 import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress, secrets  # noqa: F401
+from types import MethodType
 from platform_utils import (  # noqa: F401
     OS, IS_WINDOWS, IS_LINUX,
     get_processes, get_pid_name_map, get_listen_ports,
@@ -611,7 +612,7 @@ CORS(app, resources={r"/api/*": {"origins": _cors_origins}})
 _HTTPS_ONLY = os.environ.get("HTTPS_ONLY", "false").lower() == "true"
 try:
     from flask_talisman import Talisman
-    Talisman(
+    talisman = Talisman(
         app,
         force_https=_HTTPS_ONLY,
         strict_transport_security=_HTTPS_ONLY,
@@ -625,16 +626,30 @@ try:
             "frame-src":   "https://js.stripe.com",
             "connect-src": "'self'",
         },
-        x_frame_options="DENY",
+        frame_options="DENY",
         x_content_type_options=True,
-        referrer_policy="strict-origin-when-cross-origin",
         session_cookie_secure=_HTTPS_ONLY,
         session_cookie_http_only=True,
+    )
+
+    def _talisman_set_referrer_policy_headers(self, headers):
+        headers.setdefault("Referrer-Policy", self.referrer_policy)
+
+    talisman._set_referrer_policy_headers = MethodType(  # type: ignore[attr-defined]
+        _talisman_set_referrer_policy_headers,
+        talisman,
     )
     logger.info("Flask-Talisman ativo | HTTPS_ONLY=%s", _HTTPS_ONLY)
 except ImportError:
     logger.warning("flask-talisman não instalado — headers de segurança desativados. "
                    "Instale com: pip install flask-talisman")
+
+
+@app.after_request
+def _apply_referrer_policy(resp):
+    # Preserve per-route overrides such as the onboarding welcome page.
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return resp
 
 # ── Rate Limiting via Flask-Limiter (se disponível) ──────────────
 try:
@@ -1071,7 +1086,7 @@ BROWSERS_E_APPS = {
     "python.exe","pythonw.exe","node.exe","git.exe",
     "dropbox.exe","googledrivefs.exe","steam.exe",
     "obs64.exe","vlc.exe","microsoftedgeupdate.exe",
-    "steam.exe","steamwebhelper.exe","steamservice.exe","gameoverlayui.exe",
+    "steamwebhelper.exe","steamservice.exe","gameoverlayui.exe",
     "mpdefendercoreservice.exe","mpdefendercoreserv.exe","msmpeng.exe","nissrv.exe",
     "securityhealthsystray.exe","securityhealthservice.exe",
     "msedgewebview2.exe","webview2.exe",
@@ -1079,9 +1094,9 @@ BROWSERS_E_APPS = {
     "whatsapp.exe","signal.exe","telegram.exe",
     "postman.exe","insomnia.exe","1password.exe",
     "winstore.app.exe","winstoredraftapp.exe","microsoftstore.exe","widgets.exe",
-    "msMpEng.exe","nisssrv.exe","securityhealthservice.exe",
+    "msMpEng.exe","nisssrv.exe",
     "csrss.exe","smss.exe","spoolsv.exe","RuntimeBroker.exe",
-    "Teams.exe","Slack.exe","discord.exe",
+    "Teams.exe","Slack.exe",
 }
 
 PROCESSOS_SUSPEITOS = [
