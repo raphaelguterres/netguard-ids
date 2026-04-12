@@ -4497,6 +4497,17 @@ def ml_anomaly_status():
     return jsonify(eng.status())
 
 
+# ── ML Training progress state ────────────────────────────────
+import threading as _threading
+_ml_train_state = {"running": False, "pct": 0, "status": "idle", "result": None}
+_ml_train_lock  = _threading.Lock()
+
+@app.route("/api/ml/anomaly/progress", methods=["GET"])
+@auth
+def ml_anomaly_progress():
+    with _ml_train_lock:
+        return jsonify(dict(_ml_train_state))
+
 @app.route("/api/ml/anomaly/train", methods=["POST"])
 @auth
 @csrf_protect
@@ -4504,11 +4515,43 @@ def ml_anomaly_status():
 def ml_anomaly_train():
     if not ML_ANOMALY_AVAILABLE:
         return jsonify({"error": "scikit-learn não disponível"}), 503
-    data     = request.get_json(force=True) or {}
+    with _ml_train_lock:
+        if _ml_train_state["running"]:
+            return jsonify({"error": "Treinamento já em andamento"}), 409
+        _ml_train_state.update({"running": True, "pct": 0, "status": "Iniciando…", "result": None})
+
+    data      = request.get_json(force=True) or {}
     days_back = int(data.get("days_back", 30))
-    eng      = _get_ml_anomaly()
-    result   = eng.train(days_back=days_back)
-    return jsonify(result)
+    eng       = _get_ml_anomaly()
+
+    def _do_train():
+        try:
+            with _ml_train_lock:
+                _ml_train_state.update({"pct": 10, "status": "Coletando dados históricos…"})
+            import time as _time; _time.sleep(0.2)
+
+            with _ml_train_lock:
+                _ml_train_state.update({"pct": 30, "status": "Extraindo features…"})
+            _time.sleep(0.1)
+
+            with _ml_train_lock:
+                _ml_train_state.update({"pct": 55, "status": "Treinando Isolation Forest…"})
+            result = eng.train(days_back=days_back)
+
+            with _ml_train_lock:
+                _ml_train_state.update({"pct": 90, "status": "Salvando modelo…"})
+            _time.sleep(0.1)
+
+            with _ml_train_lock:
+                _ml_train_state.update({"running": False, "pct": 100,
+                                        "status": "Concluído", "result": result})
+        except Exception as exc:
+            with _ml_train_lock:
+                _ml_train_state.update({"running": False, "pct": 0,
+                                        "status": f"Erro: {exc}", "result": {"trained": False}})
+
+    _threading.Thread(target=_do_train, daemon=True).start()
+    return jsonify({"ok": True, "message": "Treinamento iniciado"})
 
 
 @app.route("/api/ml/anomaly/detect", methods=["GET"])

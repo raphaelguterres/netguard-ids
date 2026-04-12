@@ -1858,6 +1858,66 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 .hp-top-attacker-bar { flex: 1; height: 3px; background: rgba(0,200,255,.08); border-radius: 2px; overflow: hidden; }
 .hp-top-attacker-fill { height: 100%; background: var(--red); border-radius: 2px; }
 .hp-top-attacker-n { font-family: var(--mono); font-size: 9px; color: var(--red); min-width: 20px; text-align: right; }
+
+/* ── IOC filter bar / pagination / search highlight ─── */
+.ioc-filter-bar{display:flex;align-items:center;gap:8px;padding:8px 0 4px;flex-wrap:wrap}
+.ioc-search-input{flex:1;min-width:180px;max-width:320px}
+.ioc-filter-sel{width:140px}
+.ioc-count-label{font-size:10px;color:var(--txt3);white-space:nowrap;margin-left:auto}
+.ioc-pagination{display:flex;align-items:center;gap:4px;padding:10px 0 4px;flex-wrap:wrap}
+.pg-btn{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:var(--txt2);
+  font-size:11px;padding:3px 9px;border-radius:4px;cursor:pointer;transition:.15s}
+.pg-btn:hover:not(.disabled){background:rgba(0,200,255,.12);border-color:var(--cyn);color:var(--cyn)}
+.pg-btn.active{background:var(--cyn);border-color:var(--cyn);color:#000;font-weight:700}
+.pg-btn.disabled{opacity:.3;cursor:default;pointer-events:none}
+.pg-ellipsis{color:var(--txt3);font-size:11px;padding:0 2px}
+.pg-info{font-size:10px;color:var(--txt3);margin-left:8px;white-space:nowrap}
+mark.ioc-hl{background:rgba(255,200,0,.3);color:inherit;border-radius:2px;padding:0 1px}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--cyn)}
+
+/* ── ML Training progress bar ───────────────────────── */
+.ml-progress-wrap{display:flex;align-items:center;gap:10px;padding:10px 16px;
+  background:rgba(0,200,255,.06);border-radius:6px;margin:8px 0}
+.ml-progress-label{font-size:11px;color:var(--txt2);min-width:200px}
+.ml-progress-track{flex:1;height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden}
+.ml-progress-fill{height:100%;border-radius:3px;transition:width .35s ease,background .4s}
+.ml-progress-pct{font-family:var(--mono);font-size:11px;color:var(--cyn);min-width:36px;text-align:right}
+
+/* ── Command Palette ─────────────────────────────────── */
+.cmdpal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;
+  display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;backdrop-filter:blur(4px)}
+.cmdpal-box{background:#0d1117;border:1px solid rgba(0,200,255,.25);border-radius:10px;
+  width:min(600px,90vw);max-height:70vh;display:flex;flex-direction:column;
+  box-shadow:0 24px 64px rgba(0,0,0,.7)}
+.cmdpal-header{display:flex;align-items:center;gap:10px;padding:12px 16px;
+  border-bottom:1px solid rgba(255,255,255,.06)}
+.cmdpal-icon{font-size:16px;color:var(--cyn);opacity:.7}
+.cmdpal-input{flex:1;background:transparent;border:none;outline:none;
+  color:var(--txt);font-size:15px;font-family:var(--sans)}
+.cmdpal-input::placeholder{color:var(--txt3)}
+.cmdpal-esc{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+  border-radius:4px;padding:2px 7px;font-size:10px;color:var(--txt3);cursor:pointer}
+.cmdpal-list{overflow-y:auto;padding:6px 0;flex:1}
+.cmdpal-item{display:flex;align-items:center;gap:12px;padding:9px 16px;cursor:pointer;
+  border-left:2px solid transparent;transition:.1s}
+.cmdpal-item:hover,.cmdpal-item.selected{background:rgba(0,200,255,.08);
+  border-left-color:var(--cyn)}
+.cmdpal-item-icon{font-size:14px;width:20px;text-align:center;opacity:.85}
+.cmdpal-item-label{font-size:13px;color:var(--txt);flex:1}
+.cmdpal-item-label mark{background:rgba(0,200,255,.3);color:var(--cyn);border-radius:2px;padding:0 1px}
+.cmdpal-item-hint{font-size:10px;color:var(--txt3);font-family:var(--mono)}
+.cmdpal-section{padding:6px 16px 2px;font-size:9px;font-weight:700;letter-spacing:.1em;
+  color:var(--txt3);text-transform:uppercase;margin-top:4px}
+.cmdpal-footer{display:flex;gap:16px;padding:8px 16px;border-top:1px solid rgba(255,255,255,.05);
+  font-size:10px;color:var(--txt3)}
+
+.cmdpal-trigger{display:flex;align-items:center;gap:5px;background:rgba(0,200,255,.07);
+  border:1px solid rgba(0,200,255,.15);border-radius:6px;padding:4px 10px;
+  color:var(--txt2);font-size:11px;cursor:pointer;transition:.15s}
+.cmdpal-trigger:hover{background:rgba(0,200,255,.14);color:var(--cyn)}
+.cmdpal-trigger kbd{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
+  border-radius:3px;padding:1px 5px;font-size:9px;font-family:var(--mono)}
 </style>
 </head>
 <body class="enterprise-command">
@@ -1914,6 +1974,7 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
     <a id="hdr-admin-btn" href="/admin" class="hdr-admin-link"
        style="display:none"
        title="Painel de Administração">⚡ Admin</a>
+    <button class="cmdpal-trigger" onclick="openPalette()" title="Busca global (Ctrl+K)"><span>🔍</span> <kbd>Ctrl+K</kbd></button>
     <div id="utc">—</div>
   </div>
 </div>
@@ -6004,13 +6065,19 @@ document.addEventListener('visibilitychange',()=>{
 // ═══════════════════════════════════════════════════════════════
 // ── IOC MANAGER ───────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
-async function loadIOC(){
-  const d=await api('/ioc?active=false&limit=500');
+/* ── IOC state ──────────────────────────────────────── */
+let _iocAll=[], _iocPage=1;
+const _IOC_PER_PAGE=25;
+
+async function loadIOC(resetPage=true){
+  const d=await api('/ioc?active=false&limit=2000');
   const pg=document.getElementById('p-ioc');
   if(!pg)return;
-  const iocs=d?.iocs||[], stats=d?.stats||{};
+  _iocAll=d?.iocs||[];
+  const stats=d?.stats||{};
   const total=stats.total||0, active=stats.active||0;
   const byType=stats.by_type||{};
+  if(resetPage) _iocPage=1;
   pg.innerHTML=`
   <div class="module-shell">
     <div class="module-toolbar">
@@ -6031,6 +6098,23 @@ async function loadIOC(){
           <div class="stat-card-label">${l}</div>
         </div>`).join('')}
     </div>
+    <div class="ioc-filter-bar">
+      <input id="ioc-search" class="form-control ioc-search-input" placeholder="🔍 Buscar por valor, ameaça ou tipo…" oninput="_renderIOCTable()">
+      <select id="ioc-ft" class="form-control ioc-filter-sel" onchange="_renderIOCTable()">
+        <option value="">Todos os tipos</option>
+        <option value="ip">IP</option>
+        <option value="domain">Domínio</option>
+        <option value="hash">Hash</option>
+        <option value="url">URL</option>
+      </select>
+      <select id="ioc-fs" class="form-control ioc-filter-sel" onchange="_renderIOCTable()">
+        <option value="">Todos os status</option>
+        <option value="active">Ativos</option>
+        <option value="inactive">Inativos</option>
+        <option value="hits">Com hits</option>
+      </select>
+      <span id="ioc-count-label" class="ioc-count-label"></span>
+    </div>
     <div id="add-ioc-form" class="inline-form-panel" style="display:none">
       <div class="inline-form-title">ADICIONAR IOC</div>
       <input id="ioc-val" class="form-control grow" placeholder="IP, domínio ou hash">
@@ -6042,41 +6126,92 @@ async function loadIOC(){
       <button class="fbtn form-action success" onclick="addIOC()">✓ Salvar</button>
       <button class="fbtn" onclick="document.getElementById('add-ioc-form').style.display='none'">✕</button>
     </div>
-    <div class="table-shell">
-      <table class="module-table">
-        <thead><tr>
-          <th class="left">Valor</th>
-          <th>Tipo</th>
-          <th class="left">Ameaça</th>
-          <th>Confiança</th>
-          <th>Hits</th>
-          <th>Status</th>
-          <th>Ações</th>
-        </tr></thead>
-        <tbody>
-        ${iocs.length===0?`<tr><td colspan="7" class="module-empty">Nenhum IOC cadastrado.<br><small>Importe um CSV ou adicione manualmente.</small></td></tr>`
-        :iocs.map(ioc=>{
+    <div id="ioc-table-wrap"></div>
+    <div id="ioc-pagination" class="ioc-pagination"></div>
+  </div>`;
+  _renderIOCTable();
+}
+
+function _renderIOCTable(){
+  const q=(document.getElementById('ioc-search')?.value||'').toLowerCase();
+  const ft=document.getElementById('ioc-ft')?.value||'';
+  const fs=document.getElementById('ioc-fs')?.value||'';
+  let rows=_iocAll.filter(ioc=>{
+    if(ft && ioc.ioc_type!==ft) return false;
+    if(fs==='active'   && !ioc.active)        return false;
+    if(fs==='inactive' &&  ioc.active)        return false;
+    if(fs==='hits'     && !(ioc.hit_count>0)) return false;
+    if(q){
+      const hay=`${ioc.value_raw||ioc.value||''} ${ioc.threat_name||''} ${ioc.ioc_type||''}`.toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const total=rows.length;
+  const pages=Math.max(1,Math.ceil(total/_IOC_PER_PAGE));
+  if(_iocPage>pages) _iocPage=pages;
+  const start=(_iocPage-1)*_IOC_PER_PAGE;
+  const slice=rows.slice(start,start+_IOC_PER_PAGE);
+  const lbl=document.getElementById('ioc-count-label');
+  if(lbl) lbl.textContent=total===_iocAll.length?`${total} IOCs`:`${total} de ${_iocAll.length} IOCs`;
+  const wrap=document.getElementById('ioc-table-wrap');
+  if(!wrap)return;
+  const escRe=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  wrap.innerHTML=`
+    <div class="table-shell"><table class="module-table">
+      <thead><tr>
+        <th class="left sortable" onclick="_iocSort('value')">Valor ⇅</th>
+        <th onclick="_iocSort('ioc_type')">Tipo ⇅</th>
+        <th class="left">Ameaça</th>
+        <th onclick="_iocSort('confidence')">Conf ⇅</th>
+        <th onclick="_iocSort('hit_count')">Hits ⇅</th>
+        <th>Status</th><th>Ações</th>
+      </tr></thead>
+      <tbody>
+      ${slice.length===0
+        ?`<tr><td colspan="7" class="module-empty">Nenhum IOC encontrado para este filtro.</td></tr>`
+        :slice.map(ioc=>{
           const typeColor={ip:'#f85149',domain:'#d29922',hash:'#bc8cff',url:'#58a6ff'}[ioc.ioc_type]||'var(--cyn)';
           const confColor=ioc.confidence>=80?'#3fb950':ioc.confidence>=60?'#d29922':'#f85149';
+          const val=ioc.value_raw||ioc.value||'';
+          const safeVal=val.replace(/"/g,'&quot;');
+          const valHl=q?val.replace(new RegExp(escRe(q),'gi'),m=>`<mark class="ioc-hl">${m}</mark>`):val;
           return`<tr class="dynamic-row${ioc.active?'':' inactive'}">
-            <td class="cell left code truncate-200" title="${ioc.value_raw||ioc.value}">${ioc.value_raw||ioc.value}</td>
+            <td class="cell left code truncate-200" title="${safeVal}">${valHl}</td>
             <td class="cell"><span class="badge-outline" style="border:1px solid ${typeColor};color:${typeColor}">${(ioc.ioc_type||'').toUpperCase()}</span></td>
             <td class="cell left muted truncate-160">${ioc.threat_name||'—'}</td>
             <td class="cell head" style="color:${confColor}">${ioc.confidence}%</td>
             <td class="cell head" style="color:${ioc.hit_count>0?'#f85149':'var(--txt3)'}">${ioc.hit_count||0}</td>
-            <td class="cell">
-              <span style="color:${ioc.active?'#3fb950':'#f85149'}">${ioc.active?'●  Ativo':'○  Inativo'}</span>
-            </td>
+            <td class="cell"><span style="color:${ioc.active?'#3fb950':'#f85149'}">${ioc.active?'● Ativo':'○ Inativo'}</span></td>
             <td class="cell nowrap">
               <button class="icon-btn" onclick="toggleIOC('${ioc.ioc_id}',${!ioc.active})" title="${ioc.active?'Desativar':'Ativar'}">${ioc.active?'⏸':'▶'}</button>
               <button class="icon-btn danger" onclick="deleteIOC('${ioc.ioc_id}')" title="Remover">✕</button>
-            </td>
-          </tr>`;
+            </td></tr>`;
         }).join('')}
-        </tbody>
-      </table>
-    </div>
-  </div>`;
+      </tbody>
+    </table></div>`;
+  const pg2=document.getElementById('ioc-pagination');
+  if(!pg2)return;
+  if(pages<=1){pg2.innerHTML='';return;}
+  let btns=`<button class="pg-btn${_iocPage===1?' disabled':''}" onclick="_iocGo(${_iocPage-1})">‹</button>`;
+  let lo=Math.max(1,_iocPage-3), hi=Math.min(pages,_iocPage+3);
+  if(lo>1) btns+=`<button class="pg-btn" onclick="_iocGo(1)">1</button>${lo>2?'<span class="pg-ellipsis">…</span>':''}`;
+  for(let i=lo;i<=hi;i++) btns+=`<button class="pg-btn${i===_iocPage?' active':''}" onclick="_iocGo(${i})">${i}</button>`;
+  if(hi<pages) btns+=`${hi<pages-1?'<span class="pg-ellipsis">…</span>':''}<button class="pg-btn" onclick="_iocGo(${pages})">${pages}</button>`;
+  btns+=`<button class="pg-btn${_iocPage===pages?' disabled':''}" onclick="_iocGo(${_iocPage+1})">›</button>`;
+  btns+=`<span class="pg-info">Pág ${_iocPage}/${pages} · ${start+1}–${Math.min(start+_IOC_PER_PAGE,total)} de ${total}</span>`;
+  pg2.innerHTML=btns;
+}
+
+let _iocSortKey='',_iocSortAsc=true;
+function _iocSort(key){
+  if(_iocSortKey===key) _iocSortAsc=!_iocSortAsc; else{_iocSortKey=key;_iocSortAsc=true;}
+  _iocAll.sort((a,b)=>{const va=a[key]??'',vb=b[key]??'';return _iocSortAsc?(va>vb?1:va<vb?-1:0):(va<vb?1:va>vb?-1:0);});
+  _iocPage=1;_renderIOCTable();
+}
+function _iocGo(p){
+  const pages=Math.max(1,Math.ceil((_iocAll.length||1)/_IOC_PER_PAGE));
+  _iocPage=Math.max(1,Math.min(pages,p));_renderIOCTable();
 }
 function showAddIOC(){
   const f=document.getElementById('add-ioc-form');
@@ -6177,11 +6312,62 @@ async function loadMLAnomaly(){
   </div>`;
 }
 async function trainMLAnomaly(){
-  toast('Treinando modelo ML...','ok');
+  // Show inline progress bar
+  const btn=event?.target;
+  if(btn){btn.disabled=true;btn.textContent='⏳ Treinando…';}
+  const barId='ml-train-progress';
+  let bar=document.getElementById(barId);
+  if(!bar){
+    bar=document.createElement('div');
+    bar.id=barId;
+    bar.innerHTML=`<div class="ml-progress-wrap">
+      <div class="ml-progress-label" id="ml-prog-label">Iniciando…</div>
+      <div class="ml-progress-track"><div class="ml-progress-fill" id="ml-prog-fill" style="width:0%"></div></div>
+      <div class="ml-progress-pct" id="ml-prog-pct">0%</div>
+    </div>`;
+    const toolbar=document.querySelector('#p-ml-anomaly .module-toolbar');
+    if(toolbar) toolbar.after(bar);
+    else document.getElementById('p-ml-anomaly')?.prepend(bar);
+  }
+  bar.style.display='block';
+
+  // Start training
   const r=await api('/ml/anomaly/train',{method:'POST',body:JSON.stringify({days_back:30})});
-  if(r?.trained){toast(`✓ Modelo treinado com ${r.windows} janelas!`,'ok');}
-  else toast(r?.message||'Dados insuficientes para treino','err');
-  loadMLAnomaly();
+  if(r?.error){
+    toast(r.error,'err');
+    if(btn){btn.disabled=false;btn.textContent='⚡ Treinar Modelo';}
+    bar.style.display='none';
+    return;
+  }
+
+  // Poll progress
+  const fill=document.getElementById('ml-prog-fill');
+  const lbl=document.getElementById('ml-prog-label');
+  const pct=document.getElementById('ml-prog-pct');
+  let done=false;
+  while(!done){
+    await new Promise(res=>setTimeout(res,400));
+    const prog=await api('/ml/anomaly/progress');
+    if(!prog)break;
+    const p=prog.pct||0;
+    if(fill){fill.style.width=p+'%';fill.style.background=p<50?'var(--ora)':p<90?'var(--cyn)':'#3fb950';}
+    if(lbl) lbl.textContent=prog.status||'…';
+    if(pct) pct.textContent=p+'%';
+    if(!prog.running && p>=100){
+      done=true;
+      const res=prog.result||{};
+      await new Promise(res=>setTimeout(res,600));
+      bar.style.display='none';
+      if(res.trained) toast(`✓ Modelo treinado com ${res.windows||'?'} janelas!`,'ok');
+      else toast(res.message||'Dados insuficientes para treino','err');
+      loadMLAnomaly();
+    } else if(!prog.running && prog.status?.startsWith('Erro')){
+      done=true;
+      bar.style.display='none';
+      toast(prog.status,'err');
+    }
+  }
+  if(btn){btn.disabled=false;btn.textContent='⚡ Treinar Modelo';}
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -8172,6 +8358,154 @@ async function forensicsDeleteSnap(snapId, btn){
 /* ── Misc helpers ────────────────────────────────────────────── */
 .left { text-align: left !important; }
 </style>
+
+<!-- ── Command Palette (Ctrl+K / Cmd+K) ───────────────── -->
+<div id="cmd-palette" class="cmdpal-overlay" style="display:none" onclick="if(event.target===this)closePalette()">
+  <div class="cmdpal-box">
+    <div class="cmdpal-header">
+      <span class="cmdpal-icon">⌘</span>
+      <input id="cmdpal-input" class="cmdpal-input" placeholder="Ir para… (tab, ação, IOC)" autocomplete="off"
+             oninput="_cpFilter()" onkeydown="_cpKey(event)">
+      <kbd class="cmdpal-esc" onclick="closePalette()">ESC</kbd>
+    </div>
+    <div id="cmdpal-list" class="cmdpal-list"></div>
+    <div class="cmdpal-footer">
+      <span>↑↓ navegar</span><span>↵ ir</span><span>ESC fechar</span>
+      <span style="margin-left:auto;opacity:.5">Ctrl+K / ⌘K</span>
+    </div>
+  </div>
+</div>
+
+
+<script>
+
+// ══════════════════════════════════════════════════════
+// ── COMMAND PALETTE ───────────────────────────────────
+// ══════════════════════════════════════════════════════
+const _CP_TABS = [
+  {icon:'◉',label:'Visão Geral',key:'overview',hint:'overview'},
+  {icon:'⇄',label:'Conexões',key:'connections',hint:'connections'},
+  {icon:'⬡',label:'Ao Vivo',key:'live',hint:'live'},
+  {icon:'🌐',label:'Geo Map',key:'geomap',hint:'geo'},
+  {icon:'⊞',label:'Sistema',key:'system',hint:'system'},
+  {icon:'⚔',label:'OWASP',key:'owasp',hint:'owasp'},
+  {icon:'⊕',label:'Analisar',key:'analyze',hint:'analyze'},
+  {icon:'≋',label:'Estatísticas',key:'stats',hint:'stats'},
+  {icon:'⛓',label:'Kill Chain',key:'killchain',hint:'killchain'},
+  {icon:'🚫',label:'Fail2Ban',key:'fail2ban',hint:'fail2ban'},
+  {icon:'🔎',label:'SOC Events',key:'soc',hint:'soc'},
+  {icon:'🔗',label:'Correlation',key:'corr',hint:'corr'},
+  {icon:'🎯',label:'Risk Score',key:'risk',hint:'risk'},
+  {icon:'🧠',label:'ML Baseline',key:'ml',hint:'ml'},
+  {icon:'🛡',label:'Auto Block',key:'block',hint:'block'},
+  {icon:'🔍',label:'Threat Hunt',key:'hunt',hint:'hunt'},
+  {icon:'🌐',label:'Lateral Move',key:'lateral',hint:'lateral'},
+  {icon:'🦠',label:'YARA',key:'yara',hint:'yara'},
+  {icon:'🌐',label:'DNS Monitor',key:'dns',hint:'dns'},
+  {icon:'🍯',label:'Honeypot',key:'honeypot',hint:'honeypot'},
+  {icon:'☣',label:'IOC Manager',key:'ioc',hint:'ioc'},
+  {icon:'🤖',label:'ML Anomaly',key:'ml-anomaly',hint:'ml-anomaly'},
+  {icon:'📋',label:'Compliance',key:'compliance',hint:'compliance'},
+  {icon:'⚙',label:'Custom Rules',key:'custom-rules',hint:'custom-rules'},
+  {icon:'🔔',label:'Webhooks',key:'webhooks',hint:'webhooks'},
+  {icon:'🔗',label:'Trials',key:'trials',hint:'trials'},
+  {icon:'🗺',label:'MITRE ATT&CK',key:'mitre',hint:'mitre'},
+  {icon:'🌐',label:'Threat Intel',key:'threat-intel',hint:'threat-intel'},
+  {icon:'📋',label:'Playbooks',key:'playbooks',hint:'playbooks'},
+  {icon:'🔬',label:'Forensics',key:'forensics',hint:'forensics'},
+];
+const _CP_ACTIONS = [
+  {icon:'⚡',label:'Treinar ML Anomaly',hint:'action',action:()=>{closePalette();goPage('ml-anomaly',null);setTimeout(trainMLAnomaly,400);}},
+  {icon:'↻',label:'Atualizar dashboard',hint:'action',action:()=>{closePalette();location.reload();}},
+  {icon:'⬇',label:'Exportar IOCs (CSV)',hint:'action',action:()=>{closePalette();window.open('/api/ioc/export','_blank');}},
+  {icon:'📑',label:'Gerar Relatório',hint:'action',action:()=>{closePalette();goPage('analyze',null);}},
+  {icon:'🔗',label:'Novo Trial',hint:'action',action:()=>{closePalette();goPage('trials',null);setTimeout(showNewTrial,400);}},
+];
+let _cpIdx=0, _cpFiltered=[];
+
+function openPalette(){
+  const el=document.getElementById('cmd-palette');
+  if(!el)return;
+  el.style.display='flex';
+  const inp=document.getElementById('cmdpal-input');
+  if(inp){inp.value='';inp.focus();}
+  _cpIdx=0;_cpFilter();
+}
+function closePalette(){
+  const el=document.getElementById('cmd-palette');
+  if(el) el.style.display='none';
+}
+function _cpFilter(){
+  const q=(document.getElementById('cmdpal-input')?.value||'').toLowerCase().trim();
+  const esc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const hl=(txt)=>q?txt.replace(new RegExp(esc(q),'gi'),m=>`<mark>${m}</mark>`):txt;
+  const tabs=_CP_TABS.filter(t=>!q||t.label.toLowerCase().includes(q)||t.key.includes(q));
+  const acts=_CP_ACTIONS.filter(a=>!q||a.label.toLowerCase().includes(q));
+  _cpFiltered=[...tabs.map(t=>({...t,_type:'tab'})),...acts.map(a=>({...a,_type:'action'}))];
+  if(_cpIdx>=_cpFiltered.length) _cpIdx=0;
+  const list=document.getElementById('cmdpal-list');
+  if(!list)return;
+  let html='';
+  if(tabs.length){
+    html+='<div class="cmdpal-section">Navegação</div>';
+    tabs.forEach((t,i)=>{
+      const sel=_cpFiltered[_cpIdx]?.key===t.key&&_cpFiltered[_cpIdx]?._type==='tab';
+      html+=`<div class="cmdpal-item${sel?' selected':''}" onclick="_cpGo(${_cpFiltered.indexOf({...t,_type:'tab'})})" onmouseover="_cpHover(this)">
+        <span class="cmdpal-item-icon">${t.icon}</span>
+        <span class="cmdpal-item-label">${hl(t.label)}</span>
+        <span class="cmdpal-item-hint">${t.hint}</span>
+      </div>`;
+    });
+  }
+  if(acts.length){
+    html+='<div class="cmdpal-section">Ações</div>';
+    acts.forEach((a,i)=>{
+      const globalIdx=tabs.length+i;
+      const sel=_cpIdx===globalIdx;
+      html+=`<div class="cmdpal-item${sel?' selected':''}" onclick="_cpGo(${globalIdx})" onmouseover="_cpHover(this)">
+        <span class="cmdpal-item-icon">${a.icon}</span>
+        <span class="cmdpal-item-label">${hl(a.label)}</span>
+        <span class="cmdpal-item-hint">${a.hint}</span>
+      </div>`;
+    });
+  }
+  if(!html) html='<div class="cmdpal-section" style="padding:20px 16px;text-align:center;color:var(--txt3)">Nenhum resultado</div>';
+  list.innerHTML=html;
+}
+function _cpHover(el){
+  document.querySelectorAll('.cmdpal-item.selected').forEach(e=>e.classList.remove('selected'));
+  el.classList.add('selected');
+  const items=document.querySelectorAll('.cmdpal-item');
+  items.forEach((item,i)=>{if(item===el)_cpIdx=i;});
+}
+function _cpGo(idx){
+  const item=_cpFiltered[idx];
+  if(!item)return;
+  closePalette();
+  if(item._type==='tab'){
+    const tabEl=document.querySelector(`.tab[onclick*="'${item.key}'"]`);
+    goPage(item.key,tabEl);
+  } else if(item.action){
+    item.action();
+  }
+}
+function _cpKey(e){
+  const items=document.querySelectorAll('.cmdpal-item');
+  if(e.key==='ArrowDown'){e.preventDefault();_cpIdx=Math.min(_cpIdx+1,_cpFiltered.length-1);}
+  else if(e.key==='ArrowUp'){e.preventDefault();_cpIdx=Math.max(_cpIdx-1,0);}
+  else if(e.key==='Enter'){e.preventDefault();_cpGo(_cpIdx);return;}
+  else if(e.key==='Escape'){closePalette();return;}
+  // Update selected state
+  items.forEach((el,i)=>el.classList.toggle('selected',i===_cpIdx));
+  const sel=items[_cpIdx];
+  if(sel) sel.scrollIntoView({block:'nearest'});
+}
+// Global keyboard shortcut
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openPalette();}
+  if(e.key==='Escape'){closePalette();}
+});
+
+</script>
 </body>
 </html>
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
