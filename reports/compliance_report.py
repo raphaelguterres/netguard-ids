@@ -678,7 +678,7 @@ def generate_compliance_report(
     story.append(HRFlowable(width="100%", thickness=0.5, color=C_BORDER))
     story.append(Spacer(1, 0.3 * cm))
 
-    for i, (control, (status, justification)) in enumerate(zip(controls, statuses)):
+    for _i, (control, (status, justification)) in enumerate(zip(controls, statuses)):
         status_color = C_GREEN if status == "CONFORME" else (
             C_YELLOW if status == "PARCIAL" else C_RED
         )

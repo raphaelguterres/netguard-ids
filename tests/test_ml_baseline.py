@@ -58,7 +58,7 @@ class TestSampleCollection:
 
     def test_progress_pct_increases(self):
         ml = MLBaseline(host_id="h", min_samples=10)
-        for i in range(5):
+        for _i in range(5):
             ml.add_sample(_snapshot())
         assert ml.stats()["progress_pct"] == 50
 

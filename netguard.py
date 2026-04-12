@@ -52,7 +52,7 @@ def aguardar_servidor(port, timeout=20):
         try:
             urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1)
             return True
-        except:
+        except Exception:
             time.sleep(0.3)
     return False
 
@@ -124,7 +124,7 @@ def iniciar_tray(port):
                         f"NetGuard — {hi} alto(s)"       if hi>0 else
                         "NetGuard IDS — Rede segura"
                     )
-                except:
+                except Exception:
                     pass
                 time.sleep(15)
 

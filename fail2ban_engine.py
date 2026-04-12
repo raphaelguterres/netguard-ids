@@ -118,7 +118,7 @@ class BanEntry:
         try:
             exp = datetime.fromisoformat(self.expires_at)
             return datetime.now() > exp
-        except:
+        except Exception:
             return False
 
     def time_remaining(self) -> str:
@@ -135,7 +135,7 @@ class BanEntry:
             if s >= 60:
                 return f"{s//60}m {s%60}s"
             return f"{s}s"
-        except:
+        except Exception:
             return "?"
 
     def to_dict(self) -> dict:

@@ -14,7 +14,7 @@ Coverage:
 import os
 import sys
 import tempfile
-import time
+import time  # noqa: F401
 import unittest
 from datetime import datetime, timezone, timedelta
 

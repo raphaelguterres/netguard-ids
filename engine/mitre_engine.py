@@ -4,13 +4,13 @@ Mapeia detecções para o framework MITRE ATT&CK e gera heat maps de cobertura.
 """
 from __future__ import annotations  # noqa: F401
 
-import json
+import json  # noqa: F401
 import logging
 import sqlite3
 import threading
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 logger = logging.getLogger("netguard.mitre")
 

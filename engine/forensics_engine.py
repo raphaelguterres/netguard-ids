@@ -20,7 +20,7 @@ import os
 import platform
 import sqlite3
 import subprocess
-import sys
+import sys  # noqa: F401
 import threading
 from datetime import datetime, timezone
 from typing import Optional

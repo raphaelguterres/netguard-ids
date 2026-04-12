@@ -11,12 +11,16 @@ Substitui 2-4h de trabalho manual de analista SOC nível 1/2 por análise instan
 import time
 import threading
 import logging
-from datetime import datetime, timedelta  # noqa: F401
+from datetime import datetime, timedelta, timezone  # noqa: F401
 from collections import defaultdict
 from typing import List, Dict, Optional
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("ids.killchain")
+
+
+def _utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 # ── MITRE ATT&CK Tactic Order (Kill Chain progression) ────────────
 TACTIC_ORDER = {
@@ -198,7 +202,7 @@ class Incident:
             t0 = datetime.fromisoformat(self.first_seen.replace("Z",""))
             t1 = datetime.fromisoformat(self.last_seen.replace("Z",""))
             return int((t1 - t0).total_seconds())
-        except:
+        except Exception:
             return 0
 
     @property
@@ -271,7 +275,7 @@ class KillChainCorrelator:
         )
 
         event = KillChainEvent(
-            timestamp=detection.get("timestamp", datetime.now().isoformat()+"Z"),
+            timestamp=detection.get("timestamp", _utc_iso()),
             threat_name=threat,
             severity=detection.get("severity","low"),
             tactic=tactic,
@@ -437,7 +441,7 @@ class KillChainCorrelator:
             "mitre_heatmap":   list(heatmap.values()),
             "recommendations": recs,
             "summary":         self._generate_summary(inc, score),
-            "generated_at":    datetime.now().isoformat() + "Z",
+            "generated_at":    _utc_iso(),
         }
 
     def _generate_summary(self, inc: Incident, score: int) -> str:
@@ -494,7 +498,7 @@ class KillChainCorrelator:
     def _ts_to_epoch(ts: str) -> float:
         try:
             return datetime.fromisoformat(ts.replace("Z","")).timestamp()
-        except:
+        except Exception:
             return time.time()
 
     def stats(self) -> dict:
@@ -511,4 +515,3 @@ class KillChainCorrelator:
 
 
 # Instância global
-correlator = KillChainCorrelator(window_minutes=60, min_events=2)

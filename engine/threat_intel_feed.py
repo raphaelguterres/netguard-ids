@@ -9,17 +9,17 @@ Puxa IOCs automaticamente de fontes abertas:
 from __future__ import annotations
 
 import gzip
-import io
+import io  # noqa: F401
 import json
 import logging
-import re
+import re  # noqa: F401
 import sqlite3
 import threading
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta  # noqa: F401
 from typing import Optional
 from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
+from urllib.error import URLError, HTTPError  # noqa: F401
 
 logger = logging.getLogger("netguard.threat_intel")
 

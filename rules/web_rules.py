@@ -97,7 +97,7 @@ class WebRules:
                 d = urllib.parse.unquote(result)
                 if d == result: break
                 result = d
-            except: break
+            except Exception: break
         for enc, dec in [("&#60;","<"),("&#62;",">"),("&lt;","<"),
                          ("&gt;",">"),("&amp;","&"),("&quot;",'"')]:
             result = result.replace(enc, dec)

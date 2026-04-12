@@ -17,7 +17,7 @@ import json
 import logging
 import sqlite3
 import threading
-import time
+import time  # noqa: F401
 from datetime import datetime, timezone
 from typing import Optional
 

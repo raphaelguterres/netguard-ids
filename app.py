@@ -1066,7 +1066,7 @@ BROWSERS_E_APPS = {
     "spotify.exe","zoom.exe","skype.exe","outlook.exe",
     "code.exe","cursor.exe","windowsterminal.exe",
     "python.exe","pythonw.exe","node.exe","git.exe",
-    "dropbox.exe","googledrivefs.exe","steam.exe",
+    "dropbox.exe","googledrivefs.exe",
     "obs64.exe","vlc.exe","microsoftedgeupdate.exe",
     "steam.exe","steamwebhelper.exe","steamservice.exe","gameoverlayui.exe",
     "mpdefendercoreservice.exe","mpdefendercoreserv.exe","msmpeng.exe","nissrv.exe",
@@ -1076,9 +1076,9 @@ BROWSERS_E_APPS = {
     "whatsapp.exe","signal.exe","telegram.exe",
     "postman.exe","insomnia.exe","1password.exe",
     "winstore.app.exe","winstoredraftapp.exe","microsoftstore.exe","widgets.exe",
-    "msMpEng.exe","nisssrv.exe","securityhealthservice.exe",
+    "msMpEng.exe","nisssrv.exe",
     "csrss.exe","smss.exe","spoolsv.exe","RuntimeBroker.exe",
-    "Teams.exe","Slack.exe","discord.exe",
+    "Teams.exe","Slack.exe",
 }
 
 PROCESSOS_SUSPEITOS = [

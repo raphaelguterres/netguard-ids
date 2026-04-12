@@ -14,9 +14,9 @@ import os
 import sys
 import time
 import threading
-import socket
+import socket  # noqa: F401
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch  # noqa: F401
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)

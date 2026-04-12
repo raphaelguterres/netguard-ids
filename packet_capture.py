@@ -450,7 +450,7 @@ def detectar_interface_ativa() -> str:
 
         if candidatas:
             # Prefere "Ethernet" ou "Wi-Fi" sobre outros
-            for nome, ip, desc in candidatas:
+            for nome, ip, _desc in candidatas:
                 if "ethernet" in nome.lower() or "wi-fi" in nome.lower():
                     logger.info("Interface detectada: %s (%s)", nome, ip)
                     return nome

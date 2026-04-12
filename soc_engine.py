@@ -159,7 +159,7 @@ class SOCStorage:
                     d = dict(r)
                     for f in ('details', 'tags'):
                         try: d[f] = json.loads(d[f] or '{}')
-                        except: pass
+                        except Exception: pass
                     d['mitre'] = {'tactic': d.pop('mitre_tactic',''), 'technique': d.pop('mitre_tech','')}
                     result.append(d)
                 return result
@@ -179,8 +179,7 @@ class SOCStorage:
                 since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
                 last24 = conn.execute("SELECT COUNT(*) FROM soc_events WHERE timestamp>=?", (since,)).fetchone()[0]
                 return {"total": total, "by_severity": by_sev, "by_type": by_type, "last_24h": last24}
-        except:
-            return {}
+        except Exception:             return {}
 
     def get_baseline(self, host_id, btype):
         try:
@@ -189,7 +188,7 @@ class SOCStorage:
                     "SELECT value FROM soc_baseline WHERE host_id=? AND btype=?",
                     (host_id, btype)).fetchall()
                 return {r[0] for r in rows}
-        except: return set()
+        except Exception: return set()
 
     def update_baseline(self, host_id, btype, value):
         now = datetime.now(timezone.utc).isoformat()
@@ -201,7 +200,7 @@ class SOCStorage:
                     ON CONFLICT(host_id,btype,value)
                     DO UPDATE SET last_seen=?,count=count+1
                 """, (host_id, btype, str(value), now, now, now))
-        except: pass
+        except Exception: pass
 
     def update_baseline_batch(self, host_id, btype, values):
         for v in values:
@@ -220,12 +219,12 @@ KNOWN_PROCS = {
     "discord.exe","steam.exe","steamwebhelper.exe","gameoverlayui.exe",
     "whatsapp.exe","whatsapp.root.exe","slack.exe","zoom.exe","claude.exe",
     "widgets.exe","protonvpn.exe","audiodg.exe","wmiprvse.exe","wbemcons.exe",
-    "spoolsv.exe","lsm.exe","wlanext.exe","dashost.exe","smartscreen.exe",
-    "registry","smss.exe","wermgr.exe","msiexec.exe","winstore.app.exe",
+    "lsm.exe","wlanext.exe","dashost.exe","smartscreen.exe",
+    "registry","wermgr.exe","msiexec.exe","winstore.app.exe",
     "securityhealthservice.exe","nissrv.exe","mssense.exe","mpdefendercoreservice.exe",
     "mpdefendercoreserv.exe","protonvpnclient.exe","protonvpn_service.exe",
     "openconsole.exe","regedit.exe","mmc.exe","eventvwr.exe",
-    "netguard","netguard.exe","lsass.exe","wuauclt.exe",
+    "netguard","netguard.exe","wuauclt.exe",
 }
 
 COMMON_PORTS = {
@@ -535,7 +534,7 @@ class SOCEngine:
     def _alert(self, event):
         if self.callback:
             try: self.callback(event)
-            except: pass
+            except Exception: pass
 
     @staticmethod
     def _decode(text):
@@ -546,7 +545,7 @@ class SOCEngine:
                 d = urllib.parse.unquote(r)
                 if d == r: break
                 r = d
-            except: break
+            except Exception: break
         for enc, dec in [("&#60;","<"),("&#62;",">"),("&lt;","<"),("&gt;",">"),("&amp;","&")]:
             r = r.replace(enc, dec)
         return r

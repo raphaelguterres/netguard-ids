@@ -527,7 +527,7 @@ class SigmaEngine:
             if isinstance(v, list):
                 keywords.extend([str(x) for x in v])
             elif isinstance(v, dict):
-                for kk, vv in v.items():
+                for _kk, vv in v.items():
                     if isinstance(vv, list):
                         keywords.extend([str(x) for x in vv])
                     elif isinstance(vv, str):
