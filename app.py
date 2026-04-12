@@ -4147,46 +4147,6 @@ def demo_access():
     )
     return resp
 
-    try:
-        from demo_seed import seed_demo, DEMO_TOKEN, DEMO_TENANT_ID
-        try:
-            existing    = repo.get_tenant_by_token(DEMO_TOKEN)
-            event_count = repo.count(tenant_id=DEMO_TENANT_ID) if existing else 0
-        except Exception:
-            existing    = None
-            event_count = 0
-        # Seed se: tenant não existe OU banco vazio (seed anterior falhou)
-        if not existing or event_count < 50:
-            seed_demo(repo, n_events=350, verbose=False)
-            logger.info("Demo seed criado/refeito via /demo | ip=%s events_before=%d",
-                        request.remote_addr, event_count)
-        audit("DEMO_ACCESS", ip=request.remote_addr or "-",
-              detail=f"tenant={DEMO_TENANT_ID} events={event_count}")
-    except Exception as exc:
-        logger.warning("Demo seed falhou (continuando mesmo assim): %s", exc)
-        try:
-            from demo_seed import DEMO_TOKEN, DEMO_TENANT_ID
-        except Exception:
-            DEMO_TOKEN = "ng_DEMO00000000000000000000000000"
-
-    # Serve o dashboard diretamente — evita passar pelo require_session
-    # O cookie é setado na resposta e fica disponível para todas as chamadas de API
-    dashboard_path = pathlib.Path(__file__).parent / "dashboard.html"
-    if not dashboard_path.exists():
-        return redirect("/login")
-
-    html = dashboard_path.read_text(encoding="utf-8")
-    resp = make_response(html, 200)
-    resp.headers["Content-Type"] = "text/html; charset=utf-8"
-    _set_no_cache_headers(resp)
-    resp.set_cookie(
-        "netguard_token", DEMO_TOKEN,
-        httponly=True, samesite="Lax",
-        max_age=4 * 3600,          # 4h — suficiente para demo
-        secure=_HTTPS_ONLY,
-    )
-    return resp
-
 
 @app.route("/demo/reset", methods=["POST"])
 def demo_reset():
