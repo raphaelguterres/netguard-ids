@@ -4,6 +4,7 @@ Envia alertas críticos para Slack, Teams, Discord, Telegram, WhatsApp ou qualqu
 """
 from __future__ import annotations  # noqa: F401
 
+from contextlib import contextmanager
 import ipaddress
 import json
 import logging
@@ -83,10 +84,10 @@ def _validate_webhook_url(url: str) -> None:
                 pass
     except ValueError:
         raise
-    except Exception:
-        # Falha na resolução DNS não bloqueia (pode ser hostname externo válido
-        # sem DNS disponível no servidor — a tentativa de envio falhará depois)
-        logger.debug("SSRF check: falha ao resolver '%s' — permitindo provisoriamente", host)
+    except Exception as exc:
+        raise ValueError(
+            f"Não foi possível validar o destino do webhook: falha ao resolver {host}"
+        ) from exc
 
 
 # ── Constantes ────────────────────────────────────────────────
@@ -289,11 +290,19 @@ class WebhookEngine:
         self._lock     = threading.Lock()
         self._init_db()
 
+    @contextmanager
     def _db(self):
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_db(self):
         with self._db() as c:
@@ -468,6 +477,9 @@ class WebhookEngine:
         if wtype not in ("telegram", "whatsapp") and wh.get("secret"):
             headers["X-NetGuard-Secret"] = wh["secret"]
 
+        # Revalida no momento do dispatch para reduzir janela de DNS rebinding / TOCTOU.
+        _validate_webhook_url(url)
+
         payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
         try:
             req  = urllib.request.Request(url, data=payload, headers=headers, method="POST")
@@ -581,9 +593,10 @@ class WebhookEngine:
 _engines: dict[str, WebhookEngine] = {}
 _engines_lock = threading.Lock()
 
-def get_webhook_engine(db_path: str, tenant_id: str = "default") -> WebhookEngine:
-    key = f"{db_path}::{tenant_id}"
+def get_webhook_engine(db_path: str, tenant_id: str) -> WebhookEngine:
+    global _engines
     with _engines_lock:
+        key = f"{db_path}:{tenant_id}"
         if key not in _engines:
             _engines[key] = WebhookEngine(db_path, tenant_id)
-    return _engines[key]
+    return _engines[f"{db_path}:{tenant_id}"]
