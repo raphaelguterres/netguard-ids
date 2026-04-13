@@ -2019,6 +2019,7 @@ th.sortable:hover{color:var(--cyn)}
     <div class="tab" onclick="goPage('custom-rules',this)" title="Regras Customizadas">⚙ My Rules</div>
     <div class="tab" onclick="goPage('webhooks',this)" title="Webhook Alerts">🔔 Webhooks</div>
     <div class="tab" id="tab-trials-btn" style="display:none" onclick="goPage('trials',this)" title="Trials de Clientes">🔗 Trials</div>
+    <div class="tab" onclick="goPage('xdr',this)" title="XDR/EDR Pipeline">🛡 XDR</div>
     <div class="tab" onclick="goPage('mitre',this)" title="MITRE ATT&CK">🗺 ATT&CK</div>
     <div class="tab" onclick="goPage('threat-intel',this)" title="Threat Intelligence Feeds">🌐 Threat Intel</div>
     <div class="tab" onclick="goPage('playbooks',this)" title="Incident Response Playbooks">📋 Playbooks</div>
@@ -3048,6 +3049,7 @@ th.sortable:hover{color:var(--cyn)}
 <div class="page" id="p-custom-rules"></div>
 <div class="page" id="p-webhooks"></div>
 <div class="page" id="p-trials"></div>
+<div class="page" id="p-xdr"></div>
 <div class="page" id="p-mitre"></div>
 <div class="page" id="p-threat-intel"></div>
 <div class="page" id="p-playbooks"></div>
@@ -3479,7 +3481,8 @@ const PAGE_GROUPS={
   compliance:'control',
   'custom-rules':'control',
   webhooks:'control',
-  trials:'control'
+  trials:'control',
+  xdr:'control'
 };
 const GROUP_DEFAULT_PAGE={
   ops:'overview',
@@ -3751,6 +3754,7 @@ function goPage(name,el){
   if(name==='custom-rules') loadCustomRules();
   if(name==='webhooks')      loadWebhooks();
   if(name==='trials')        loadTrials();
+  if(name==='xdr')           loadXdr();
   if(name==='mitre')         loadMitre();
   if(name==='threat-intel')  loadThreatIntel(true);
   if(name==='playbooks')     loadPlaybooks(true);
@@ -7239,6 +7243,103 @@ function mitreTopTechniques(top10, matrix){
     .slice(0, 10);
 }
 
+// ── XDR / EDR Pipeline ───────────────────────────────────────────
+const _XDR_RISK_COLOR = {critical:'#f85149',high:'#d29922',medium:'#e3b341',low:'#3fb950',info:'#8b949e'};
+const _XDR_RISK_BG    = {critical:'rgba(248,81,73,.15)',high:'rgba(210,153,34,.15)',medium:'rgba(227,179,65,.12)',low:'rgba(63,185,80,.12)',info:'rgba(139,148,158,.1)'};
+function _xdrEsc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+async function loadXdr(){
+  const pg = document.getElementById('p-xdr');
+  if(!pg) return;
+  pg.innerHTML = `<div class="page-inner" style="display:flex;flex-direction:column;overflow-y:auto;padding:0 16px 32px">
+    <div class="page-title" style="margin-bottom:4px">🛡 XDR / EDR Pipeline</div>
+    <div style="color:var(--txt3);font-size:.82rem;margin-bottom:20px">Detecção comportamental, correlação de sinais fracos e resposta automatizada.</div>
+    <div id="xdr-stats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:20px"></div>
+    <div style="font-size:.78rem;font-weight:600;color:var(--txt2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Hosts em Risco</div>
+    <div id="xdr-hosts" style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px"></div>
+    <div style="font-size:.78rem;font-weight:600;color:var(--txt2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Eventos Recentes do Pipeline</div>
+    <div id="xdr-events" style="display:flex;flex-direction:column;gap:6px"></div>
+  </div>`;
+
+  let data;
+  try {
+    const r = await _api('/api/xdr/summary');
+    data = await r.json();
+  } catch(e) {
+    document.getElementById('xdr-stats').innerHTML = `<div style="color:var(--txt3);font-size:.84rem;padding:20px 0">Sem dados XDR — ingira eventos via <code>/api/xdr/events</code>.</div>`;
+    return;
+  }
+
+  // Stats pills
+  const st = data.pipeline_stats || {};
+  const statPills = [
+    {label:'Hosts Monitorados', val: st.hosts_tracked||0, color:'var(--txt1)'},
+    {label:'Critical',          val: st.critical||0,       color:'#f85149'},
+    {label:'High',              val: st.high||0,            color:'#d29922'},
+    {label:'Medium',            val: st.medium||0,          color:'#e3b341'},
+    {label:'Low',               val: st.low||0,             color:'#3fb950'},
+  ];
+  document.getElementById('xdr-stats').innerHTML = statPills.map(p=>`
+    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:4px">
+      <span style="font-size:1.4rem;font-weight:700;color:${p.color}">${p.val}</span>
+      <span style="font-size:.75rem;color:var(--txt3)">${p.label}</span>
+    </div>`).join('');
+
+  // Host risk bars
+  const hosts = data.host_risks || [];
+  const hostsDiv = document.getElementById('xdr-hosts');
+  if(!hosts.length){
+    hostsDiv.innerHTML = `<div style="color:var(--txt3);font-size:.84rem;padding:12px 0;text-align:center">Nenhum host com risco elevado no momento.</div>`;
+  } else {
+    hostsDiv.innerHTML = hosts.map(h=>{
+      const pct = Math.min(100, h.risk_score||0);
+      const col = _XDR_RISK_COLOR[h.risk_level]||'#8b949e';
+      const bg  = _XDR_RISK_BG[h.risk_level]||'rgba(139,148,158,.1)';
+      return `<div style="background:var(--s2);border:1px solid var(--b1);border-left:3px solid ${col};border-radius:6px;padding:10px 14px;display:flex;align-items:center;gap:12px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.85rem;font-weight:600;color:var(--txt1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_xdrEsc(h.host_id)}</div>
+          <div style="margin-top:5px;height:5px;background:var(--s3);border-radius:3px;overflow:hidden">
+            <div style="width:${pct}%;height:100%;background:${col};border-radius:3px;transition:width .4s"></div>
+          </div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:1.1rem;font-weight:700;color:${col}">${h.risk_score}</div>
+          <div style="font-size:.7rem;padding:2px 7px;background:${bg};color:${col};border-radius:4px;margin-top:2px;text-transform:uppercase;letter-spacing:.05em">${h.risk_level}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // Recent events table
+  const evs = data.recent_events || [];
+  const evDiv = document.getElementById('xdr-events');
+  if(!evs.length){
+    evDiv.innerHTML = `<div style="color:var(--txt3);font-size:.84rem;padding:12px 0;text-align:center">Nenhum evento XDR recente.</div>`;
+  } else {
+    evDiv.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.8rem">
+      <thead><tr style="color:var(--txt3);text-transform:uppercase;font-size:.7rem;letter-spacing:.06em">
+        <th style="text-align:left;padding:4px 8px">Hora</th>
+        <th style="text-align:left;padding:4px 8px">Host</th>
+        <th style="text-align:left;padding:4px 8px">Categoria</th>
+        <th style="text-align:left;padding:4px 8px">Detalhe</th>
+        <th style="text-align:right;padding:4px 8px">Severidade</th>
+      </tr></thead>
+      <tbody>${evs.map(e=>{
+        const sev = e.severity||e.level||'info';
+        const col = _XDR_RISK_COLOR[sev]||'#8b949e';
+        const ts  = (e.timestamp||e.ts||'').replace('T',' ').slice(0,19);
+        return `<tr style="border-top:1px solid var(--b1)">
+          <td style="padding:5px 8px;color:var(--txt3);white-space:nowrap">${ts}</td>
+          <td style="padding:5px 8px;color:var(--txt2)">${_xdrEsc(e.host_id||e.src_ip||'-')}</td>
+          <td style="padding:5px 8px;color:var(--txt2)">${_xdrEsc(e.category||e.source||'-')}</td>
+          <td style="padding:5px 8px;color:var(--txt1);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_xdrEsc(e.message||e.description||'')}">${_xdrEsc((e.message||e.description||e.event_type||'-').slice(0,80))}</td>
+          <td style="padding:5px 8px;text-align:right;color:${col};text-transform:uppercase;font-size:.72rem">${sev}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  }
+}
+
 async function loadMitre(days){
   if(days) _mitreDays = days;
   const pg = document.getElementById('p-mitre');
@@ -8018,7 +8119,7 @@ async function forensicsDeleteSnap(snapId, btn){
 <!-- ── Módulos: sistema de design ─────────────────────────────── -->
 <style>
 /* ── Página container ────────────────────────────────────────── */
-#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules,#p-webhooks,#p-trials,#p-mitre,
+#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules,#p-webhooks,#p-trials,#p-xdr,#p-mitre,
 #p-threat-intel,#p-playbooks,#p-forensics{
   flex-direction:column;overflow:hidden;
 }
@@ -8667,4 +8768,6 @@ const _CP_ACTIONS = [
   {icon:'⬇',label:'Exportar IOCs (CSV)',hint:'action',action:()=>{closePalette();window.open('/api/ioc/export','_blank');}},
   {icon:'📑',label:'Gerar Relatório',hint:'action',action:()=>{closePalette();goPage('analyze',null);}},
   {id:'new-trial',icon:'🔗',label:'Novo Trial',hint:'action',action:()=>{closePalette();goPage('trials',null);setTimeout(showNewTrial,300);}},
+  {icon:'🛡',label:'XDR Pipeline',hint:'action',action:()=>{closePalette();goPage('xdr',document.querySelector('.tab[onclick*="xdr"]'));}},
+  {icon:'🔔',label:'Webhooks',hint:'action',action:()=>{closePalette();goPage('webhooks',document.querySelector('.tab[onclick*="webhooks"]'));}},
 ];

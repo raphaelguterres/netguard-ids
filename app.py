@@ -2801,6 +2801,63 @@ def xdr_events_ingest():
         "hosts": list(host_states.values()),
     })
 
+
+@app.route("/api/xdr/summary", methods=["GET"])
+@auth
+def xdr_summary():
+    """Retorna resumo do pipeline XDR: host risk scores + detecções recentes."""
+    try:
+        pipeline = _get_xdr_pipeline()
+        with pipeline._risk_lock:
+            host_risks = [
+                {
+                    "host_id": hid,
+                    "risk_score": pipeline._host_risk_scores[hid],
+                    "risk_level": (
+                        "critical" if pipeline._host_risk_scores[hid] >= 80 else
+                        "high"     if pipeline._host_risk_scores[hid] >= 60 else
+                        "medium"   if pipeline._host_risk_scores[hid] >= 40 else
+                        "low"      if pipeline._host_risk_scores[hid] >= 20 else
+                        "info"
+                    ),
+                }
+                for hid in sorted(
+                    pipeline._host_risk_scores,
+                    key=lambda h: pipeline._host_risk_scores[h],
+                    reverse=True,
+                )
+                if pipeline._host_risk_scores[hid] > 0
+            ]
+
+        tenant_repo = _get_tenant_event_repo()
+        recent_raw = tenant_repo.recent(50)
+        xdr_events = [
+            e for e in recent_raw
+            if e.get("source", "").startswith("xdr")
+            or e.get("category") in ("detection", "correlation", "response")
+        ]
+
+        return jsonify({
+            "ok": True,
+            "host_risks": host_risks[:20],
+            "total_hosts_at_risk": len(host_risks),
+            "recent_events": xdr_events[:30],
+            "pipeline_stats": {
+                "hosts_tracked": len(pipeline._host_risk_scores),
+                "critical": sum(1 for s in pipeline._host_risk_scores.values() if s >= 80),
+                "high":     sum(1 for s in pipeline._host_risk_scores.values() if 60 <= s < 80),
+                "medium":   sum(1 for s in pipeline._host_risk_scores.values() if 40 <= s < 60),
+                "low":      sum(1 for s in pipeline._host_risk_scores.values() if 20 <= s < 40),
+            },
+        })
+    except Exception:
+        logger.exception("XDR summary failed | tenant=%s", _resolve_tenant_id())
+        return jsonify({"ok": False, "error": "xdr_summary_failed",
+                        "host_risks": [], "recent_events": [],
+                        "total_hosts_at_risk": 0,
+                        "pipeline_stats": {"hosts_tracked": 0, "critical": 0, "high": 0, "medium": 0, "low": 0}}), 500
+
+
 @app.route("/api/agent/push", methods=["POST"])
 @auth
 def agent_push():
@@ -5916,6 +5973,155 @@ def playbooks_open_incident():
             trigger_event=data.get("trigger_event", {}),
             tenant_id=_resolve_tenant_id(),
         )
-        tenant_id = _resolve_tenant_id()
-        _cache_invalidate_prefixes(
-       
+        return jsonify({"ok": True, "incident": inc}), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/playbooks/incidents/<incident_id>")
+@auth
+def playbooks_get_incident(incident_id):
+    if not PLAYBOOK_AVAILABLE:
+        return jsonify({"available": False}), 503
+    inc = _get_playbook_engine().get_incident(incident_id)
+    if not inc:
+        return jsonify({"error": "Incidente não encontrado"}), 404
+    return jsonify(inc)
+
+@app.route("/api/playbooks/incidents/<incident_id>/status", methods=["POST"])
+@auth
+@csrf_protect
+@require_role("analyst", "admin")
+def playbooks_update_status(incident_id):
+    if not PLAYBOOK_AVAILABLE:
+        return jsonify({"available": False}), 503
+    data   = request.get_json(force=True) or {}
+    status = data.get("status", "")
+    notes  = data.get("notes", "")
+    _get_playbook_engine().update_incident_status(incident_id, status, notes)
+    return jsonify({"ok": True})
+
+@app.route("/api/playbooks/incidents/<incident_id>/steps/<int:step_order>", methods=["POST"])
+@auth
+@csrf_protect
+@require_role("analyst", "admin")
+def playbooks_update_step(incident_id, step_order):
+    if not PLAYBOOK_AVAILABLE:
+        return jsonify({"available": False}), 503
+    data   = request.get_json(force=True) or {}
+    status = data.get("status", "done")
+    output = data.get("output", "")
+    _get_playbook_engine().update_step(incident_id, step_order, status, output)
+    return jsonify({"ok": True})
+
+# ── Forensics Snapshots ───────────────────────────────────────────────────────
+
+def _get_forensics_engine():
+    db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+    return get_forensics_engine(db)
+
+@app.route("/api/forensics/snapshots")
+@auth
+def forensics_list():
+    if not FORENSICS_AVAILABLE:
+        return jsonify({"available": False}), 503
+    tenant_id = _resolve_tenant_id()
+    limit     = min(int(request.args.get("limit", 50)), 200)
+    snaps = _get_forensics_engine().list_snapshots(tenant_id=tenant_id, limit=limit)
+    stats = _get_forensics_engine().stats(tenant_id=tenant_id)
+    return jsonify({"snapshots": snaps, "stats": stats, "available": True})
+
+@app.route("/api/forensics/snapshots", methods=["POST"])
+@auth
+@csrf_protect
+@require_role("analyst", "admin")
+def forensics_capture():
+    if not FORENSICS_AVAILABLE:
+        return jsonify({"available": False}), 503
+    data      = request.get_json(force=True) or {}
+    tenant_id = _resolve_tenant_id()
+    def _run():
+        try:
+            _get_forensics_engine().capture(
+                trigger_type="manual",
+                trigger_event=data,
+                severity=data.get("severity", "high"),
+                tenant_id=tenant_id,
+            )
+        except Exception as e:
+            logger.error("Forensics capture error: %s", e)
+    threading.Thread(target=_run, daemon=True, name="forensics-manual").start()
+    return jsonify({"ok": True, "status": "capture_started"}), 202
+
+@app.route("/api/forensics/snapshots/<snapshot_id>")
+@auth
+def forensics_get(snapshot_id):
+    if not FORENSICS_AVAILABLE:
+        return jsonify({"available": False}), 503
+    snap = _get_forensics_engine().get_snapshot(snapshot_id)
+    if not snap:
+        return jsonify({"error": "Snapshot não encontrado"}), 404
+    return jsonify(snap)
+
+@app.route("/api/forensics/snapshots/<snapshot_id>", methods=["DELETE"])
+@auth
+@csrf_protect
+@require_role("analyst", "admin")
+def forensics_delete(snapshot_id):
+    if not FORENSICS_AVAILABLE:
+        return jsonify({"available": False}), 503
+    _get_forensics_engine().delete_snapshot(snapshot_id)
+    return jsonify({"ok": True})
+
+# ═══════════════════════════════════════════════════════════════════
+
+@app.route("/")
+def index():
+    """Landing page pública — apresentação do produto."""
+    from flask import render_template
+    contact_email = CONTACT_EMAIL if BILLING_OK else "contato@netguard.io"
+    return render_template("landing.html", contact_email=contact_email)
+
+
+@app.route("/dashboard")
+@require_session
+def dashboard():
+    p = pathlib.Path(__file__).parent/"dashboard.html"
+    if not p.exists(): return "dashboard.html nao encontrado",404
+    from flask import make_response
+    resp = make_response(p.read_text(encoding="utf-8"), 200)
+    resp.headers["Content-Type"] = "text/html;charset=utf-8"
+    _set_no_cache_headers(resp)
+    return resp
+
+# ── Inicialização ─────────────────────────────────────────────────
+def iniciar_monitoramento():
+    if os.environ.get("IDS_DISABLE_BACKGROUND", "false").lower() == "true" or "pytest" in sys.modules:
+        monitor_status["captura"] = "desativada"
+        logger.info("Monitoramento em background desativado neste contexto")
+        return
+    threading.Thread(target=loop_monitor, kwargs={"intervalo":30},
+                     daemon=True, name="ids-monitor").start()
+    try:
+        from packet_capture import PacketCapture, detectar_interface_ativa
+        interface = detectar_interface_ativa()
+        capture   = PacketCapture(callback=analisar, interface=interface)
+        capture.iniciar()
+        monitor_status["captura"] = f"ativa | interface={interface}"
+        logger.info("Captura de pacotes iniciada | interface=%s", interface)
+    except Exception as e:
+        monitor_status["captura"] = f"indisponivel: {e}"
+        logger.warning("Captura de pacotes indisponivel: %s", e)
+
+iniciar_monitoramento()
+
+if __name__=="__main__":
+    host     = os.environ.get("IDS_HOST","127.0.0.1")
+    port     = int(os.environ.get("IDS_PORT",5000))
+    debug    = os.environ.get("IDS_DEBUG","false").lower()=="true"
+    ssl_ctx  = get_ssl_context()
+    print_startup_info()
+    if ssl_ctx:
+        app.run(host=host, port=HTTPS_PORT, debug=debug,
+                use_reloader=False, ssl_context=ssl_ctx)
+    else:
+        app.run(host=host, port=port, debug=debug, use_reloader=False)
