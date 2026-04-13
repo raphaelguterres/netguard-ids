@@ -3757,18 +3757,63 @@ function _csrfToken(){
   const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
   return m ? decodeURIComponent(m[1]) : '';
 }
+const _apiInflight = new Map();
+const _apiRecent = new Map();
+const _API_RECENT_TTL_MS = 1200;
+
+function _apiClone(data){
+  if(data == null || typeof data !== 'object') return data;
+  if(typeof structuredClone === 'function') return structuredClone(data);
+  return JSON.parse(JSON.stringify(data));
+}
+
 async function api(path,opts={}){
+  const method=(opts.method||'GET').toUpperCase();
+  const isReadOnly=['GET','HEAD','OPTIONS'].includes(method);
+  const cacheKey=isReadOnly?`${method}:${path}`:null;
+  let createdInflight=false;
   try{
-    const method=(opts.method||'GET').toUpperCase();
-    if(!['GET','HEAD','OPTIONS'].includes(method)){
+    if(!isReadOnly){
       opts.headers=Object.assign(
         {'X-CSRFToken':_csrfToken(),'Content-Type':'application/json'},
         opts.headers||{}
       );
     }
-    const r=await fetch('/api'+path,opts);
-    return await r.json();
+
+    if(cacheKey){
+      const recent=_apiRecent.get(cacheKey);
+      if(recent && (Date.now()-recent.ts)<_API_RECENT_TTL_MS){
+        return _apiClone(recent.data);
+      }
+
+      const inflight=_apiInflight.get(cacheKey);
+      if(inflight){
+        return _apiClone(await inflight);
+      }
+    }
+
+    const request=(async()=>{
+      const r=await fetch('/api'+path,opts);
+      const data=await r.json();
+      if(cacheKey && r.ok && !data?.error){
+        _apiRecent.set(cacheKey,{ts:Date.now(),data:_apiClone(data)});
+      }
+      return data;
+    })();
+
+    if(cacheKey){
+      _apiInflight.set(cacheKey,request);
+      createdInflight=true;
+    }
+
+    const data=await request;
+    return cacheKey?_apiClone(data):data;
   }catch{return null;}
+  finally{
+    if(cacheKey && createdInflight){
+      _apiInflight.delete(cacheKey);
+    }
+  }
 }
 
 // ── Intel ─────────────────────────────────────────────────────────
@@ -3786,7 +3831,13 @@ function ibadge(ip){
 
 // ── KPIs + health polling ──────────────────────────────────────────
 async function pollHealth(){
-  const [stats,sys,h]=await Promise.all([api('/statistics'),api('/system'),api('/health')]);
+  const wantsStats = pageOn('overview') || pageOn('stats');
+  const wantsSystem = pageOn('overview') || pageOn('system');
+  const [h,stats,sys]=await Promise.all([
+    api('/health'),
+    wantsStats ? api('/statistics') : Promise.resolve(null),
+    wantsSystem ? api('/system') : Promise.resolve(null),
+  ]);
   if(stats){
     setKpi('k-cr',stats.by_severity?.critical||0,'cr');
     setKpi('k-hi',stats.by_severity?.high||0,'hi');
@@ -3795,9 +3846,9 @@ async function pollHealth(){
     setKpi('k-tot',stats.total||0,'to');
   }
   if(h){
-    const conns=h.monitor?.conexoes_n||0;
+    const conns=h.connections_active||0;
     setKpi('k-con',conns,'co');
-    if(h.monitor?.ciclo)$('mon-cycle','#'+h.monitor.ciclo);
+    if(h.uptime_cycles !== undefined)$('mon-cycle','#'+h.uptime_cycles);
   }
   if(sys){
     const cpu=sys.cpu_percent||0;
@@ -6609,10 +6660,8 @@ async function loadWebhooks(){
     return;
   }
   const typeIcon = {
-    telegram: '📱', whatsapp: '💬',
-    slack: '<img src="https://slack.com/favicon.ico" style="width:14px;height:14px;border-radius:3px" onerror="this.outerHTML=\'🟩\'">',
-    teams: '<img src="https://teams.microsoft.com/favicon.ico" style="width:14px;height:14px;border-radius:3px" onerror="this.outerHTML=\'🔵\'">',
-    discord: '<img src="https://discord.com/assets/favicon.ico" style="width:14px;height:14px;border-radius:3px" onerror="this.outerHTML=\'🎮\'">',
+    telegram: '✈️', whatsapp: '💬',
+    slack: '🟩', teams: '🔵', discord: '🎮',
     generic: '🌐'
   };
   list.innerHTML = whs.map(w=>`
