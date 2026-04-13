@@ -8593,8 +8593,9 @@ function _cpFilter(){
   if(tabs.length){
     html+='<div class="cmdpal-section">Navegação</div>';
     tabs.forEach((t,i)=>{
+      const globalIdx=i;
       const sel=_cpFiltered[_cpIdx]?.key===t.key&&_cpFiltered[_cpIdx]?._type==='tab';
-      html+=`<div class="cmdpal-item${sel?' selected':''}" onclick="_cpGo(${_cpFiltered.indexOf({...t,_type:'tab'})})" onmouseover="_cpHover(this)">
+      html+=`<div class="cmdpal-item${sel?' selected':''}" onclick="_cpGo(${globalIdx})" onmouseover="_cpHover(this)">
         <span class="cmdpal-item-icon">${t.icon}</span>
         <span class="cmdpal-item-label">${hl(t.label)}</span>
         <span class="cmdpal-item-hint">${t.hint}</span>
