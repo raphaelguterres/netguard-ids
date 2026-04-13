@@ -2,7 +2,6 @@ import os
 import sqlite3
 import tempfile
 import unittest
-import uuid
 from unittest.mock import patch
 
 from engine.mitre_engine import MitreEngine
@@ -10,11 +9,13 @@ from engine.mitre_engine import MitreEngine
 
 class TestMitreEngine(unittest.TestCase):
     def setUp(self):
-        self.tmp_root = os.path.join(os.path.dirname(__file__), "_tmp_mitre_engine")
-        os.makedirs(self.tmp_root, exist_ok=True)
-        self.tmpdir = os.path.join(self.tmp_root, str(uuid.uuid4()))
-        os.makedirs(self.tmpdir, exist_ok=True)
-        self.db_path = os.path.join(self.tmpdir, "mitre_test.db")
+        fd, self.db_path = tempfile.mkstemp(
+            prefix="mitre_engine_",
+            suffix=".db",
+            dir=os.path.dirname(__file__),
+        )
+        os.close(fd)
+        os.remove(self.db_path)
         self.engine = MitreEngine(self.db_path, "tenant-test")
         self.engine.record_hit(
             {
@@ -33,14 +34,9 @@ class TestMitreEngine(unittest.TestCase):
         )
 
     def tearDown(self):
-        if os.path.exists(self.db_path):
+        for suffix in ("", "-wal", "-shm"):
             try:
-                os.remove(self.db_path)
-            except OSError:
-                pass
-        if os.path.isdir(self.tmpdir):
-            try:
-                os.rmdir(self.tmpdir)
+                os.remove(self.db_path + suffix)
             except OSError:
                 pass
 

@@ -4,7 +4,7 @@ Detecção contextual, janela deslizante, whitelist,
 composite scoring, persistência SQLite, bloqueio de IP.
 """
 
-import os, re, json, sqlite3, hashlib, logging, threading, subprocess
+import os, re, json, sqlite3, hashlib, logging, threading, subprocess, copy, time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta, timezone
@@ -475,6 +475,10 @@ class IDSEngine:
         self._ssh_counter  = SlidingWindowCounter(60)
         self._http_counter = SlidingWindowCounter(30)
         self._req_counter  = SlidingWindowCounter(60)
+        self._stats_cache = None
+        self._stats_cache_at = 0.0
+        self._stats_cache_ttl = 8.0
+        self._stats_cache_lock = threading.Lock()
 
         # Restaura bloqueios persistidos
         for b in self.store.load_blocks():
@@ -508,31 +512,52 @@ class IDSEngine:
                 if self.blocker.block(ev.source_ip, ev.threat_name):
                     self.store.save_block(ev.source_ip, ev.threat_name)
 
+        if events:
+            self._invalidate_statistics_cache()
         return events
 
     def block_ip(self, ip: str, reason: str = "Manual") -> bool:
         ok = self.blocker.block(ip, reason)
         if ok:
             self.store.save_block(ip, reason)
+            self._invalidate_statistics_cache()
         return ok
 
     def unblock_ip(self, ip: str) -> bool:
         ok = self.blocker.unblock(ip)
         if ok:
             self.store.remove_block(ip)
+            self._invalidate_statistics_cache()
         return ok
 
     def update_status(self, did: str, status: str, note: str = "") -> bool:
-        return self.store.update_status(did, status, note)
+        ok = self.store.update_status(did, status, note)
+        if ok:
+            self._invalidate_statistics_cache()
+        return ok
 
     def get_detections(self, **kwargs) -> List[Dict]:
         return self.store.query(**kwargs)
 
     def get_statistics(self) -> Dict:
+        now = time.time()
+        with self._stats_cache_lock:
+            if self._stats_cache is not None and (now - self._stats_cache_at) < self._stats_cache_ttl:
+                return copy.deepcopy(self._stats_cache)
+
         s = self.store.statistics()
         s["blocked_ips"] = self.blocker.list_blocked()
         s["auto_block"]  = self.auto_block
+
+        with self._stats_cache_lock:
+            self._stats_cache = copy.deepcopy(s)
+            self._stats_cache_at = now
         return s
+
+    def _invalidate_statistics_cache(self):
+        with self._stats_cache_lock:
+            self._stats_cache = None
+            self._stats_cache_at = 0.0
 
     def export(self, fmt="json") -> str:
         if fmt == "csv":

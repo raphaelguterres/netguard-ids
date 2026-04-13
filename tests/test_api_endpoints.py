@@ -166,6 +166,218 @@ class TestHealthEndpoint(unittest.TestCase):
                           f"{path} returned unexpected status {resp.status_code}")
 
 
+class TestMitreEndpoints(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import app as _app
+        from auth import get_or_create_token
+
+        _app.app.config["TESTING"] = True
+        cls.client = _app.app.test_client()
+        cls.auth_headers = {"X-API-Token": get_or_create_token()}
+
+    def test_mitre_stats_returns_200_with_expected_shape(self):
+        resp = self.client.get("/api/mitre/stats", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIsInstance(data, dict)
+        self.assertIn("coverage_pct", data)
+        self.assertIn("total_hits", data)
+
+    def test_mitre_heatmap_returns_matrix_and_top_aliases(self):
+        resp = self.client.get("/api/mitre/heatmap?days=30", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIsInstance(data, dict)
+        self.assertIn("matrix", data)
+        self.assertIn("top_techniques", data)
+        self.assertIn("top10", data)
+
+    def test_mitre_hits_returns_hits_list(self):
+        resp = self.client.get("/api/mitre/hits?days=30&limit=10", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIsInstance(data, dict)
+        self.assertIn("hits", data)
+        self.assertIn("total", data)
+        self.assertIsInstance(data["hits"], list)
+
+    @patch("app._get_mitre_engine", side_effect=RuntimeError("boom"))
+    def test_mitre_stats_falls_back_instead_of_500(self, _mock_engine):
+        resp = self.client.get("/api/mitre/stats", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("degraded"))
+        self.assertEqual(data.get("warning"), "stats_unavailable")
+        self.assertIn("request_id", data)
+        self.assertEqual(resp.headers.get("X-NetGuard-Degraded"), "1")
+        self.assertEqual(resp.headers.get("X-NetGuard-Warning"), "stats_unavailable")
+
+    @patch("app._get_mitre_engine", side_effect=RuntimeError("boom"))
+    def test_mitre_heatmap_falls_back_instead_of_500(self, _mock_engine):
+        resp = self.client.get("/api/mitre/heatmap?days=30", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("degraded"))
+        self.assertEqual(data.get("warning"), "heatmap_unavailable")
+        self.assertEqual(data.get("days"), 30)
+        self.assertIn("request_id", data)
+        self.assertEqual(resp.headers.get("X-NetGuard-Degraded"), "1")
+        self.assertEqual(resp.headers.get("X-NetGuard-Warning"), "heatmap_unavailable")
+
+    def test_mitre_heatmap_invalid_days_uses_default(self):
+        resp = self.client.get("/api/mitre/heatmap?days=abc", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data.get("days"), 30)
+
+    def test_mitre_hits_invalid_params_do_not_500(self):
+        resp = self.client.get("/api/mitre/hits?days=abc&limit=xyz", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIn("hits", data)
+        self.assertEqual(data.get("days"), 30)
+
+    @patch("app._get_mitre_engine", side_effect=RuntimeError("boom"))
+    def test_mitre_hits_fallback_sets_headers_and_request_id(self, _mock_engine):
+        resp = self.client.get("/api/mitre/hits?days=30&limit=10", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("degraded"))
+        self.assertEqual(data.get("warning"), "hits_unavailable")
+        self.assertIn("request_id", data)
+        self.assertEqual(resp.headers.get("X-NetGuard-Degraded"), "1")
+        self.assertEqual(resp.headers.get("X-NetGuard-Warning"), "hits_unavailable")
+
+    def test_mitre_navigator_invalid_days_uses_default(self):
+        resp = self.client.get("/api/mitre/navigator?days=abc", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.mimetype, "application/json")
+
+    @patch("app._get_mitre_engine", side_effect=RuntimeError("boom"))
+    def test_mitre_navigator_internal_error_is_opaque(self, _mock_engine):
+        resp = self.client.get("/api/mitre/navigator?days=30", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 500)
+        data = resp.get_json()
+        self.assertEqual(data.get("error"), "internal_error")
+        self.assertIn("request_id", data)
+
+    @patch("app._get_mitre_engine", side_effect=RuntimeError("boom"))
+    def test_mitre_technique_internal_error_is_opaque(self, _mock_engine):
+        resp = self.client.get("/api/mitre/technique/T1059", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 500)
+        data = resp.get_json()
+        self.assertEqual(data.get("error"), "internal_error")
+        self.assertIn("request_id", data)
+
+
+class TestSystemEndpointCaching(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import app as _app
+        from auth import get_or_create_token
+
+        _app.app.config["TESTING"] = True
+        cls.client = _app.app.test_client()
+        cls.app_mod = _app
+        cls.auth_headers = {"X-API-Token": get_or_create_token()}
+
+    def setUp(self):
+        with self.app_mod._endpoint_swr_lock:
+            self.app_mod._endpoint_swr_cache.clear()
+
+    @patch("app.get_system_info")
+    def test_system_second_call_uses_short_cache(self, mock_get_system_info):
+        mock_get_system_info.return_value = {
+            "cpu_percent": 10,
+            "mem_percent": 20,
+            "disk_percent": 30,
+            "net_sent_mb": 1.5,
+            "net_recv_mb": 2.5,
+            "interfaces": [],
+            "processes": [],
+            "listening": [],
+            "details_deferred": True,
+        }
+
+        first = self.client.get("/api/system", headers=self.auth_headers)
+        second = self.client.get("/api/system", headers=self.auth_headers)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(mock_get_system_info.call_count, 1)
+
+
+class TestBackendSingletonsAndCaching(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import app as _app
+        from auth import get_or_create_token
+
+        _app.app.config["TESTING"] = True
+        cls.client = _app.app.test_client()
+        cls.app_mod = _app
+        cls.auth_headers = {"X-API-Token": get_or_create_token()}
+
+    def setUp(self):
+        with self.app_mod._endpoint_swr_lock:
+            self.app_mod._endpoint_swr_cache.clear()
+        self.app_mod._ti_feed_singleton = None
+        self.app_mod._ti_feed_scheduler_started = False
+        self.app_mod._playbook_engine_singleton = None
+        self.app_mod._forensics_engine_singleton = None
+
+    @patch("app.get_ti_feed")
+    def test_ti_feed_scheduler_starts_only_once(self, mock_get_ti_feed):
+        feed = MagicMock()
+        mock_get_ti_feed.return_value = feed
+
+        first = self.app_mod._get_ti_feed()
+        second = self.app_mod._get_ti_feed()
+
+        self.assertIs(first, second)
+        self.assertEqual(mock_get_ti_feed.call_count, 1)
+        self.assertEqual(feed.start_scheduler.call_count, 1)
+
+    @patch("app.get_playbook_engine")
+    def test_playbook_engine_is_singleton(self, mock_get_playbook_engine):
+        eng = MagicMock()
+        mock_get_playbook_engine.return_value = eng
+
+        first = self.app_mod._get_playbook_engine()
+        second = self.app_mod._get_playbook_engine()
+
+        self.assertIs(first, second)
+        self.assertEqual(mock_get_playbook_engine.call_count, 1)
+
+    @patch("app.get_forensics_engine")
+    def test_forensics_engine_is_singleton(self, mock_get_forensics_engine_factory):
+        eng = MagicMock()
+        mock_get_forensics_engine_factory.return_value = eng
+
+        first = self.app_mod._get_forensics_engine()
+        second = self.app_mod._get_forensics_engine()
+
+        self.assertIs(first, second)
+        self.assertEqual(mock_get_forensics_engine_factory.call_count, 1)
+
+    @patch("app._get_forensics_engine")
+    def test_forensics_second_call_uses_cache(self, mock_get_forensics_engine):
+        eng = MagicMock()
+        eng.list_snapshots.return_value = [{"snapshot_id": "snap-1"}]
+        eng.stats.return_value = {"total": 1, "by_severity": {"high": 1}}
+        mock_get_forensics_engine.return_value = eng
+
+        first = self.client.get("/api/forensics/snapshots", headers=self.auth_headers)
+        second = self.client.get("/api/forensics/snapshots", headers=self.auth_headers)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(mock_get_forensics_engine.call_count, 1)
+        self.assertEqual(eng.list_snapshots.call_count, 1)
+        self.assertEqual(eng.stats.call_count, 1)
+
+
 # ══════════════════════════════════════════════════════════════════
 # 4. /api/graph — stale-while-revalidate
 # ══════════════════════════════════════════════════════════════════

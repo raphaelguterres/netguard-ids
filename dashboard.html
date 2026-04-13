@@ -2045,7 +2045,7 @@ th.sortable:hover{color:var(--cyn)}
 <!-- ── OVERVIEW ──────────────────────────────────────────────────── -->
 <div class="page on" id="p-overview">
   <div id="ov-left">
-    <div class="ph"><span class="ph-t">Mapa de Rede Local</span><button class="fbtn" onclick="loadDevices()">↻</button></div>
+    <div class="ph"><span class="ph-t">Mapa de Rede Local</span><button class="fbtn" onclick="loadDevices(true)">↻</button></div>
     <div id="mapwrap">
       <svg id="mapsvg" xmlns="http://www.w3.org/2000/svg">
         <defs>
@@ -3731,7 +3731,7 @@ function goPage(name,el){
   if(name==='stats')       loadStats();
   if(name==='connections') loadConn();
   if(name==='system')      loadSys(true);
-  if(name==='overview')    loadFeed();
+  if(name==='overview')    loadOverview(true);
   if(name==='owasp')       {loadOwaspStats();loadOwaspPayloads();}
   if(name==='killchain')   loadKillChain();
   if(name==='fail2ban')    loadFail2Ban();
@@ -3934,21 +3934,23 @@ function bar(id,vid,pct,label){
 }
 
 // ── Feed / Detections ─────────────────────────────────────────────
+async function loadOverview(force=false){
+  return _guardedTabLoad('overview-bootstrap', async()=>{
+    if(force) await Promise.all([loadFeed(), pollHealth()]);
+    else await loadFeed();
+    setTimeout(()=>{ if(dashboardVisible() && pageOn('overview')) loadDevices(force); }, 120);
+    setTimeout(()=>{ if(dashboardVisible() && pageOn('overview')) loadMiniGraph(force); }, 320);
+    setTimeout(()=>{ if(dashboardVisible() && pageOn('overview')) loadMiniLogData(force); }, 520);
+  }, {cooldownMs: 4000, force});
+}
+
 async function loadFeed(){
   const sev=document.getElementById('f-sev').value;
   const sta=document.getElementById('f-sta').value;
   let q='/detections?limit=200';
   if(sev)q+='&severity='+sev;
   if(sta)q+='&status='+sta;
-  const [data,stats]=await Promise.all([api(q),api('/statistics')]);
-  if(stats){
-    const bysev=stats.by_severity||{};
-    setKpi('k-cr',(bysev.critical||bysev.CRITICAL||0),'cr');
-    setKpi('k-hi',(bysev.high||bysev.HIGH||0),'hi');
-    setKpi('k-me',(bysev.medium||bysev.MEDIUM||0),'me');
-    setKpi('k-lo',(bysev.low||bysev.LOW||0),'lo');
-    setKpi('k-tot',stats.total||0,'to');
-  }
+  const data=await api(q);
   if(!data)return;
   const newDets=data.detections||[];
   const changed=JSON.stringify(newDets.map(d=>d.id))!==JSON.stringify(dets.map(d=>d.id));
@@ -3983,46 +3985,43 @@ function updateTicker(dets){
 // Device detail drawer
 let _selectedDevice = null;
 
-async function loadDevices(){
-  const data=await api('/devices');
-  if(!data)return;
-  const devices=data.devices||[];
-  window._allDevices = devices;
+async function loadDevices(force=false){
+  return _guardedTabLoad('overview-devices', async()=>{
+    const data=await api('/devices');
+    if(!data)return;
+    const devices=data.devices||[];
+    window._allDevices = devices;
 
-  const svg=document.getElementById('mapsvg');
-  const cx=130,cy=150;
-  const angles=devices.map((_,i)=>i*(2*Math.PI/Math.max(devices.length,1))-Math.PI/2);
-  const radii=[70,90,110];
-  svg.querySelectorAll('.dev-node').forEach(e=>e.remove());
+    const svg=document.getElementById('mapsvg');
+    const cx=130,cy=150;
+    const angles=devices.map((_,i)=>i*(2*Math.PI/Math.max(devices.length,1))-Math.PI/2);
+    const radii=[70,90,110];
+    svg.querySelectorAll('.dev-node').forEach(e=>e.remove());
 
-  devices.forEach((d,i)=>{
-    const r=radii[i%3];
-    const a=angles[i];
-    const x=cx+r*Math.cos(a);
-    const y=cy+r*Math.sin(a);
-    const isGateway=d.ip?.endsWith('.1');
-    const isLocal=d.ip==='192.168.15.2';
-    const col=isLocal?'var(--acc)':isGateway?'var(--pur)':'var(--grn)';
-    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
-    g.classList.add('dev-node');
-    g.style.cursor='pointer';
-    g.onclick=()=>showDeviceDetail(d);
-    // Icon based on type
-    const icon = isLocal?'💻':isGateway?'🌐':
-      d.tipo==='celular'?'📱':d.tipo==='apple'?'🍎':
-      d.tipo==='samsung'?'📱':d.vendor==='Raspberry Pi'?'🍓':'🖥️';
-    g.innerHTML=`
-      <line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="${col}" stroke-width=".6" opacity=".3" stroke-dasharray="3 3"/>
-      <circle cx="${x}" cy="${y}" r="9" fill="#04080f" stroke="${col}" stroke-width="1.4" filter="url(#glow)"/>
-      <circle cx="${x}" cy="${y}" r="3" fill="${col}" opacity=".9"/>
-      <text x="${x}" y="${y+16}" text-anchor="middle" font-family="Share Tech Mono" font-size="7" fill="${col}">${d.ip||'?'}</text>
-      <text x="${x}" y="${y+24}" text-anchor="middle" font-family="Share Tech Mono" font-size="6" fill="${col}" opacity=".6">${(d.hostname||d.vendor||'').slice(0,14)}</text>`;
-    svg.appendChild(g);
-  });
+    devices.forEach((d,i)=>{
+      const r=radii[i%3];
+      const a=angles[i];
+      const x=cx+r*Math.cos(a);
+      const y=cy+r*Math.sin(a);
+      const isGateway=d.ip?.endsWith('.1');
+      const isLocal=d.ip==='192.168.15.2';
+      const col=isLocal?'var(--acc)':isGateway?'var(--pur)':'var(--grn)';
+      const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+      g.classList.add('dev-node');
+      g.style.cursor='pointer';
+      g.onclick=()=>showDeviceDetail(d);
+      g.innerHTML=`
+        <line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="${col}" stroke-width=".6" opacity=".3" stroke-dasharray="3 3"/>
+        <circle cx="${x}" cy="${y}" r="9" fill="#04080f" stroke="${col}" stroke-width="1.4" filter="url(#glow)"/>
+        <circle cx="${x}" cy="${y}" r="3" fill="${col}" opacity=".9"/>
+        <text x="${x}" y="${y+16}" text-anchor="middle" font-family="Share Tech Mono" font-size="7" fill="${col}">${d.ip||'?'}</text>
+        <text x="${x}" y="${y+24}" text-anchor="middle" font-family="Share Tech Mono" font-size="6" fill="${col}" opacity=".6">${(d.hostname||d.vendor||'').slice(0,14)}</text>`;
+      svg.appendChild(g);
+    });
 
-  // Render device cards below map
-  renderDeviceCards(devices);
-  $('k-con',devices.length);
+    renderDeviceCards(devices);
+    $('k-con',devices.length);
+  }, {cooldownMs: 20000, force});
 }
 
 function renderDeviceCards(devices){
@@ -4197,39 +4196,41 @@ async function setSt(status){
 
 // ── Mini graph (overview right panel) ─────────────────────────────
 let _lastMiniGraphHash='';
-async function loadMiniGraph(){
-  const data=await api('/graph');
-  if(!data)return;
-  const nodes=data.nodes||[],edges=data.edges||[];
-  const hash=nodes.length+'x'+edges.length;
-  if(hash===_lastMiniGraphHash)return;
-  _lastMiniGraphHash=hash;
-  $('graph-info-mini',nodes.length+' nós');
-  const svg=document.getElementById('mini-graph-svg');
-  const W=svg.clientWidth||340,H=svg.clientHeight||200;
-  const procs=nodes.filter(n=>n.type==='process');
-  const ips=nodes.filter(n=>n.type==='ip');
-  const pos={};
-  procs.forEach((n,i)=>{pos[n.id]={x:W*.22,y:(H/(procs.length+1))*(i+1)}});
-  const extIps=ips.filter(n=>n.cat!=='privado'&&!n.ip?.startsWith('127.'));
-  const locIps=ips.filter(n=>n.cat==='privado'||n.ip?.startsWith('127.'));
-  extIps.forEach((n,i)=>{pos[n.id]={x:W*.82,y:(H/(extIps.length+1))*(i+1)}});
-  locIps.forEach((n,i)=>{pos[n.id]={x:W*.52,y:(H/(locIps.length+1))*(i+1)}});
-  const mk=(tag,attrs,txt)=>{const e=document.createElementNS('http://www.w3.org/2000/svg',tag);Object.entries(attrs).forEach(([k,v])=>e.setAttribute(k,v));if(txt!==undefined)e.textContent=txt;return e;};
-  svg.innerHTML='';
-  const nc=n=>n.type==='process'?n.trusted?'var(--grn)':'var(--yel)':n.cat==='malicioso'?'var(--red)':n.cat==='suspeito'?'var(--ora)':n.cat==='privado'||n.ip?.startsWith('127.')?'var(--pur)':'var(--acc)';
-  edges.forEach(e=>{
-    const s=pos[e.source],t=pos[e.target];if(!s||!t)return;
-    const col=nodes.find(n=>n.id===e.target)?.cat==='malicioso'?'rgba(255,26,75,.3)':'rgba(0,229,255,.12)';
-    svg.appendChild(mk('line',{x1:s.x,y1:s.y,x2:t.x,y2:t.y,stroke:col,'stroke-width':'1'}));
-  });
-  [...procs,...ips].forEach(n=>{
-    const p=pos[n.id];if(!p)return;
-    const col=nc(n);const r=n.type==='process'?8:5;
-    const g=mk('g',{});
-    g.appendChild(mk('circle',{cx:p.x,cy:p.y,r,fill:'#04080f',stroke:col,'stroke-width':'1.2'}));
-    svg.appendChild(g);
-  });
+async function loadMiniGraph(force=false){
+  return _guardedTabLoad('overview-mini-graph', async()=>{
+    const data=await api('/graph');
+    if(!data)return;
+    const nodes=data.nodes||[],edges=data.edges||[];
+    const hash=nodes.length+'x'+edges.length;
+    if(hash===_lastMiniGraphHash)return;
+    _lastMiniGraphHash=hash;
+    $('graph-info-mini',nodes.length+' nós');
+    const svg=document.getElementById('mini-graph-svg');
+    const W=svg.clientWidth||340,H=svg.clientHeight||200;
+    const procs=nodes.filter(n=>n.type==='process');
+    const ips=nodes.filter(n=>n.type==='ip');
+    const pos={};
+    procs.forEach((n,i)=>{pos[n.id]={x:W*.22,y:(H/(procs.length+1))*(i+1)}});
+    const extIps=ips.filter(n=>n.cat!=='privado'&&!n.ip?.startsWith('127.'));
+    const locIps=ips.filter(n=>n.cat==='privado'||n.ip?.startsWith('127.'));
+    extIps.forEach((n,i)=>{pos[n.id]={x:W*.82,y:(H/(extIps.length+1))*(i+1)}});
+    locIps.forEach((n,i)=>{pos[n.id]={x:W*.52,y:(H/(locIps.length+1))*(i+1)}});
+    const mk=(tag,attrs,txt)=>{const e=document.createElementNS('http://www.w3.org/2000/svg',tag);Object.entries(attrs).forEach(([k,v])=>e.setAttribute(k,v));if(txt!==undefined)e.textContent=txt;return e;};
+    svg.innerHTML='';
+    const nc=n=>n.type==='process'?n.trusted?'var(--grn)':'var(--yel)':n.cat==='malicioso'?'var(--red)':n.cat==='suspeito'?'var(--ora)':n.cat==='privado'||n.ip?.startsWith('127.')?'var(--pur)':'var(--acc)';
+    edges.forEach(e=>{
+      const s=pos[e.source],t=pos[e.target];if(!s||!t)return;
+      const col=nodes.find(n=>n.id===e.target)?.cat==='malicioso'?'rgba(255,26,75,.3)':'rgba(0,229,255,.12)';
+      svg.appendChild(mk('line',{x1:s.x,y1:s.y,x2:t.x,y2:t.y,stroke:col,'stroke-width':'1'}));
+    });
+    [...procs,...ips].forEach(n=>{
+      const p=pos[n.id];if(!p)return;
+      const col=nc(n);const r=n.type==='process'?8:5;
+      const g=mk('g',{});
+      g.appendChild(mk('circle',{cx:p.x,cy:p.y,r,fill:'#04080f',stroke:col,'stroke-width':'1.2'}));
+      svg.appendChild(g);
+    });
+  }, {cooldownMs: 15000, force});
 }
 
 // ── Mini log terminal ─────────────────────────────────────────────
@@ -4245,12 +4246,14 @@ function setMiniFilter(f){
   });
   renderMiniLog();
 }
-async function loadMiniLogData(){
-  if(_logStreamState==='open' && miniLogData.length) return;
-  const data=await api('/live-log');
-  if(!data)return;
-  miniLogData=(data.entries||[]).slice(-60);
-  renderMiniLog();
+async function loadMiniLogData(force=false){
+  return _guardedTabLoad('overview-mini-log', async()=>{
+    if(_logStreamState==='open' && miniLogData.length) return;
+    const data=await api('/live-log');
+    if(!data)return;
+    miniLogData=(data.entries||[]).slice(-60);
+    renderMiniLog();
+  }, {cooldownMs: 8000, force});
 }
 function renderMiniLog(){
   const el=document.getElementById('mini-log-scroll');
@@ -4321,17 +4324,17 @@ function togP(p){if(expProcs.has(p))expProcs.delete(p);else expProcs.add(p);rend
 // ── System ────────────────────────────────────────────────────────
 async function loadSys(force=false){
   return _guardedTabLoad('system', async()=>{
-    const sysPromise=api('/system');
-    const procsPromise=api('/processes');
-    const portsPromise=api('/ports');
-
-    const sys=await sysPromise;
+    const sys=await api('/system');
     if(sys)renderSysMetrics(sys);
-
-    const [procs,ports]=await Promise.allSettled([procsPromise,portsPromise]);
+    void loadSysPanels(force);
+  }, {cooldownMs: 8000, force});
+}
+async function loadSysPanels(force=false){
+  return _guardedTabLoad('system-panels', async()=>{
+    const [procs,ports]=await Promise.allSettled([api('/processes'),api('/ports')]);
     if(procs.status==='fulfilled' && procs.value)renderProcs(procs.value);
     if(ports.status==='fulfilled' && ports.value)renderPorts(ports.value);
-  }, {cooldownMs: 8000, force});
+  }, {cooldownMs: 20000, force});
 }
 function renderSysMetrics(s){
   const b=(v,col)=>`<div class="gauge"><div class="gauge-f" style="width:${v}%;background:${col}"></div></div>`;
@@ -6161,15 +6164,10 @@ function pageOn(name){return !!document.getElementById('p-'+name)?.classList.con
 function dashboardVisible(){return !document.hidden;}
 
 // ── Init ──────────────────────────────────────────────────────────
-loadFeed();
-loadDevices();
-loadMiniGraph();
-loadMiniLogData();
+loadOverview(true);
 startLiveStream();
-setInterval(()=>{ if(dashboardVisible() && pageOn('overview')) loadFeed(); },20000);
+setInterval(()=>{ if(dashboardVisible() && pageOn('overview')) loadOverview(); },20000);
 setInterval(()=>{ if(dashboardVisible()) pollHealth(); },10000);
-setInterval(()=>{ if(dashboardVisible() && pageOn('overview')) loadMiniGraph(); },15000);
-setInterval(()=>{ if(dashboardVisible() && pageOn('overview')) loadMiniLogData(); },8000);
 setInterval(()=>{ if(dashboardVisible() && pageOn('killchain')) loadKillChain(); },15000);
 setInterval(()=>{ if(dashboardVisible() && pageOn('fail2ban')) loadFail2Ban(); },10000);
 setInterval(()=>{ if(dashboardVisible() && pageOn('ioc')) loadIOC(); },20000);
@@ -6995,7 +6993,7 @@ let trialFormOpen = false;
 async function loadTrials(){
   const pg = document.getElementById('p-trials');
   if(!pg) return;
-  if(!window._ngMe?.is_admin){
+  if(!canAccessUi('trials')){
     pg.innerHTML = `
     <div class="page-shell">
       <div class="panel-card module-empty tall">
@@ -7192,6 +7190,11 @@ function mitreNotice(kind, message){
   return `<div style="margin-bottom:14px;padding:10px 12px;border-radius:8px;border:1px solid ${tone.bd};background:${tone.bg};color:${tone.fg};font-size:.78rem">${message}</div>`;
 }
 
+function mitreRequestHint(data, label){
+  if(!data?.request_id) return '';
+  return mitreNotice('info', `${label} em fallback. Referencia operacional: ${data.request_id}.`);
+}
+
 function normalizeMitreMatrix(matrix){
   if(Array.isArray(matrix)){
     return matrix.map(group=>({
@@ -7294,6 +7297,13 @@ async function loadMitre(days){
     notices.push(mitreNotice('err', `Estatísticas indisponíveis agora${stats?.error ? `: ${stats.error}` : '.'}`));
   } else if(stats?.degraded){
     notices.push(mitreNotice('warn', 'As estatísticas MITRE foram servidas em fallback temporário por lock de banco.'));
+  }
+
+  if(hm?.degraded && hm?.request_id){
+    notices.push(mitreRequestHint(hm, 'Heatmap MITRE'));
+  }
+  if(stats?.degraded && stats?.request_id){
+    notices.push(mitreRequestHint(stats, 'Estatisticas MITRE'));
   }
 
   const alert = document.getElementById('mitre-alert');
@@ -8657,4 +8667,3 @@ const _CP_ACTIONS = [
   {icon:'⬇',label:'Exportar IOCs (CSV)',hint:'action',action:()=>{closePalette();window.open('/api/ioc/export','_blank');}},
   {icon:'📑',label:'Gerar Relatório',hint:'action',action:()=>{closePalette();goPage('analyze',null);}},
   {id:'new-trial',icon:'🔗',label:'Novo Trial',hint:'action',action:()=>{closePalette();goPage('trials',null);setTimeout(showNewTr
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   

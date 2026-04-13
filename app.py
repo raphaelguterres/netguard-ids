@@ -500,6 +500,17 @@ def _ensure_demo_access_token(*, min_events: int = 50, reason: str = "demo") -> 
         return None
 
 
+def _get_demo_cookie_token(*, reason: str) -> str:
+    demo_token = _ensure_demo_access_token(reason=reason)
+    if demo_token:
+        return demo_token
+    try:
+        from demo_seed import DEMO_TOKEN as _DEMO_TOKEN
+        return _DEMO_TOKEN
+    except Exception:
+        return "ng_DEMO00000000000000000000000000"
+
+
 def _resolve_tenant_id(fallback: str = None) -> str:
     """
     Resolve o tenant_id da requisição atual.
@@ -862,6 +873,19 @@ def _trigger_bg_refresh(job_key: str, fn, *args):
 
 _endpoint_swr_cache: dict = {}
 _endpoint_swr_lock = threading.Lock()
+_engine_singletons_lock = threading.Lock()
+_ti_feed_singleton = None
+_ti_feed_scheduler_started = False
+_playbook_engine_singleton = None
+_forensics_engine_singleton = None
+
+
+def _cache_invalidate_prefixes(cache: dict, lock: threading.Lock, prefixes):
+    prefixes = tuple(prefixes)
+    with lock:
+        for key in list(cache.keys()):
+            if key.startswith(prefixes):
+                cache.pop(key, None)
 
 
 def _cache_value_refresh(cache: dict, lock: threading.Lock, key: str, compute_fn):
@@ -881,10 +905,10 @@ def _swr_cached_value(cache: dict, lock: threading.Lock, key: str,
     return _cache_value_refresh(cache, lock, key, compute_fn)
 
 
-_SYSTEM_CACHE_TTL = 3.0
-_SYSTEM_STALE_TTL = 15.0
-_STATISTICS_CACHE_TTL = 2.5
-_STATISTICS_STALE_TTL = 12.0
+_SYSTEM_CACHE_TTL = 6.0
+_SYSTEM_STALE_TTL = 30.0
+_STATISTICS_CACHE_TTL = 8.0
+_STATISTICS_STALE_TTL = 45.0
 _HEALTH_CACHE_TTL = 2.0
 _HEALTH_STALE_TTL = 8.0
 _DEVICES_CACHE_TTL = 20.0
@@ -1023,10 +1047,54 @@ def _classificar_dispositivo(ip: str, mac: str) -> str:
     return tipo
 
 # ── Sistema: info de processos/rede via psutil ────────────────────
+_system_cpu_lock = threading.Lock()
+_system_cpu_last = 0.0
+_system_interfaces_lock = threading.Lock()
+_system_interfaces_cache = {"ts": 0.0, "data": []}
+_SYSTEM_INTERFACES_TTL = 60.0
+
+
+def _system_cpu_percent_fast() -> float:
+    global _system_cpu_last
+    with _system_cpu_lock:
+        try:
+            value = round(psutil.cpu_percent(interval=None), 1)
+            _system_cpu_last = value
+            return value
+        except Exception:
+            return _system_cpu_last
+
+
+def _system_interfaces_snapshot() -> list:
+    now = time.time()
+    with _system_interfaces_lock:
+        if (now - _system_interfaces_cache["ts"]) < _SYSTEM_INTERFACES_TTL and _system_interfaces_cache["data"]:
+            return [dict(item) for item in _system_interfaces_cache["data"]]
+
+    if_stats = psutil.net_if_stats()
+    interfaces = []
+    for name, addrs in psutil.net_if_addrs().items():
+        stats = if_stats.get(name)
+        for addr in addrs:
+            if addr.family == socket.AF_INET:
+                interfaces.append({
+                    "name":  name,
+                    "ip":    addr.address,
+                    "mask":  addr.netmask,
+                    "speed": stats.speed if stats else 0,
+                    "up":    stats.isup if stats else False,
+                })
+
+    with _system_interfaces_lock:
+        _system_interfaces_cache["ts"] = now
+        _system_interfaces_cache["data"] = [dict(item) for item in interfaces]
+    return interfaces
+
+
 def get_system_info(include_details: bool = False) -> dict:
     """Coleta métricas detalhadas do sistema usando psutil."""
     try:
-        cpu = psutil.cpu_percent(interval=0.1)
+        cpu = _system_cpu_percent_fast()
         mem = psutil.virtual_memory()
         disk = psutil.disk_usage('C:\\') if os.name == 'nt' else psutil.disk_usage('/')
         net_io = psutil.net_io_counters()
@@ -1034,20 +1102,7 @@ def get_system_info(include_details: bool = False) -> dict:
         uptime_s = int(time.time() - boot)
         uptime = f"{uptime_s//3600}h {(uptime_s%3600)//60}m"
 
-        # Network interfaces
-        if_stats = psutil.net_if_stats()
-        interfaces = []
-        for name, addrs in psutil.net_if_addrs().items():
-            stats = if_stats.get(name)
-            for addr in addrs:
-                if addr.family == socket.AF_INET:
-                    interfaces.append({
-                        "name":  name,
-                        "ip":    addr.address,
-                        "mask":  addr.netmask,
-                        "speed": stats.speed if stats else 0,
-                        "up":    stats.isup if stats else False,
-                    })
+        interfaces = _system_interfaces_snapshot()
 
         procs = []
         listening = []
@@ -2000,12 +2055,11 @@ def system_info():
     if not PSUTIL_OK:
         return jsonify({"error": "psutil não instalado. Execute: pip install psutil"}), 503
     """Métricas detalhadas do sistema: CPU, RAM, disco, processos, portas abertas."""
-    tenant_id = _resolve_tenant_id()
     payload = _swr_cached_value(
         _endpoint_swr_cache, _endpoint_swr_lock,
-        f"system:{tenant_id}",
+        "system:host",
         _SYSTEM_CACHE_TTL, _SYSTEM_STALE_TTL,
-        f"system:{tenant_id}",
+        "system:host",
         lambda: get_system_info(include_details=False),
     )
     return jsonify(payload)
@@ -2016,8 +2070,6 @@ def list_processes():
     if not PSUTIL_OK:
         return jsonify({"error": "psutil não instalado"}), 503
     """Lista todos os processos com CPU, RAM, conexões e classificação."""
-    tenant_id = _resolve_tenant_id()
-
     def _compute():
         try:
             procs = []
@@ -2052,9 +2104,9 @@ def list_processes():
 
     payload = _swr_cached_value(
         _endpoint_swr_cache, _endpoint_swr_lock,
-        f"processes:{tenant_id}",
+        "processes:host",
         _SYSTEM_CACHE_TTL, _SYSTEM_STALE_TTL,
-        f"processes:{tenant_id}",
+        "processes:host",
         _compute,
     )
     status = 500 if payload.get("error") else 200
@@ -2066,8 +2118,6 @@ def list_ports():
     if not PSUTIL_OK:
         return jsonify({"error": "psutil não instalado"}), 503
     """Lista todas as portas abertas (LISTEN) com processo responsável."""
-    tenant_id = _resolve_tenant_id()
-
     def _compute():
         try:
             listening = []
@@ -2092,9 +2142,9 @@ def list_ports():
 
     payload = _swr_cached_value(
         _endpoint_swr_cache, _endpoint_swr_lock,
-        f"ports:{tenant_id}",
+        "ports:host",
         _SYSTEM_CACHE_TTL, _SYSTEM_STALE_TTL,
-        f"ports:{tenant_id}",
+        "ports:host",
         _compute,
     )
     status = 500 if payload.get("error") else 200
@@ -4245,13 +4295,7 @@ def demo_access():
     if os.environ.get("IDS_DEMO_DISABLED", "false").lower() == "true":
         return redirect("/pricing")
 
-    demo_token = _ensure_demo_access_token(reason="demo_route")
-    if not demo_token:
-        try:
-            from demo_seed import DEMO_TOKEN as _DEMO_TOKEN
-            demo_token = _DEMO_TOKEN
-        except Exception:
-            demo_token = "ng_DEMO00000000000000000000000000"
+    demo_token = _get_demo_cookie_token(reason="demo_route")
 
     dashboard_path = pathlib.Path(__file__).parent / "dashboard.html"
     if not dashboard_path.exists():
@@ -5037,6 +5081,7 @@ def trial_access(token):
     # Seed de dados demo para este trial (tenant isolado por token hash)
     trial        = result["trial"]
     trial_tenant = "trial_" + token[-12:]
+    DEMO_TOKEN = _get_demo_cookie_token(reason="trial_access")
     auth_cookie  = DEMO_TOKEN  # padrão seguro
     try:
         from demo_seed import seed_demo, DEMO_TOKEN as _DEMO_TK
@@ -5372,6 +5417,28 @@ def _mitre_int_arg(name: str, default: int) -> int:
     except (TypeError, ValueError):
         return default
 
+
+def _mitre_degraded_response(payload: dict, warning: str = "internal_error", status_code: int = 200):
+    body = dict(payload or {})
+    body["degraded"] = True
+    body["warning"] = warning
+    req_id = getattr(request, "_rid", None)
+    if req_id:
+        body["request_id"] = req_id
+    resp = jsonify(body)
+    resp.status_code = status_code
+    resp.headers["X-NetGuard-Degraded"] = "1"
+    resp.headers["X-NetGuard-Warning"] = warning
+    return resp
+
+
+def _mitre_internal_error_response(status_code: int = 500):
+    body = {"error": "internal_error"}
+    req_id = getattr(request, "_rid", None)
+    if req_id:
+        body["request_id"] = req_id
+    return jsonify(body), status_code
+
 @app.route("/api/mitre/stats", methods=["GET"])
 @auth
 def mitre_stats():
@@ -5382,7 +5449,7 @@ def mitre_stats():
         return jsonify(_get_mitre_engine().stats())
     except Exception as e:
         logger.exception("MITRE stats route fallback | tenant=%s", _resolve_tenant_id())
-        return jsonify(_mitre_stats_fallback()), 200
+        return _mitre_degraded_response(_mitre_stats_fallback(), warning="stats_unavailable")
 
 @app.route("/api/mitre/heatmap", methods=["GET"])
 @auth
@@ -5395,7 +5462,7 @@ def mitre_heatmap():
         return jsonify(_get_mitre_engine().heat_map(days))
     except Exception as e:
         logger.exception("MITRE heatmap route fallback | tenant=%s | days=%s", _resolve_tenant_id(), days)
-        return jsonify(_mitre_heatmap_fallback(days)), 200
+        return _mitre_degraded_response(_mitre_heatmap_fallback(days), warning="heatmap_unavailable")
 
 @app.route("/api/mitre/hits", methods=["GET"])
 @auth
@@ -5415,13 +5482,11 @@ def mitre_hits():
         })
     except Exception as e:
         logger.exception("MITRE hits route fallback | tenant=%s", _resolve_tenant_id())
-        return jsonify({
+        return _mitre_degraded_response({
             "hits": [],
             "total": 0,
             "days": _mitre_int_arg("days", 30),
-            "degraded": True,
-            "warning": "internal_error",
-        }), 200
+        }, warning="hits_unavailable")
 
 @app.route("/api/mitre/navigator", methods=["GET"])
 @auth
@@ -5439,7 +5504,8 @@ def mitre_navigator():
         resp.headers["Content-Disposition"] = "attachment; filename=netguard_mitre_layer.json"
         return resp
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.exception("MITRE navigator route error | tenant=%s", _resolve_tenant_id())
+        return _mitre_internal_error_response()
 
 @app.route("/api/mitre/technique/<tid_param>", methods=["GET"])
 @auth
@@ -5453,7 +5519,8 @@ def mitre_technique(tid_param: str):
             return jsonify({"error": "Técnica não encontrada"}), 404
         return jsonify(detail)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.exception("MITRE technique route error | tenant=%s | tid=%s", _resolve_tenant_id(), tid_param)
+        return _mitre_internal_error_response()
 
 
 # ═══════════════════════════════════════ WEBHOOK ALERTS ════════════
@@ -5583,11 +5650,15 @@ def webhooks_types():
 # ── Threat Intel Feed ────────────────────────────────────────────────────────
 
 def _get_ti_feed():
+    global _ti_feed_singleton, _ti_feed_scheduler_started
     db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
-    feed = get_ti_feed(db)
-    # Start scheduler on first call
-    feed.start_scheduler(interval_check_s=300)
-    return feed
+    with _engine_singletons_lock:
+        if _ti_feed_singleton is None:
+            _ti_feed_singleton = get_ti_feed(db)
+        if not _ti_feed_scheduler_started:
+            _ti_feed_singleton.start_scheduler(interval_check_s=300)
+            _ti_feed_scheduler_started = True
+        return _ti_feed_singleton
 
 @app.route("/api/ti/stats")
 @auth
@@ -5652,9 +5723,14 @@ def ti_lookup():
 def ti_refresh_feed(feed_name):
     if not TI_AVAILABLE:
         return jsonify({"available": False}), 503
+    tenant_id = _resolve_tenant_id()
     def _run():
         try:
             _get_ti_feed().refresh_feed(feed_name)
+            _cache_invalidate_prefixes(
+                _endpoint_swr_cache, _endpoint_swr_lock,
+                [f"ti:stats:{tenant_id}", f"ti:iocs:{tenant_id}:"],
+            )
         except Exception as e:
             logger.error("TI refresh error: %s", e)
     threading.Thread(target=_run, daemon=True, name=f"ti-refresh-{feed_name}").start()
@@ -5667,9 +5743,14 @@ def ti_refresh_feed(feed_name):
 def ti_refresh_all():
     if not TI_AVAILABLE:
         return jsonify({"available": False}), 503
+    tenant_id = _resolve_tenant_id()
     def _run():
         try:
             _get_ti_feed().refresh_all()
+            _cache_invalidate_prefixes(
+                _endpoint_swr_cache, _endpoint_swr_lock,
+                [f"ti:stats:{tenant_id}", f"ti:iocs:{tenant_id}:"],
+            )
         except Exception as e:
             logger.error("TI refresh_all error: %s", e)
     threading.Thread(target=_run, daemon=True, name="ti-refresh-all").start()
@@ -5679,7 +5760,11 @@ def ti_refresh_all():
 
 def _get_playbook_engine():
     db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
-    return get_playbook_engine(db)
+    global _playbook_engine_singleton
+    with _engine_singletons_lock:
+        if _playbook_engine_singleton is None:
+            _playbook_engine_singleton = get_playbook_engine(db)
+        return _playbook_engine_singleton
 
 @app.route("/api/playbooks")
 @auth
@@ -5692,11 +5777,11 @@ def playbooks_list_route():
         f"playbooks:{tenant_id}",
         _PLAYBOOK_CACHE_TTL, _PLAYBOOK_STALE_TTL,
         f"playbooks:{tenant_id}",
-        lambda: {
+        lambda: (lambda eng: {
             "available": True,
-            "playbooks": _get_playbook_engine().playbooks_list(),
-            "stats": _get_playbook_engine().stats(tenant_id),
-        },
+            "playbooks": eng.playbooks_list(),
+            "stats": eng.stats(tenant_id),
+        })(_get_playbook_engine()),
     )
     return jsonify(payload)
 
@@ -5743,6 +5828,11 @@ def playbooks_open_incident():
             trigger_event=data.get("trigger_event", {}),
             tenant_id=_resolve_tenant_id(),
         )
+        tenant_id = _resolve_tenant_id()
+        _cache_invalidate_prefixes(
+            _endpoint_swr_cache, _endpoint_swr_lock,
+            [f"playbooks:{tenant_id}", f"playbooks:incidents:{tenant_id}:"],
+        )
         return jsonify({"ok": True, "incident": inc}), 201
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
@@ -5767,7 +5857,12 @@ def playbooks_update_status(incident_id):
     data   = request.get_json(force=True) or {}
     status = data.get("status", "")
     notes  = data.get("notes", "")
+    tenant_id = _resolve_tenant_id()
     _get_playbook_engine().update_incident_status(incident_id, status, notes)
+    _cache_invalidate_prefixes(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        [f"playbooks:{tenant_id}", f"playbooks:incidents:{tenant_id}:"],
+    )
     return jsonify({"ok": True})
 
 @app.route("/api/playbooks/incidents/<incident_id>/steps/<int:step_order>", methods=["POST"])
@@ -5780,14 +5875,23 @@ def playbooks_update_step(incident_id, step_order):
     data   = request.get_json(force=True) or {}
     status = data.get("status", "done")
     output = data.get("output", "")
+    tenant_id = _resolve_tenant_id()
     _get_playbook_engine().update_step(incident_id, step_order, status, output)
+    _cache_invalidate_prefixes(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        [f"playbooks:{tenant_id}", f"playbooks:incidents:{tenant_id}:"],
+    )
     return jsonify({"ok": True})
 
 # ── Forensics Snapshots ───────────────────────────────────────────────────────
 
 def _get_forensics_engine():
     db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
-    return get_forensics_engine(db)
+    global _forensics_engine_singleton
+    with _engine_singletons_lock:
+        if _forensics_engine_singleton is None:
+            _forensics_engine_singleton = get_forensics_engine(db)
+        return _forensics_engine_singleton
 
 @app.route("/api/forensics/snapshots")
 @auth
@@ -5796,9 +5900,19 @@ def forensics_list():
         return jsonify({"available": False}), 503
     tenant_id = _resolve_tenant_id()
     limit     = min(int(request.args.get("limit", 50)), 200)
-    snaps = _get_forensics_engine().list_snapshots(tenant_id=tenant_id, limit=limit)
-    stats = _get_forensics_engine().stats(tenant_id=tenant_id)
-    return jsonify({"snapshots": snaps, "stats": stats, "available": True})
+    key = f"forensics:{tenant_id}:{limit}"
+    payload = _swr_cached_value(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        key,
+        _FORENSICS_CACHE_TTL, _FORENSICS_STALE_TTL,
+        key,
+        lambda: (lambda eng: {
+            "snapshots": eng.list_snapshots(tenant_id=tenant_id, limit=limit),
+            "stats": eng.stats(tenant_id=tenant_id),
+            "available": True,
+        })(_get_forensics_engine()),
+    )
+    return jsonify(payload)
 
 @app.route("/api/forensics/snapshots", methods=["POST"])
 @auth
@@ -5816,6 +5930,10 @@ def forensics_capture():
                 trigger_event=data,
                 severity=data.get("severity", "high"),
                 tenant_id=tenant_id,
+            )
+            _cache_invalidate_prefixes(
+                _endpoint_swr_cache, _endpoint_swr_lock,
+                [f"forensics:{tenant_id}:"],
             )
         except Exception as e:
             logger.error("Forensics capture error: %s", e)
@@ -5839,7 +5957,12 @@ def forensics_get(snapshot_id):
 def forensics_delete(snapshot_id):
     if not FORENSICS_AVAILABLE:
         return jsonify({"available": False}), 503
+    tenant_id = _resolve_tenant_id()
     _get_forensics_engine().delete_snapshot(snapshot_id)
+    _cache_invalidate_prefixes(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        [f"forensics:{tenant_id}:"],
+    )
     return jsonify({"ok": True})
 
 # ═══════════════════════════════════════════════════════════════════
