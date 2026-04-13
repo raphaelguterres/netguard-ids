@@ -260,11 +260,13 @@ except ImportError:
 
 # MITRE ATT&CK Engine
 try:
-    from engine.mitre_engine import get_mitre_engine
+    from engine.mitre_engine import get_mitre_engine, TACTICS as MITRE_TACTICS, TECHNIQUES as MITRE_TECHNIQUES
     MITRE_AVAILABLE = True
     logger.info("MITRE ATT&CK Engine disponível") if False else None  # lazy-init
 except Exception as _me:
     get_mitre_engine = None
+    MITRE_TACTICS = []
+    MITRE_TECHNIQUES = []
     MITRE_AVAILABLE = False
     print(f"[WARN] MITRE Engine: {_me}")
 
@@ -501,10 +503,14 @@ def _ensure_demo_access_token(*, min_events: int = 50, reason: str = "demo") -> 
 def _resolve_tenant_id(fallback: str = None) -> str:
     """
     Resolve o tenant_id da requisição atual.
-    Prioridade: fallback param → token/header/cookie → 'default'
+    Prioridade: fallback param → trial cookie → token/header/cookie → 'default'
     """
     if fallback:
         return fallback
+    # Prioridade 1: cookie de trial → tenant isolado por token
+    trial_token = request.cookies.get("netguard_trial", "").strip()
+    if trial_token and trial_token.startswith("ng_trial_"):
+        return "trial_" + trial_token[-12:]
     try:
         token = _extract_token()
         if token and AUTH_MODULE_OK:
@@ -854,6 +860,42 @@ def _trigger_bg_refresh(job_key: str, fn, *args):
 
     threading.Thread(target=_run, daemon=True, name=f"bg-{job_key}").start()
 
+_endpoint_swr_cache: dict = {}
+_endpoint_swr_lock = threading.Lock()
+
+
+def _cache_value_refresh(cache: dict, lock: threading.Lock, key: str, compute_fn):
+    value = compute_fn()
+    _ttl_cache_set(cache, lock, key, value)
+    return value
+
+
+def _swr_cached_value(cache: dict, lock: threading.Lock, key: str,
+                      fresh_ttl: float, stale_ttl: float,
+                      job_key: str, compute_fn):
+    value, is_stale = _ttl_cache_get_swr(cache, lock, key, fresh_ttl, stale_ttl)
+    if value is not None:
+        if is_stale:
+            _trigger_bg_refresh(job_key, _cache_value_refresh, cache, lock, key, compute_fn)
+        return value
+    return _cache_value_refresh(cache, lock, key, compute_fn)
+
+
+_SYSTEM_CACHE_TTL = 3.0
+_SYSTEM_STALE_TTL = 15.0
+_STATISTICS_CACHE_TTL = 2.5
+_STATISTICS_STALE_TTL = 12.0
+_HEALTH_CACHE_TTL = 2.0
+_HEALTH_STALE_TTL = 8.0
+_DEVICES_CACHE_TTL = 20.0
+_DEVICES_STALE_TTL = 90.0
+_TI_CACHE_TTL_SHORT = 6.0
+_TI_STALE_TTL_SHORT = 25.0
+_PLAYBOOK_CACHE_TTL = 5.0
+_PLAYBOOK_STALE_TTL = 20.0
+_FORENSICS_CACHE_TTL = 4.0
+_FORENSICS_STALE_TTL = 18.0
+
 # ── Descoberta de dispositivos ────────────────────────────────────
 _dispositivos: list = []
 _ultimo_scan: float = 0.0
@@ -981,7 +1023,7 @@ def _classificar_dispositivo(ip: str, mac: str) -> str:
     return tipo
 
 # ── Sistema: info de processos/rede via psutil ────────────────────
-def get_system_info() -> dict:
+def get_system_info(include_details: bool = False) -> dict:
     """Coleta métricas detalhadas do sistema usando psutil."""
     try:
         cpu = psutil.cpu_percent(interval=0.1)
@@ -992,29 +1034,11 @@ def get_system_info() -> dict:
         uptime_s = int(time.time() - boot)
         uptime = f"{uptime_s//3600}h {(uptime_s%3600)//60}m"
 
-        # Top processes by CPU
-        procs = []
-        for p in sorted(psutil.process_iter(['pid','name','cpu_percent','memory_percent','status']),
-                        key=lambda x: x.info.get('cpu_percent') or 0, reverse=True)[:15]:
-            try:
-                try:
-                    nconns = len(p.net_connections())
-                except Exception:
-                    nconns = 0
-                procs.append({
-                    "pid":    p.info['pid'],
-                    "name":   p.info['name'],
-                    "cpu":    round(p.info.get('cpu_percent') or 0, 1),
-                    "mem":    round(p.info.get('memory_percent') or 0, 1),
-                    "status": p.info.get('status','?'),
-                    "conns":  nconns,
-                })
-            except Exception: pass
-
         # Network interfaces
+        if_stats = psutil.net_if_stats()
         interfaces = []
         for name, addrs in psutil.net_if_addrs().items():
-            stats = psutil.net_if_stats().get(name)
+            stats = if_stats.get(name)
             for addr in addrs:
                 if addr.family == socket.AF_INET:
                     interfaces.append({
@@ -1025,10 +1049,31 @@ def get_system_info() -> dict:
                         "up":    stats.isup if stats else False,
                     })
 
-        # Open listening ports
+        procs = []
         listening = []
-        for conn in psutil.net_connections(kind='tcp'):
-            if conn.status == 'LISTEN':
+        if include_details:
+            # Detalhes pesados ficam sob demanda; a UI já consulta processos e portas em rotas dedicadas.
+            for p in sorted(psutil.process_iter(['pid','name','cpu_percent','memory_percent','status']),
+                            key=lambda x: x.info.get('cpu_percent') or 0, reverse=True)[:15]:
+                try:
+                    try:
+                        nconns = len(p.net_connections())
+                    except Exception:
+                        nconns = 0
+                    procs.append({
+                        "pid":    p.info['pid'],
+                        "name":   p.info['name'],
+                        "cpu":    round(p.info.get('cpu_percent') or 0, 1),
+                        "mem":    round(p.info.get('memory_percent') or 0, 1),
+                        "status": p.info.get('status','?'),
+                        "conns":  nconns,
+                    })
+                except Exception:
+                    pass
+
+            for conn in psutil.net_connections(kind='tcp'):
+                if conn.status != 'LISTEN':
+                    continue
                 try:
                     proc = psutil.Process(conn.pid).name() if conn.pid else '?'
                 except Exception:
@@ -1039,7 +1084,7 @@ def get_system_info() -> dict:
                     "pid":  conn.pid,
                     "process": proc,
                 })
-        listening.sort(key=lambda x: x['port'])
+            listening.sort(key=lambda x: x['port'])
 
         return {
             "cpu_percent":   cpu,
@@ -1058,6 +1103,7 @@ def get_system_info() -> dict:
             "processes":     procs,
             "interfaces":    interfaces,
             "listening":     listening,
+            "details_deferred": not include_details,
         }
     except Exception as e:
         logger.warning("System info error: %s", e)
@@ -1780,7 +1826,15 @@ def analyze():
 @app.route("/api/statistics")
 @auth
 def statistics():
-    return jsonify(_get_ids(_resolve_tenant_id()).get_statistics())
+    tenant_id = _resolve_tenant_id()
+    payload = _swr_cached_value(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        f"statistics:{tenant_id}",
+        _STATISTICS_CACHE_TTL, _STATISTICS_STALE_TTL,
+        f"statistics:{tenant_id}",
+        lambda: _get_ids(tenant_id).get_statistics(),
+    )
+    return jsonify(payload)
 
 @app.route("/api/export")
 @auth
@@ -1903,28 +1957,32 @@ def _infer_services(ports: list) -> list:
 @app.route("/api/devices")
 @auth
 def get_devices():
-    dispositivos = scan_rede_local("192.168.15.0/24")
-    # Enrich each device with extra info
-    enriched = []
-    for d in dispositivos:
-        dev = dict(d)
-        ip = dev.get("ip","")
-        mac = dev.get("mac","")
-        # OUI vendor lookup
-        dev["vendor"] = _oui_vendor(mac)
-        # Open ports via netstat (fast, local)
-        dev["open_ports"] = _scan_device_ports(ip)
-        # Latency via ping
-        dev["latency_ms"] = _ping_latency(ip)
-        # Services inferred from ports
-        dev["services"] = _infer_services(dev["open_ports"])
-        enriched.append(dev)
-    return jsonify({
-        "devices":   enriched,
-        "total":     len(enriched),
-        "rede":      "192.168.15.0/24",
-        "timestamp": _utc_iso(),
-    })
+    def _compute():
+        dispositivos = scan_rede_local("192.168.15.0/24")
+        enriched = []
+        for d in dispositivos:
+            dev = dict(d)
+            ip = dev.get("ip","")
+            mac = dev.get("mac","")
+            dev["vendor"] = _oui_vendor(mac)
+            dev["open_ports"] = _scan_device_ports(ip)
+            dev["latency_ms"] = _ping_latency(ip)
+            dev["services"] = _infer_services(dev["open_ports"])
+            enriched.append(dev)
+        return {
+            "devices":   enriched,
+            "total":     len(enriched),
+            "rede":      "192.168.15.0/24",
+            "timestamp": _utc_iso(),
+        }
+
+    payload = _swr_cached_value(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        "devices:local",
+        _DEVICES_CACHE_TTL, _DEVICES_STALE_TTL,
+        "devices:local", _compute,
+    )
+    return jsonify(payload)
 
 @app.route("/api/connections")
 @auth
@@ -1942,7 +2000,15 @@ def system_info():
     if not PSUTIL_OK:
         return jsonify({"error": "psutil não instalado. Execute: pip install psutil"}), 503
     """Métricas detalhadas do sistema: CPU, RAM, disco, processos, portas abertas."""
-    return jsonify(get_system_info())
+    tenant_id = _resolve_tenant_id()
+    payload = _swr_cached_value(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        f"system:{tenant_id}",
+        _SYSTEM_CACHE_TTL, _SYSTEM_STALE_TTL,
+        f"system:{tenant_id}",
+        lambda: get_system_info(include_details=False),
+    )
+    return jsonify(payload)
 
 @app.route("/api/processes")
 @auth
@@ -1950,35 +2016,49 @@ def list_processes():
     if not PSUTIL_OK:
         return jsonify({"error": "psutil não instalado"}), 503
     """Lista todos os processos com CPU, RAM, conexões e classificação."""
-    try:
-        procs = []
-        for p in psutil.process_iter(['pid','name','cpu_percent','memory_percent',
-                                       'status','username','exe']):
-            try:
-                name = (p.info['name'] or '').lower()
-                trusted = any(b in name for b in [x.lower() for x in BROWSERS_E_APPS])
-                suspicious = any(s.lower() in name for s in PROCESSOS_SUSPEITOS)
+    tenant_id = _resolve_tenant_id()
+
+    def _compute():
+        try:
+            procs = []
+            for p in psutil.process_iter(['pid','name','cpu_percent','memory_percent',
+                                           'status','username','exe']):
                 try:
-                    nconns = len(p.net_connections())
-                except Exception:
-                    nconns = 0
-                procs.append({
-                    "pid":        p.info['pid'],
-                    "name":       p.info['name'],
-                    "cpu":        round(p.info.get('cpu_percent') or 0, 1),
-                    "mem":        round(p.info.get('memory_percent') or 0, 1),
-                    "status":     p.info.get('status','?'),
-                    "user":       (p.info.get('username') or '?').split('\\')[-1],
-                    "conns":      nconns,
-                    "trusted":    trusted,
-                    "suspicious": suspicious,
-                    "exe":        (p.info.get('exe') or '')[:80],
-                })
-            except (psutil.NoSuchProcess, psutil.AccessDenied): pass
-        procs.sort(key=lambda x: x['cpu'], reverse=True)
-        return jsonify({"total": len(procs), "processes": procs})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+                    name = (p.info['name'] or '').lower()
+                    trusted = any(b in name for b in [x.lower() for x in BROWSERS_E_APPS])
+                    suspicious = any(s.lower() in name for s in PROCESSOS_SUSPEITOS)
+                    try:
+                        nconns = len(p.net_connections())
+                    except Exception:
+                        nconns = 0
+                    procs.append({
+                        "pid":        p.info['pid'],
+                        "name":       p.info['name'],
+                        "cpu":        round(p.info.get('cpu_percent') or 0, 1),
+                        "mem":        round(p.info.get('memory_percent') or 0, 1),
+                        "status":     p.info.get('status','?'),
+                        "user":       (p.info.get('username') or '?').split('\\')[-1],
+                        "conns":      nconns,
+                        "trusted":    trusted,
+                        "suspicious": suspicious,
+                        "exe":        (p.info.get('exe') or '')[:80],
+                    })
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            procs.sort(key=lambda x: x['cpu'], reverse=True)
+            return {"total": len(procs), "processes": procs}
+        except Exception as e:
+            return {"error": str(e)}
+
+    payload = _swr_cached_value(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        f"processes:{tenant_id}",
+        _SYSTEM_CACHE_TTL, _SYSTEM_STALE_TTL,
+        f"processes:{tenant_id}",
+        _compute,
+    )
+    status = 500 if payload.get("error") else 200
+    return jsonify(payload), status
 
 @app.route("/api/ports")
 @auth
@@ -1986,26 +2066,39 @@ def list_ports():
     if not PSUTIL_OK:
         return jsonify({"error": "psutil não instalado"}), 503
     """Lista todas as portas abertas (LISTEN) com processo responsável."""
-    try:
-        listening = []
-        for conn in psutil.net_connections(kind='inet'):
-            if conn.status in ('LISTEN',''):
-                try:
-                    proc = psutil.Process(conn.pid).name() if conn.pid else '?'
-                except Exception:
-                    proc = f'pid:{conn.pid}'
-                listening.append({
-                    "port":     conn.laddr.port,
-                    "addr":     conn.laddr.ip,
-                    "proto":    "tcp" if conn.type == 1 else "udp",
-                    "pid":      conn.pid,
-                    "process":  proc,
-                    "suspicious": conn.laddr.port in PORTAS_SUSPEITAS,
-                })
-        listening.sort(key=lambda x: x['port'])
-        return jsonify({"total": len(listening), "ports": listening})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    tenant_id = _resolve_tenant_id()
+
+    def _compute():
+        try:
+            listening = []
+            for conn in psutil.net_connections(kind='inet'):
+                if conn.status in ('LISTEN',''):
+                    try:
+                        proc = psutil.Process(conn.pid).name() if conn.pid else '?'
+                    except Exception:
+                        proc = f'pid:{conn.pid}'
+                    listening.append({
+                        "port":     conn.laddr.port,
+                        "addr":     conn.laddr.ip,
+                        "proto":    "tcp" if conn.type == 1 else "udp",
+                        "pid":      conn.pid,
+                        "process":  proc,
+                        "suspicious": conn.laddr.port in PORTAS_SUSPEITAS,
+                    })
+            listening.sort(key=lambda x: x['port'])
+            return {"total": len(listening), "ports": listening}
+        except Exception as e:
+            return {"error": str(e)}
+
+    payload = _swr_cached_value(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        f"ports:{tenant_id}",
+        _SYSTEM_CACHE_TTL, _SYSTEM_STALE_TTL,
+        f"ports:{tenant_id}",
+        _compute,
+    )
+    status = 500 if payload.get("error") else 200
+    return jsonify(payload), status
 
 # ── Live log buffer ──────────────────────────────────────────────
 from collections import deque
@@ -3289,8 +3382,15 @@ def health():
     import uuid as _uuid
     req_id = _uuid.uuid4().hex[:12]
     try:
-        resp, code = _health_inner()
-        data = resp.get_json()
+        tenant_id = _resolve_tenant_id()
+        data, code = _swr_cached_value(
+            _endpoint_swr_cache, _endpoint_swr_lock,
+            f"health:{tenant_id}",
+            _HEALTH_CACHE_TTL, _HEALTH_STALE_TTL,
+            f"health:{tenant_id}",
+            lambda: _health_inner_cached(tenant_id),
+        )
+        data = dict(data)
         data["request_id"] = req_id
         return jsonify(data), code
     except Exception as _ex:
@@ -3301,6 +3401,11 @@ def health():
             "request_id": req_id,
             "error":      "internal_error",  # opaco — sem detalhes para o cliente
         }), 500
+
+
+def _health_inner_cached(_tenant_id: str):
+    resp, code = _health_inner()
+    return resp.get_json(), code
 
 
 def _health_inner():
@@ -4930,10 +5035,12 @@ def trial_access(token):
         )
 
     # Seed de dados demo para este trial (tenant isolado por token hash)
-    trial    = result["trial"]
+    trial        = result["trial"]
     trial_tenant = "trial_" + token[-12:]
+    auth_cookie  = DEMO_TOKEN  # padrão seguro
     try:
-        from demo_seed import seed_demo
+        from demo_seed import seed_demo, DEMO_TOKEN as _DEMO_TK
+        auth_cookie = _DEMO_TK
         from storage.event_repository import EventRepository as _ER
         _repo = _ER()
         cnt = _repo.count(tenant_id=trial_tenant)
@@ -4941,20 +5048,18 @@ def trial_access(token):
             seed_demo(_repo, n_events=300, verbose=False, tenant_override=trial_tenant)
     except Exception as _se:
         logger.warning("Trial seed parcial: %s", _se)
-        try:
-            from demo_seed import DEMO_TOKEN
-            trial_token_cookie = DEMO_TOKEN
-        except Exception:
-            trial_token_cookie = token
-    else:
-        trial_token_cookie = token
+
+    # Usa o DEMO_TOKEN como cookie de autenticação (token registrado como tenant).
+    # O cookie netguard_trial mantém o token do trial para isolamento de tenant:
+    # _resolve_tenant_id() prioriza netguard_trial e retorna "trial_<últimos-12>",
+    # apontando para o tenant isolado onde os dados de demo foram semeados.
 
     html = _render_trial_dashboard(trial, result["remaining_seconds"])
     resp = make_response(html, 200)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
     _set_no_cache_headers(resp)
     _clear_preview_cookies(resp)
-    resp.set_cookie("netguard_token", trial_token_cookie,
+    resp.set_cookie("netguard_token", auth_cookie,
                     httponly=True, samesite="Lax", max_age=result["remaining_seconds"],
                     secure=_HTTPS_ONLY)
     resp.set_cookie("netguard_trial", token,
@@ -5235,6 +5340,38 @@ def _get_mitre_engine():
     tid = _resolve_tenant_id()
     return get_mitre_engine(db, tid)
 
+
+def _mitre_heatmap_fallback(days: int, warning: str = "internal_error"):
+    return {
+        "matrix": [],
+        "top_techniques": [],
+        "top10": [],
+        "total_hits": 0,
+        "days": days,
+        "degraded": True,
+        "warning": warning,
+    }
+
+
+def _mitre_stats_fallback(warning: str = "internal_error"):
+    return {
+        "total_hits": 0,
+        "unique_techniques_hit": 0,
+        "unique_tactics_hit": 0,
+        "total_techniques": len(MITRE_TECHNIQUES),
+        "total_tactics": len(MITRE_TACTICS),
+        "coverage_pct": 0.0,
+        "degraded": True,
+        "warning": warning,
+    }
+
+
+def _mitre_int_arg(name: str, default: int) -> int:
+    try:
+        return int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
 @app.route("/api/mitre/stats", methods=["GET"])
 @auth
 def mitre_stats():
@@ -5244,7 +5381,8 @@ def mitre_stats():
     try:
         return jsonify(_get_mitre_engine().stats())
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.exception("MITRE stats route fallback | tenant=%s", _resolve_tenant_id())
+        return jsonify(_mitre_stats_fallback()), 200
 
 @app.route("/api/mitre/heatmap", methods=["GET"])
 @auth
@@ -5252,11 +5390,12 @@ def mitre_heatmap():
     """Heat map de técnicas ATT&CK detectadas nos últimos N dias."""
     if not MITRE_AVAILABLE:
         return jsonify({"error": "MITRE Engine indisponível"}), 503
+    days = _mitre_int_arg("days", 30)
     try:
-        days = int(request.args.get("days", 30))
         return jsonify(_get_mitre_engine().heat_map(days))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.exception("MITRE heatmap route fallback | tenant=%s | days=%s", _resolve_tenant_id(), days)
+        return jsonify(_mitre_heatmap_fallback(days)), 200
 
 @app.route("/api/mitre/hits", methods=["GET"])
 @auth
@@ -5265,8 +5404,8 @@ def mitre_hits():
     if not MITRE_AVAILABLE:
         return jsonify({"error": "MITRE Engine indisponível"}), 503
     try:
-        limit = int(request.args.get("limit", 50))
-        days  = int(request.args.get("days", 30))
+        limit = _mitre_int_arg("limit", 50)
+        days  = _mitre_int_arg("days", 30)
         hm    = _get_mitre_engine().heat_map(days)
         hits  = hm.get("top_techniques") or hm.get("top10") or []
         return jsonify({
@@ -5275,7 +5414,14 @@ def mitre_hits():
             "days":  days,
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.exception("MITRE hits route fallback | tenant=%s", _resolve_tenant_id())
+        return jsonify({
+            "hits": [],
+            "total": 0,
+            "days": _mitre_int_arg("days", 30),
+            "degraded": True,
+            "warning": "internal_error",
+        }), 200
 
 @app.route("/api/mitre/navigator", methods=["GET"])
 @auth
@@ -5284,7 +5430,7 @@ def mitre_navigator():
     if not MITRE_AVAILABLE:
         return jsonify({"error": "MITRE Engine indisponível"}), 503
     try:
-        days  = int(request.args.get("days", 30))
+        days  = _mitre_int_arg("days", 30)
         layer = _get_mitre_engine().navigator_layer(days)
         resp  = Response(
             json.dumps(layer, indent=2),
@@ -5449,7 +5595,14 @@ def ti_stats():
     if not TI_AVAILABLE:
         return jsonify({"available": False}), 503
     tenant_id = _resolve_tenant_id()
-    return jsonify({"available": True, **_get_ti_feed().stats(tenant_id=tenant_id)})
+    payload = _swr_cached_value(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        f"ti:stats:{tenant_id}",
+        _TI_CACHE_TTL_SHORT, _TI_STALE_TTL_SHORT,
+        f"ti:stats:{tenant_id}",
+        lambda: {"available": True, **_get_ti_feed().stats(tenant_id=tenant_id)},
+    )
+    return jsonify(payload)
 
 @app.route("/api/ti/iocs")
 @auth
@@ -5461,9 +5614,24 @@ def ti_iocs():
     ioc_type  = request.args.get("type")
     limit     = min(int(request.args.get("limit", 200)), 1000)
     offset    = int(request.args.get("offset", 0))
-    iocs = _get_ti_feed().list_iocs(source=source, ioc_type=ioc_type,
-                                     limit=limit, offset=offset, tenant_id=tenant_id)
-    return jsonify({"iocs": iocs, "count": len(iocs)})
+    key = f"ti:iocs:{tenant_id}:{source or '*'}:{ioc_type or '*'}:{limit}:{offset}"
+    payload = _swr_cached_value(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        key,
+        _TI_CACHE_TTL_SHORT, _TI_STALE_TTL_SHORT,
+        key,
+        lambda: {
+            "iocs": _get_ti_feed().list_iocs(
+                source=source, ioc_type=ioc_type,
+                limit=limit, offset=offset, tenant_id=tenant_id,
+            ),
+            "count": 0,
+        },
+    )
+    if payload.get("count") == 0 and payload.get("iocs"):
+        payload = dict(payload)
+        payload["count"] = len(payload["iocs"])
+    return jsonify(payload)
 
 @app.route("/api/ti/lookup")
 @auth
@@ -5518,12 +5686,19 @@ def _get_playbook_engine():
 def playbooks_list_route():
     if not PLAYBOOK_AVAILABLE:
         return jsonify({"available": False}), 503
-    pbe = _get_playbook_engine()
-    return jsonify({
-        "available": True,
-        "playbooks": pbe.playbooks_list(),
-        "stats":     pbe.stats(_resolve_tenant_id()),
-    })
+    tenant_id = _resolve_tenant_id()
+    payload = _swr_cached_value(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        f"playbooks:{tenant_id}",
+        _PLAYBOOK_CACHE_TTL, _PLAYBOOK_STALE_TTL,
+        f"playbooks:{tenant_id}",
+        lambda: {
+            "available": True,
+            "playbooks": _get_playbook_engine().playbooks_list(),
+            "stats": _get_playbook_engine().stats(tenant_id),
+        },
+    )
+    return jsonify(payload)
 
 @app.route("/api/playbooks/incidents")
 @auth
@@ -5533,8 +5708,23 @@ def playbooks_incidents():
     tenant_id = _resolve_tenant_id()
     status    = request.args.get("status")
     limit     = min(int(request.args.get("limit", 50)), 200)
-    incidents = _get_playbook_engine().list_incidents(tenant_id=tenant_id, status=status, limit=limit)
-    return jsonify({"incidents": incidents, "count": len(incidents)})
+    key = f"playbooks:incidents:{tenant_id}:{status or '*'}:{limit}"
+    payload = _swr_cached_value(
+        _endpoint_swr_cache, _endpoint_swr_lock,
+        key,
+        _PLAYBOOK_CACHE_TTL, _PLAYBOOK_STALE_TTL,
+        key,
+        lambda: {
+            "incidents": _get_playbook_engine().list_incidents(
+                tenant_id=tenant_id, status=status, limit=limit
+            ),
+            "count": 0,
+        },
+    )
+    if payload.get("count") == 0 and payload.get("incidents"):
+        payload = dict(payload)
+        payload["count"] = len(payload["incidents"])
+    return jsonify(payload)
 
 @app.route("/api/playbooks/incidents", methods=["POST"])
 @auth
