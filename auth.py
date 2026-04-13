@@ -125,11 +125,21 @@ def _resolve_repo():
         pass
 
     try:
-        app_module = sys.modules.get("__main__") or sys.modules.get("app")
-        if app_module:
-            return getattr(app_module, "repo", None)
+        from flask import current_app
+        repo = getattr(current_app, "_repo", None)
+        if repo is not None:
+            return repo
     except Exception:
         pass
+
+    for module_name in ("__main__", "app"):
+        try:
+            app_module = sys.modules.get(module_name)
+            repo = getattr(app_module, "repo", None) if app_module else None
+            if repo is not None:
+                return repo
+        except Exception:
+            pass
     return None
 
 
@@ -169,22 +179,7 @@ def require_session(f):
             return resp
 
         # Valida o cookie (admin token ou tenant token)
-        # repo é injetado como parâmetro opcional via g ou importado sob demanda
-        try:
-            from flask import g
-            repo = getattr(g, "_repo", None)
-        except Exception:
-            repo = None
-
-        # Tenta importar repo do app se não estiver em g
-        if repo is None:
-            try:
-                import sys
-                app_module = sys.modules.get("__main__") or sys.modules.get("app")
-                if app_module:
-                    repo = getattr(app_module, "repo", None)
-            except Exception:
-                pass
+        repo = _resolve_repo()
 
         result = verify_any_token(token, repo)
         if not result["valid"]:
@@ -212,7 +207,6 @@ def auth(f):
 
     Aceita token em:
       - Header:      Authorization: Bearer <token>
-      - Query param: ?token=<token>
       - Cookie:      netguard_token=<token>
 
     Comportamento por tipo de request:

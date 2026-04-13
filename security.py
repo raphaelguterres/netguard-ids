@@ -135,6 +135,20 @@ class BruteForceGuard:
         except Exception as exc:
             logger.error("[BruteForceGuard] Falha ao inicializar DB: %s", exc)
 
+    def close(self) -> None:
+        """Fecha a conexão SQLite da thread atual, quando existir."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            return
+        try:
+            conn.close()
+        except Exception:
+            pass
+        try:
+            del self._local.conn
+        except Exception:
+            pass
+
     def is_locked(self, key: str) -> bool:
         """Retorna True se a chave está em período de lockout."""
         try:
@@ -551,15 +565,18 @@ def rotate_token(old_token: str, generate_fn) -> tuple[str, str]:
 # 10. SINGLETON BruteForceGuard para o app
 # ══════════════════════════════════════════════════════════════════
 
-_bf_guard: Optional[BruteForceGuard] = None
+_bf_guards: dict[str, BruteForceGuard] = {}
 _bf_lock = threading.Lock()
 
 
 def get_bf_guard(db_path: str = "netguard_security.db") -> BruteForceGuard:
-    """Retorna a instância singleton do BruteForceGuard."""
-    global _bf_guard
-    if _bf_guard is None:
+    """Retorna uma instância singleton por caminho de banco."""
+    normalized = os.path.abspath(db_path or "netguard_security.db")
+    guard = _bf_guards.get(normalized)
+    if guard is None:
         with _bf_lock:
-            if _bf_guard is None:
-                _bf_guard = BruteForceGuard(db_path)
-    return _bf_guard
+            guard = _bf_guards.get(normalized)
+            if guard is None:
+                guard = BruteForceGuard(normalized)
+                _bf_guards[normalized] = guard
+    return guard

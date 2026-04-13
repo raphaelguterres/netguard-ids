@@ -1,5 +1,6 @@
 import os
 import sys
+import types
 import unittest
 
 from flask import Flask
@@ -109,6 +110,24 @@ class TestAuthCsrfFlow(unittest.TestCase):
             result = mutate()
 
         self.assertEqual(result, "ok")
+
+    def test_resolve_repo_faz_fallback_para_modulo_app(self):
+        orig_main = sys.modules.get("__main__")
+        orig_app = sys.modules.get("app")
+        fake_repo = object()
+        sys.modules["__main__"] = types.SimpleNamespace()
+        sys.modules["app"] = types.SimpleNamespace(repo=fake_repo)
+        try:
+            self.assertIs(auth._resolve_repo(), fake_repo)
+        finally:
+            if orig_main is not None:
+                sys.modules["__main__"] = orig_main
+            else:
+                sys.modules.pop("__main__", None)
+            if orig_app is not None:
+                sys.modules["app"] = orig_app
+            else:
+                sys.modules.pop("app", None)
 
 
 if __name__ == "__main__":

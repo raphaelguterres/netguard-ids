@@ -84,6 +84,27 @@ class BaseIntegration(unittest.TestCase):
             headers["X-API-Token"] = token
         return self.client.get(url, headers=headers, **kw)
 
+    @staticmethod
+    def create_tenant_with_role(name: str, plan: str = "pro", role: str = "analyst",
+                                stripe_customer_id: str = ""):
+        import uuid
+        from billing import generate_api_token
+
+        tenant_id = str(uuid.uuid4())
+        token = generate_api_token()
+        repo.create_tenant(
+            tenant_id=tenant_id,
+            name=name,
+            token=token,
+            plan=plan,
+            max_hosts=25,
+            stripe_customer_id=stripe_customer_id,
+        )
+        conn = repo._conn()
+        conn.execute("UPDATE tenants SET role = ? WHERE tenant_id = ?", (role, tenant_id))
+        conn.commit()
+        return tenant_id, token
+
 
 # ══════════════════════════════════════════════════════════════════
 # 1. SELF-SERVE TRIAL
@@ -110,7 +131,6 @@ class TestTrialFlow(BaseIntegration):
             self.assertTrue(d.get("ok"))
             self.assertIn("token", d)
             self.assertTrue(d["token"].startswith("ng_"))
-            return d["token"]
 
     def test_trial_welcome_url_nao_expoe_token_em_query(self):
         r = self.post_json("/trial", {
@@ -160,6 +180,17 @@ class TestTrialFlow(BaseIntegration):
         second = self.client.get(welcome_url, follow_redirects=False)
         self.assertIn(second.status_code, (302, 303))
         self.assertIn("/pricing?error=welcome_expired", second.headers.get("Location", ""))
+
+    def test_welcome_legacy_demo_query_nao_provisiona_tenant(self):
+        legacy_token = "ng_legacy_demo_query_token"
+        r = self.client.get(
+            f"/welcome?demo=1&plan=enterprise&token={legacy_token}"
+            "&name=Legacy+Tenant&email=legacy@test.com",
+            follow_redirects=False,
+        )
+        self.assertIn(r.status_code, (302, 303))
+        self.assertIn("/pricing?error=welcome_expired", r.headers.get("Location", ""))
+        self.assertIsNone(repo.get_tenant_by_token(legacy_token))
 
     def test_trial_email_invalido_nao_quebra_app(self):
         """App não deve quebrar com email malformado."""
@@ -293,6 +324,104 @@ class TestAuthFlow(BaseIntegration):
     def test_validate_token_invalido(self):
         r = self.post_json("/api/auth/validate", {"token": "ng_fake_token_xyz"})
         self.assertEqual(r.status_code, 401)
+
+
+@skip_if_no_app
+class TestProtectedRoutePolicies(BaseIntegration):
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        if not _APP_OK:
+            return
+        cls.viewer_id, cls.viewer_token = cls.create_tenant_with_role(
+            "Viewer Tenant", role="viewer"
+        )
+        cls.analyst_id, cls.analyst_token = cls.create_tenant_with_role(
+            "Analyst Tenant", role="analyst"
+        )
+        cls.admin_id, cls.admin_token = cls.create_tenant_with_role(
+            "Admin Tenant", role="admin", stripe_customer_id="cus_test_admin"
+        )
+
+    def _cookie_headers(self, token: str, csrf_token: str | None = None):
+        cookie_parts = [f"netguard_token={token}"]
+        headers = {}
+        if csrf_token:
+            cookie_parts.append(f"csrf_token={csrf_token}")
+            headers["X-CSRFToken"] = csrf_token
+        headers["Cookie"] = "; ".join(cookie_parts)
+        return headers
+
+    def _cookie_client(self, token: str, csrf_token: str | None = None):
+        client = app.test_client()
+        client.set_cookie("netguard_token", token)
+        if csrf_token:
+            client.set_cookie("csrf_token", csrf_token)
+        return client
+
+    def test_billing_portal_exige_admin(self):
+        analyst = self.client.get("/billing/portal", headers={"X-API-Token": self.analyst_token})
+        self.assertEqual(analyst.status_code, 403)
+
+        admin = self.client.get("/billing/portal", headers={"X-API-Token": self.admin_token})
+        self.assertNotEqual(admin.status_code, 403)
+
+    def test_webhooks_list_bloqueia_viewer(self):
+        viewer = self.client.get("/api/webhooks", headers={"X-API-Token": self.viewer_token})
+        self.assertEqual(viewer.status_code, 403)
+
+        analyst = self.client.get("/api/webhooks", headers={"X-API-Token": self.analyst_token})
+        self.assertIn(analyst.status_code, (200, 503))
+
+    def test_webhooks_create_cookie_auth_exige_csrf(self):
+        payload = {
+            "name": "Sec Hook",
+            "url": "https://8.8.8.8/hook",
+            "type": "generic",
+            "min_severity": "high",
+            "event_types": [],
+        }
+        sem_csrf = self._cookie_client(self.analyst_token).post(
+            "/api/webhooks",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(sem_csrf.status_code, 403)
+
+        com_csrf = self._cookie_client(
+            self.analyst_token, csrf_token="csrf_webhook_test"
+        ).post(
+            "/api/webhooks",
+            data=json.dumps(payload),
+            content_type="application/json",
+            headers={"X-CSRFToken": "csrf_webhook_test"},
+        )
+        self.assertEqual(com_csrf.status_code, 201)
+
+    def test_custom_rules_create_bloqueia_viewer(self):
+        payload = {
+            "name": "Viewer Block Test",
+            "conditions": [{"field": "event_type", "operator": "equals", "value": "ioc_match"}],
+            "logic": "AND",
+            "severity": "HIGH",
+        }
+        r = self.post_json("/api/rules/custom", payload, headers={"X-API-Token": self.viewer_token})
+        self.assertEqual(r.status_code, 403)
+
+    def test_playbook_open_bloqueia_viewer(self):
+        payload = {"playbook": "malware_triage", "trigger_event": {"severity": "high"}}
+        r = self.post_json("/api/playbooks/incidents", payload, headers={"X-API-Token": self.viewer_token})
+        self.assertEqual(r.status_code, 403)
+
+    def test_forensics_capture_bloqueia_viewer(self):
+        payload = {"severity": "high", "hostname": "host-forensics"}
+        r = self.post_json("/api/forensics/snapshots", payload, headers={"X-API-Token": self.viewer_token})
+        self.assertEqual(r.status_code, 403)
+
+    def test_ti_refresh_bloqueia_viewer(self):
+        r = self.post_json("/api/ti/feeds/refresh_all", {}, headers={"X-API-Token": self.viewer_token})
+        self.assertEqual(r.status_code, 403)
 
 
 # ══════════════════════════════════════════════════════════════════

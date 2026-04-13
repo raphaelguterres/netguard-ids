@@ -26,9 +26,11 @@ import logging
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+import security as security_module
 
 # Chave de teste isolada — nunca usar em produção
 os.environ.setdefault("TOKEN_SIGNING_SECRET", "test-signing-key-for-unit-tests-only")
@@ -587,25 +589,65 @@ class TestValidateAbsSession(unittest.TestCase):
 
 class TestGetBfGuard(unittest.TestCase):
 
+    def _reset_cache(self):
+        for guard in list(getattr(security_module, "_bf_guards", {}).values()):
+            try:
+                guard.close()
+            except Exception:
+                pass
+        getattr(security_module, "_bf_guards", {}).clear()
+
+    def setUp(self):
+        self._reset_cache()
+
+    def tearDown(self):
+        self._reset_cache()
+
     def test_retorna_instancia_bruteforce(self):
         tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         tmp.close()
+        guard = None
         try:
             guard = get_bf_guard(tmp.name)
             self.assertIsInstance(guard, BruteForceGuard)
         finally:
+            if guard is not None:
+                guard.close()
             os.unlink(tmp.name)
 
     def test_singleton_mesma_instancia(self):
         """Duas chamadas com mesmo path retornam o mesmo objeto."""
         tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         tmp.close()
+        g1 = g2 = None
         try:
             g1 = get_bf_guard(tmp.name)
             g2 = get_bf_guard(tmp.name)
             self.assertIs(g1, g2)
         finally:
+            if g1 is not None:
+                g1.close()
+            if g2 is not None and g2 is not g1:
+                g2.close()
             os.unlink(tmp.name)
+
+    def test_paths_diferentes_retornam_instancias_diferentes(self):
+        tmp1 = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp2 = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp1.close()
+        tmp2.close()
+        g1 = g2 = None
+        try:
+            g1 = get_bf_guard(tmp1.name)
+            g2 = get_bf_guard(tmp2.name)
+            self.assertIsNot(g1, g2)
+        finally:
+            if g1 is not None:
+                g1.close()
+            if g2 is not None:
+                g2.close()
+            os.unlink(tmp1.name)
+            os.unlink(tmp2.name)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -618,11 +660,13 @@ class TestSSRFGuard(unittest.TestCase):
     privados / reservados e aceita URLs públicas legítimas.
     """
 
-    def _import(self):
+    def _module(self):
         import importlib, sys
         sys.path.insert(0, os.path.join(ROOT, "engine"))
-        mod = importlib.import_module("webhook_engine")
-        return mod._validate_webhook_url
+        return importlib.import_module("webhook_engine")
+
+    def _import(self):
+        return self._module()._validate_webhook_url
 
     def test_url_publica_https_valida(self):
         validate = self._import()
@@ -690,10 +734,64 @@ class TestSSRFGuard(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate("https:///no-host")
 
+    def test_falha_dns_bloqueia_destino(self):
+        mod = self._module()
+        with mock.patch.object(mod.socket, "getaddrinfo", side_effect=OSError("dns down")):
+            with self.assertRaises(ValueError):
+                mod._validate_webhook_url("https://example.com/webhook")
+
 
 # ══════════════════════════════════════════════════════════════════
 # 13. SECRET MASKING — WebhookEngine._row_safe
 # ══════════════════════════════════════════════════════════════════
+class TestWebhookDispatchSecurity(unittest.TestCase):
+
+    def _module(self):
+        import importlib, sys
+        sys.path.insert(0, os.path.join(ROOT, "engine"))
+        return importlib.import_module("webhook_engine")
+
+    def test_send_revalida_url_antes_do_dispatch(self):
+        mod = self._module()
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+
+        class _FakeResponse:
+            status = 204
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        try:
+            engine = mod.WebhookEngine(tmp.name)
+            wh = {
+                "id": 1,
+                "url": "https://example.com/webhook",
+                "type": "generic",
+                "secret": "",
+            }
+            event = {
+                "severity": "high",
+                "threat": "Teste",
+                "event_type": "ioc",
+                "source_ip": "1.1.1.1",
+                "hostname": "host-a",
+                "timestamp": "2026-04-11T00:00:00Z",
+                "details": {},
+            }
+            with mock.patch.object(mod, "_validate_webhook_url") as validate:
+                with mock.patch.object(mod.urllib.request, "urlopen", return_value=_FakeResponse()):
+                    ok, code, err = engine._send(wh, event)
+            validate.assert_called_once_with("https://example.com/webhook")
+            self.assertTrue(ok)
+            self.assertEqual(code, 204)
+            self.assertIsNone(err)
+        finally:
+            os.unlink(tmp.name)
+
 
 class TestWebhookSecretMasking(unittest.TestCase):
     """
