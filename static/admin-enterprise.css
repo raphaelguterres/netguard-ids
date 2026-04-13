@@ -1,0 +1,327 @@
+body.admin-enterprise {
+  background:
+    radial-gradient(circle at top left, rgba(212, 175, 55, 0.16), transparent 28%),
+    radial-gradient(circle at 85% 10%, rgba(255, 255, 255, 0.05), transparent 18%),
+    linear-gradient(180deg, #0c0a07 0%, #070604 100%);
+  color: #f8f1df;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  position: relative;
+}
+
+body.admin-enterprise::before,
+body.admin-enterprise::after {
+  content: "";
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body.admin-enterprise::before {
+  width: 30rem;
+  height: 30rem;
+  top: -12rem;
+  right: -10rem;
+  background: radial-gradient(circle, rgba(245, 215, 124, 0.14), transparent 70%);
+}
+
+body.admin-enterprise::after {
+  width: 24rem;
+  height: 24rem;
+  bottom: -8rem;
+  left: -6rem;
+  background: radial-gradient(circle, rgba(143, 106, 24, 0.2), transparent 68%);
+}
+
+body.admin-enterprise header,
+body.admin-enterprise .container {
+  position: relative;
+  z-index: 1;
+}
+
+body.admin-enterprise header {
+  background: rgba(12, 10, 7, 0.78);
+  border-bottom: 1px solid rgba(212, 175, 55, 0.2);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+}
+
+body.admin-enterprise .logo {
+  color: #f5d77c;
+  font-family: "Bahnschrift", "Trebuchet MS", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.admin-enterprise .badge-admin {
+  background: rgba(212, 175, 55, 0.12);
+  color: #f5d77c;
+  border-color: rgba(245, 215, 124, 0.28);
+}
+
+body.admin-enterprise .header-right {
+  color: #bfae87;
+}
+
+body.admin-enterprise .logout-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(245, 215, 124, 0.18);
+  color: #e2d0aa;
+}
+
+body.admin-enterprise .logout-btn:hover {
+  color: #fff4d7;
+  border-color: rgba(245, 215, 124, 0.34);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+body.admin-enterprise .container {
+  max-width: 1480px;
+  padding: 2.4rem 2rem 3.4rem;
+}
+
+body.admin-enterprise h1 {
+  font-family: "Bahnschrift", "Trebuchet MS", sans-serif;
+  font-size: clamp(2rem, 3vw, 2.8rem);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body.admin-enterprise .subtitle {
+  max-width: 48rem;
+  color: #c9b893;
+  margin-bottom: 1.5rem;
+}
+
+.admin-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(20rem, 0.85fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 1.45rem;
+  border-radius: 24px;
+  border: 1px solid rgba(212, 175, 55, 0.18);
+  background:
+    linear-gradient(135deg, rgba(245, 215, 124, 0.08), rgba(255, 255, 255, 0.02)),
+    rgba(19, 15, 11, 0.84);
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.28);
+}
+
+.admin-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 215, 124, 0.24);
+  color: #f5d77c;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.admin-hero h2 {
+  margin: 1rem 0 0.7rem;
+  font-family: "Bahnschrift", "Trebuchet MS", sans-serif;
+  font-size: clamp(1.5rem, 2.6vw, 2.3rem);
+  line-height: 1.04;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.admin-hero p {
+  margin: 0;
+  color: #cdbb95;
+  line-height: 1.7;
+}
+
+.admin-hero-grid {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.admin-hero-card {
+  padding: 1rem 1.05rem;
+  border-radius: 18px;
+  border: 1px solid rgba(245, 215, 124, 0.14);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.admin-hero-card strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #f8f1df;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+}
+
+.admin-hero-card span {
+  color: #cdbb95;
+  line-height: 1.55;
+  font-size: 0.88rem;
+}
+
+body.admin-enterprise .tabs {
+  gap: 0.7rem;
+  border-bottom: none;
+  margin-bottom: 1.6rem;
+}
+
+body.admin-enterprise .tab-btn {
+  margin-bottom: 0;
+  border: 1px solid rgba(245, 215, 124, 0.12);
+  border-radius: 999px;
+  color: #bca779;
+  background: rgba(255, 255, 255, 0.025);
+  padding-inline: 1.15rem;
+}
+
+body.admin-enterprise .tab-btn.active {
+  color: #271c07;
+  background: linear-gradient(135deg, #f5d77c, #d4af37);
+  border-color: rgba(245, 215, 124, 0.52);
+  box-shadow: 0 12px 28px rgba(212, 175, 55, 0.2);
+}
+
+body.admin-enterprise .stat-card,
+body.admin-enterprise .table-wrap,
+body.admin-enterprise .audit-log,
+body.admin-enterprise .modal {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+    rgba(22, 18, 13, 0.9);
+  border-color: rgba(212, 175, 55, 0.16);
+  box-shadow: 0 20px 42px rgba(0, 0, 0, 0.2);
+}
+
+body.admin-enterprise .stats-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+body.admin-enterprise .stat-label,
+body.admin-enterprise th,
+body.admin-enterprise .form-label,
+body.admin-enterprise .ph-t {
+  color: #9b8657;
+}
+
+body.admin-enterprise .stat-value {
+  font-family: "Bahnschrift", "Trebuchet MS", sans-serif;
+}
+
+body.admin-enterprise .stat-blue .stat-value,
+body.admin-enterprise .stat-green .stat-value,
+body.admin-enterprise .stat-orange .stat-value,
+body.admin-enterprise .stat-purple .stat-value,
+body.admin-enterprise .stat-red .stat-value {
+  color: #f5d77c;
+}
+
+body.admin-enterprise thead tr,
+body.admin-enterprise .audit-toolbar,
+body.admin-enterprise .modal {
+  background-color: rgba(29, 22, 14, 0.94);
+}
+
+body.admin-enterprise tbody tr:hover,
+body.admin-enterprise .audit-row:hover {
+  background: rgba(255, 255, 255, 0.028);
+}
+
+body.admin-enterprise .badge-blue,
+body.admin-enterprise .badge-purple,
+body.admin-enterprise .badge-orange,
+body.admin-enterprise .badge-green,
+body.admin-enterprise .badge-red,
+body.admin-enterprise .badge-gray {
+  border-color: rgba(245, 215, 124, 0.18);
+  background: rgba(245, 215, 124, 0.08);
+  color: #f5d77c;
+}
+
+body.admin-enterprise .btn-primary {
+  background: linear-gradient(135deg, #f5d77c, #d4af37);
+  color: #231905;
+  border-color: rgba(245, 215, 124, 0.48);
+}
+
+body.admin-enterprise .btn-primary:hover {
+  background: linear-gradient(135deg, #ffe49a, #d4af37);
+}
+
+body.admin-enterprise .btn-ghost,
+body.admin-enterprise .audit-filter-btn,
+body.admin-enterprise .close-btn,
+body.admin-enterprise .modal-close {
+  background: rgba(255, 255, 255, 0.025);
+  border-color: rgba(245, 215, 124, 0.14);
+  color: #d8c59e;
+}
+
+body.admin-enterprise .btn-danger {
+  background: rgba(255, 143, 130, 0.08);
+  color: #ff998f;
+  border-color: rgba(255, 143, 130, 0.18);
+}
+
+body.admin-enterprise .btn-success {
+  background: rgba(114, 214, 162, 0.08);
+  color: #8ff1be;
+  border-color: rgba(114, 214, 162, 0.18);
+}
+
+body.admin-enterprise .form-input,
+body.admin-enterprise .audit-search {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(245, 215, 124, 0.12);
+  color: #f8f1df;
+}
+
+body.admin-enterprise .form-input:focus,
+body.admin-enterprise .audit-search:focus {
+  border-color: rgba(245, 215, 124, 0.44);
+  box-shadow: 0 0 0 3px rgba(245, 215, 124, 0.08);
+}
+
+body.admin-enterprise .progress-wrap {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+body.admin-enterprise .progress-ok,
+body.admin-enterprise .progress-warn,
+body.admin-enterprise .progress-crit {
+  background: linear-gradient(90deg, #f5d77c, #d4af37);
+}
+
+body.admin-enterprise #toast {
+  background: rgba(22, 18, 13, 0.96);
+  border-color: rgba(245, 215, 124, 0.16);
+  color: #f5d77c;
+}
+
+@media (max-width: 1120px) {
+  .admin-hero {
+    grid-template-columns: 1fr;
+  }
+
+  body.admin-enterprise .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  body.admin-enterprise .container {
+    padding-inline: 1rem;
+  }
+
+  body.admin-enterprise .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body.admin-enterprise .section-header {
+    gap: 0.75rem;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

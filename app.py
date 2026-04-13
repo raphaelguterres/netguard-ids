@@ -5252,8 +5252,9 @@ def mitre_hits():
         limit = int(request.args.get("limit", 50))
         days  = int(request.args.get("days", 30))
         hm    = _get_mitre_engine().heat_map(days)
+        hits  = hm.get("top_techniques") or hm.get("top10") or []
         return jsonify({
-            "hits":  hm.get("top10", []),
+            "hits":  hits[:limit],
             "total": hm.get("total_hits", 0),
             "days":  days,
         })

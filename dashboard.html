@@ -7046,6 +7046,60 @@ async function showWHLogs(id){
 let _mitreData = null;
 let _mitreDays = 30;
 
+function mitreNotice(kind, message){
+  const tones = {
+    info: {bg:'rgba(88,166,255,.08)', bd:'rgba(88,166,255,.25)', fg:'var(--blu)'},
+    warn: {bg:'rgba(240,136,62,.08)', bd:'rgba(240,136,62,.25)', fg:'var(--ora)'},
+    err:  {bg:'rgba(248,81,73,.08)',  bd:'rgba(248,81,73,.25)',  fg:'var(--red)'}
+  };
+  const tone = tones[kind] || tones.warn;
+  return `<div style="margin-bottom:14px;padding:10px 12px;border-radius:8px;border:1px solid ${tone.bd};background:${tone.bg};color:${tone.fg};font-size:.78rem">${message}</div>`;
+}
+
+function normalizeMitreMatrix(matrix){
+  if(Array.isArray(matrix)){
+    return matrix.map(group=>({
+      tactic_id: group?.tactic_id || '',
+      tactic_name: group?.tactic_name || group?.tactic_id || 'Tática',
+      techniques: Array.isArray(group?.techniques) ? group.techniques : [],
+    }));
+  }
+  if(matrix && typeof matrix === 'object'){
+    const tactics = {};
+    for(const [techId, techData] of Object.entries(matrix)){
+      const tacticId = techData?.tactic_id || techData?.tactic || 'unknown';
+      if(!tactics[tacticId]){
+        tactics[tacticId] = {
+          tactic_id: tacticId,
+          tactic_name: techData?.tactic_name || tacticId,
+          techniques: [],
+        };
+      }
+      tactics[tacticId].techniques.push({
+        id: techId,
+        name: techData?.name || techId,
+        count: techData?.count || 0,
+        color: techData?.color || '',
+      });
+    }
+    return Object.values(tactics);
+  }
+  return [];
+}
+
+function mitreTopTechniques(top10, matrix){
+  if(Array.isArray(top10) && top10.length) return top10;
+  return (matrix || [])
+    .flatMap(group => (group.techniques || []).map(tech => ({
+      ...tech,
+      tactic: group.tactic_id,
+      tactic_name: group.tactic_name,
+    })))
+    .filter(tech => (tech.count || 0) > 0)
+    .sort((a, b) => (b.count || 0) - (a.count || 0))
+    .slice(0, 10);
+}
+
 async function loadMitre(days){
   if(days) _mitreDays = days;
   const pg = document.getElementById('p-mitre');
@@ -7071,33 +7125,55 @@ async function loadMitre(days){
         </a>
       </div>
     </div>
-    <!-- Stats row -->
+    <div id="mitre-alert" style="display:none"></div>
     <div id="mitre-stats-row" style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap"></div>
-    <!-- Tactic columns -->
     <div id="mitre-matrix" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:10px;min-height:220px">
       <div style="color:var(--txt3);font-size:.8rem;margin:auto">Carregando…</div>
     </div>
-    <!-- Top 10 table -->
     <div style="margin-top:20px">
       <div style="font-size:.85rem;font-weight:600;margin-bottom:8px;color:var(--txt2)">🏆 Top 10 Técnicas Detectadas</div>
       <div id="mitre-top10" style="display:flex;flex-direction:column;gap:4px"></div>
     </div>
   </div>`;
 
-  const [hm, stats] = await Promise.all([
+  const [hmResult, statsResult] = await Promise.allSettled([
     api(`/mitre/heatmap?days=${_mitreDays}`),
     api('/mitre/stats'),
   ]);
-  _mitreData = hm;
 
-  // Stats cards
-  if(stats){
-    const row = document.getElementById('mitre-stats-row');
-    if(row) row.innerHTML = [
-      {label:'Técnicas mapeadas', val:`${stats.unique_techniques_hit||0}/${stats.total_techniques||0}`, sub:'ATT&CK techniques'},
-      {label:'Táticas cobertas',  val:`${stats.unique_tactics_hit||0}/12`,  sub:'kill chain phases'},
-      {label:'Cobertura',         val:`${stats.coverage_pct||0}%`,          sub:'do framework ATT&CK'},
-      {label:'Total de hits',     val:stats.total_hits||0,                  sub:`últimos ${_mitreDays} dias`},
+  const hm = hmResult.status === 'fulfilled' ? hmResult.value : null;
+  const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
+  const matrix = normalizeMitreMatrix(hm?.matrix);
+  const top10 = mitreTopTechniques(hm?.top_techniques || hm?.top10, matrix);
+
+  _mitreData = {heatmap: hm, stats, matrix, top10};
+
+  const notices = [];
+  if(hmResult.status === 'rejected' || hm?.error){
+    notices.push(mitreNotice('err', `Heatmap indisponível agora${hm?.error ? `: ${hm.error}` : '.'}`));
+  } else if(hm?.degraded){
+    notices.push(mitreNotice('warn', 'Heatmap MITRE carregado em modo degradado por contenção no banco. A aba continua funcional enquanto o backend estabiliza.'));
+  }
+  if(statsResult.status === 'rejected' || stats?.error){
+    notices.push(mitreNotice('err', `Estatísticas indisponíveis agora${stats?.error ? `: ${stats.error}` : '.'}`));
+  } else if(stats?.degraded){
+    notices.push(mitreNotice('warn', 'As estatísticas MITRE foram servidas em fallback temporário por lock de banco.'));
+  }
+
+  const alert = document.getElementById('mitre-alert');
+  if(alert){
+    alert.innerHTML = notices.join('');
+    alert.style.display = notices.length ? 'block' : 'none';
+  }
+
+  const safeStats = stats && !stats.error ? stats : {};
+  const row = document.getElementById('mitre-stats-row');
+  if(row){
+    row.innerHTML = [
+      {label:'Técnicas mapeadas', val:`${safeStats.unique_techniques_hit||top10.length||0}/${safeStats.total_techniques||0}`, sub:'ATT&CK techniques'},
+      {label:'Táticas cobertas',  val:`${safeStats.unique_tactics_hit||matrix.filter(group => (group.techniques||[]).some(tech => (tech.count||0) > 0)).length||0}/${safeStats.total_tactics||12}`, sub:'kill chain phases'},
+      {label:'Cobertura',         val:`${safeStats.coverage_pct||0}%`, sub:'do framework ATT&CK'},
+      {label:'Total de hits',     val:safeStats.total_hits ?? hm?.total_hits ?? 0, sub:`últimos ${_mitreDays} dias`},
     ].map(c=>`
       <div style="background:var(--b2);border:1px solid var(--b3);border-radius:8px;padding:10px 16px;min-width:130px">
         <div style="font-size:1.3rem;font-weight:700;color:var(--txt1)">${c.val}</div>
@@ -7106,92 +7182,106 @@ async function loadMitre(days){
       </div>`).join('');
   }
 
-  // Matrix
-  if(hm?.matrix){
-    renderMitreMatrix(hm.matrix);
-  }
-
-  // Top 10
-  if(hm?.top10?.length){
-    renderMitreTop10(hm.top10);
-  }
+  renderMitreMatrix(matrix);
+  renderMitreTop10(top10, matrix);
 }
 
 function renderMitreMatrix(matrix){
   const el = document.getElementById('mitre-matrix');
   if(!el) return;
-  // Group by tactic
-  const tactics = {};
-  for(const [techId, techData] of Object.entries(matrix)){
-    const tac = techData.tactic_id;
-    if(!tactics[tac]) tactics[tac] = {name: techData.tactic_name, techs: []};
-    tactics[tac].techs.push({id: techId, ...techData});
+  if(!Array.isArray(matrix) || !matrix.length){
+    el.innerHTML = `<div style="color:var(--txt3);font-size:.8rem;margin:auto">Sem dados MITRE disponíveis no momento.</div>`;
+    return;
   }
-  el.innerHTML = Object.entries(tactics).map(([tacId, tac])=>{
-    const cells = tac.techs.map(t=>{
-      const bg = t.count > 0 ? t.color || '#f0883e' : 'var(--b2)';
-      const txt = t.count > 0 ? '#000' : 'var(--txt3)';
-      return `<div title="${t.name} (${t.count} hits)"
-        onclick="showMitreTech('${t.id}')"
+
+  el.innerHTML = matrix.map(group=>{
+    const techs = Array.isArray(group?.techniques) ? group.techniques : [];
+    const cells = techs.map(tech=>{
+      const count = tech?.count || 0;
+      const bg = count > 0 ? (tech?.color || '#f0883e') : 'var(--b2)';
+      const txt = count > 0 ? '#000' : 'var(--txt3)';
+      const name = tech?.name || tech?.id || 'Technique';
+      return `<div title="${name} (${count} hits)"
+        onclick="showMitreTech('${tech.id}')"
         style="background:${bg};color:${txt};border-radius:4px;padding:5px 6px;font-size:.65rem;
                cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
                max-width:130px;border:1px solid var(--b3);transition:.15s"
         onmouseenter="this.style.opacity='.8'" onmouseleave="this.style.opacity='1'">
-        ${t.name.length>18?t.name.slice(0,17)+'…':t.name}
-        ${t.count>0?`<span style="font-size:.6rem;opacity:.8;margin-left:3px">${t.count}</span>`:''}
+        ${name.length>18 ? name.slice(0,17)+'…' : name}
+        ${count>0 ? `<span style="font-size:.6rem;opacity:.8;margin-left:3px">${count}</span>` : ''}
       </div>`;
     }).join('');
     return `<div style="min-width:140px;display:flex;flex-direction:column;gap:4px">
       <div style="font-size:.68rem;font-weight:700;color:var(--ora);text-transform:uppercase;
                   letter-spacing:.03em;padding:4px 0;border-bottom:1px solid var(--b3);margin-bottom:2px">
-        ${tac.name}
+        ${group?.tactic_name || group?.tactic_id || 'Tática'}
       </div>
-      ${cells}
+      ${cells || `<div style="font-size:.68rem;color:var(--txt3)">Sem técnicas</div>`}
     </div>`;
   }).join('');
 }
 
-function renderMitreTop10(top10){
+function renderMitreTop10(top10, matrix=[]){
   const el = document.getElementById('mitre-top10');
   if(!el) return;
-  const max = top10[0]?.count || 1;
-  el.innerHTML = top10.map((t,i)=>`
+  const rows = mitreTopTechniques(top10, matrix);
+  if(!rows.length){
+    el.innerHTML = `<div style="color:var(--txt3);font-size:.78rem;padding:6px 0">Nenhuma técnica detectada no período selecionado.</div>`;
+    return;
+  }
+  const max = rows.reduce((acc, item) => Math.max(acc, item?.count || 0), 1);
+  el.innerHTML = rows.map((tech, i)=>`
     <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--b1)">
       <span style="color:var(--txt3);font-size:.72rem;width:18px;text-align:right">${i+1}</span>
       <div style="flex:1">
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="font-size:.78rem;font-weight:600">${t.name}</span>
-          <span style="font-size:.65rem;color:var(--txt3)">${t.id}</span>
-          <span style="font-size:.65rem;background:var(--b3);border-radius:4px;padding:1px 5px;color:var(--ora)">${t.tactic_name}</span>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span style="font-size:.78rem;font-weight:600">${tech?.name || tech?.id || 'Technique'}</span>
+          <span style="font-size:.65rem;color:var(--txt3)">${tech?.id || ''}</span>
+          <span style="font-size:.65rem;background:var(--b3);border-radius:4px;padding:1px 5px;color:var(--ora)">${tech?.tactic_name || tech?.tactic || 'Tática'}</span>
         </div>
         <div style="margin-top:4px;height:4px;background:var(--b2);border-radius:2px;overflow:hidden">
-          <div style="height:100%;width:${Math.round(t.count/max*100)}%;background:${t.color||'var(--ora)'};border-radius:2px;transition:.4s"></div>
+          <div style="height:100%;width:${Math.round(((tech?.count || 0) / max) * 100)}%;background:${tech?.color || 'var(--ora)'};border-radius:2px;transition:.4s"></div>
         </div>
       </div>
-      <span style="font-size:.8rem;font-weight:700;color:var(--txt1);min-width:30px;text-align:right">${t.count}</span>
+      <span style="font-size:.8rem;font-weight:700;color:var(--txt1);min-width:30px;text-align:right">${tech?.count || 0}</span>
     </div>`).join('');
 }
 
 async function showMitreTech(techId){
   const r = await api(`/mitre/technique/${techId}`);
-  if(!r) return;
+  if(!r || r.error) return;
+
+  const technique = r.technique || {};
+  const hits = Array.isArray(r.hits) ? r.hits : [];
   const existing = document.getElementById('mitre-tech-modal');
   if(existing) existing.remove();
+
   const m = document.createElement('div');
   m.id = 'mitre-tech-modal';
   m.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center';
   m.innerHTML = `
-    <div style="background:var(--bg2);border:1px solid var(--b3);border-radius:10px;padding:24px;max-width:500px;width:90%;position:relative">
+    <div style="background:var(--bg2);border:1px solid var(--b3);border-radius:10px;padding:24px;max-width:560px;width:92%;position:relative">
       <button onclick="document.getElementById('mitre-tech-modal').remove()"
         style="position:absolute;top:10px;right:12px;background:none;border:none;color:var(--txt3);font-size:1.1rem;cursor:pointer">✕</button>
-      <div style="font-size:.7rem;color:var(--ora);font-weight:700;margin-bottom:4px">${r.tactic_name} · ${r.id}</div>
-      <div style="font-size:1rem;font-weight:700;margin-bottom:10px">${r.name}</div>
-      <div style="font-size:.78rem;color:var(--txt2);line-height:1.5;margin-bottom:12px">${r.description||'Sem descrição disponível.'}</div>
+      <div style="font-size:.7rem;color:var(--ora);font-weight:700;margin-bottom:4px">${r.tactic_name || technique.tactic || 'MITRE'} · ${r.id || techId}</div>
+      <div style="font-size:1rem;font-weight:700;margin-bottom:10px">${r.name || technique.name || techId}</div>
+      <div style="font-size:.78rem;color:var(--txt2);line-height:1.5;margin-bottom:12px">${r.description || technique.description || 'Sem descrição disponível.'}</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px">
+        <div style="font-size:.72rem;color:var(--txt3)">Hits recentes: <span style="color:var(--txt1);font-weight:700">${r.count || hits.length || 0}</span></div>
+        <div style="font-size:.72rem;color:var(--txt3)">Tática: <span style="color:var(--txt1);font-weight:700">${r.tactic_name || technique.tactic || 'N/A'}</span></div>
+      </div>
       <div style="font-size:.72rem;color:var(--txt3);margin-bottom:6px">🔍 Keywords detectadas:</div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:14px">
-        ${(r.keywords||[]).map(k=>`<span style="background:var(--b3);border-radius:4px;padding:2px 7px;font-size:.68rem">${k}</span>`).join('')}
+        ${((r.keywords || technique.keywords || []).map(k=>`<span style="background:var(--b3);border-radius:4px;padding:2px 7px;font-size:.68rem">${k}</span>`).join('')) || '<span style="font-size:.68rem;color:var(--txt3)">Sem keywords cadastradas.</span>'}
       </div>
-      <a href="${r.url}" target="_blank" style="font-size:.75rem;color:var(--blu);text-decoration:none">
+      <div style="font-size:.72rem;color:var(--txt3);margin-bottom:6px">🧾 Eventos recentes:</div>
+      <div style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow:auto;margin-bottom:14px">
+        ${(hits.slice(0, 5).map(hit=>`<div style="background:var(--b2);border:1px solid var(--b3);border-radius:6px;padding:8px 10px">
+          <div style="font-size:.7rem;color:var(--txt1);font-weight:600">${hit.threat_name || 'Evento mapeado'}</div>
+          <div style="font-size:.67rem;color:var(--txt3);margin-top:2px">${hit.ts || 'sem timestamp'} · ${hit.source_ip || 'sem IP'} · ${hit.severity || 'N/A'}</div>
+        </div>`).join('')) || '<div style="font-size:.68rem;color:var(--txt3)">Sem eventos recentes para esta técnica.</div>'}
+      </div>
+      <a href="${r.url || r.attack_url || '#'}" target="_blank" style="font-size:.75rem;color:var(--blu);text-decoration:none">
         🔗 Ver no MITRE ATT&amp;CK →
       </a>
     </div>`;
