@@ -7,7 +7,7 @@ composite scoring, persistência SQLite, bloqueio de IP.
 import os, re, json, sqlite3, hashlib, logging, threading, subprocess
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 from urllib.parse import unquote
 from enum import Enum
@@ -31,6 +31,14 @@ class DetectionMethod(str, Enum):
     THRESHOLD = "threshold"
     COMPOSITE = "composite"
     BLOCK     = "block"
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_iso() -> str:
+    return _utc_now().isoformat().replace("+00:00", "Z")
 
 
 # ── Modelos ──────────────────────────────────────────────────────
@@ -85,7 +93,7 @@ class SlidingWindowCounter:
         self._lock = threading.Lock()
 
     def add(self, key: str) -> int:
-        now = datetime.utcnow()
+        now = _utc_now()
         with self._lock:
             dq = self._data[key]
             dq.append(now)
@@ -95,7 +103,7 @@ class SlidingWindowCounter:
             return len(dq)
 
     def count(self, key: str) -> int:
-        now = datetime.utcnow()
+        now = _utc_now()
         with self._lock:
             dq = self._data[key]
             cutoff = now - self.window
@@ -252,7 +260,7 @@ class DetectionStore:
     def update_status(self, did: str, status: str, note: str = "") -> bool:
         cur = self._conn().execute(
             "UPDATE detections SET status=?,analyst_note=?,updated_at=? WHERE detection_id=?",
-            (status, note, datetime.utcnow().isoformat()+"Z", did))
+            (status, note, _utc_iso(), did))
         self._conn().commit()
         return cur.rowcount > 0
 
@@ -306,7 +314,7 @@ class DetectionStore:
     def save_block(self, ip: str, reason: str):
         self._conn().execute(
             "INSERT OR REPLACE INTO blocked_ips(ip,reason,blocked_at) VALUES(?,?,?)",
-            (ip, reason, datetime.utcnow().isoformat()+"Z"))
+            (ip, reason, _utc_iso()))
         self._conn().commit()
 
     def remove_block(self, ip: str):
@@ -546,7 +554,7 @@ class IDSEngine:
             if sig.matches(decoded):
                 events.append(DetectionEvent(
                     detection_id=self._gen_id(log_entry, sig.name),
-                    timestamp=datetime.utcnow().isoformat()+"Z",
+                    timestamp=_utc_iso(),
                     threat_name=sig.name, severity=sig.severity.value,
                     description=sig.description,
                     source_ip=source_ip or "unknown",
@@ -581,7 +589,7 @@ class IDSEngine:
         cfg = self.THRESHOLDS[etype]
         return DetectionEvent(
             detection_id=self._gen_id(ip, etype),
-            timestamp=datetime.utcnow().isoformat()+"Z",
+            timestamp=_utc_iso(),
             threat_name=name, severity=severity.value,
             description=f"{count} eventos em {cfg['window']}s (limiar: {cfg['limit']})",
             source_ip=ip, log_entry=f"[THRESHOLD] {etype} count={count}",
@@ -602,7 +610,7 @@ class IDSEngine:
     @staticmethod
     def _gen_id(text, salt):
         return hashlib.sha256(
-            f"{salt}:{text}:{datetime.utcnow().isoformat()}".encode()
+            f"{salt}:{text}:{_utc_iso()}".encode()
         ).hexdigest()[:12]
 
 
