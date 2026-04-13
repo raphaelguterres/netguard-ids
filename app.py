@@ -4166,6 +4166,22 @@ def demo_access():
     return resp
 
 
+@app.route("/admin")
+def admin_panel():
+    """
+    Painel de administração do sistema — gerenciamento de trials, webhooks e visão geral.
+    Acesso direto sem require_session (protegido em produção por IP/VPN ou Basic Auth no proxy).
+    """
+    admin_path = pathlib.Path(__file__).parent / "admin.html"
+    if not admin_path.exists():
+        return "admin.html não encontrado", 404
+    html = admin_path.read_text(encoding="utf-8")
+    resp = make_response(html, 200)
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    _set_no_cache_headers(resp)
+    return resp
+
+
 @app.route("/demo/reset", methods=["POST"])
 def demo_reset():
     """Recria os dados de demo do zero (útil para apresentações)."""

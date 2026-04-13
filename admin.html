@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NetGuard IDS — Admin</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--green:#3fb950;--yellow:#d29922;
+  --orange:#f0883e;--red:#f85149;--blue:#58a6ff;--accent:#1f6feb;
+  --purple:#a371f7;--mono:'Cascadia Code','Fira Code',monospace;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:13px}
+a{color:var(--blue);text-decoration:none}
+
+/* ── Layout ── */
+#shell{display:flex;height:100vh;overflow:hidden}
+#sidebar{width:200px;min-width:200px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:0}
+#main{flex:1;overflow-y:auto;padding:24px}
+
+/* ── Sidebar ── */
+.sb-logo{padding:18px 16px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.sb-logo .dot{width:8px;height:8px;border-radius:50%;background:var(--blue)}
+.sb-logo span{font-weight:700;font-size:.95rem;letter-spacing:.02em}
+.sb-logo small{font-size:.65rem;color:var(--muted);display:block;margin-top:1px}
+.sb-section{padding:8px 10px 2px;font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.sb-item{display:flex;align-items:center;gap:8px;padding:8px 14px;cursor:pointer;border-radius:6px;margin:1px 6px;transition:background .15s;color:var(--text);border:none;background:none;width:calc(100% - 12px);text-align:left;font-size:.82rem}
+.sb-item:hover{background:var(--surface2)}
+.sb-item.active{background:rgba(88,166,255,.12);color:var(--blue)}
+.sb-item .icon{width:16px;text-align:center;font-size:.9rem}
+.sb-badge{margin-left:auto;background:var(--accent);color:#fff;border-radius:10px;padding:1px 7px;font-size:.65rem;font-weight:700}
+.sb-footer{margin-top:auto;padding:12px 14px;border-top:1px solid var(--border);font-size:.72rem;color:var(--muted)}
+.sb-footer a{color:var(--blue);font-size:.72rem}
+
+/* ── Cards / stats ── */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:24px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+.stat-card .val{font-size:2rem;font-weight:800;line-height:1}
+.stat-card .lbl{font-size:.72rem;color:var(--muted);margin-top:4px}
+
+/* ── Page sections ── */
+.page{display:none}.page.active{display:block}
+.page-title{font-size:1.2rem;font-weight:700;margin-bottom:4px}
+.page-sub{color:var(--muted);font-size:.82rem;margin-bottom:20px}
+
+/* ── Table ── */
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{text-align:left;padding:8px 10px;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)}
+.tbl td{padding:9px 10px;border-bottom:1px solid rgba(48,54,61,.5);font-size:.8rem;vertical-align:middle}
+.tbl tr:hover td{background:rgba(255,255,255,.02)}
+
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-size:.78rem;font-family:inherit;transition:all .15s}
+.btn:hover{border-color:var(--blue);color:var(--blue)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:#388bfd;border-color:#388bfd;color:#fff}
+.btn.danger{color:var(--red);border-color:rgba(248,81,73,.3)}
+.btn.danger:hover{background:rgba(248,81,73,.1);border-color:var(--red)}
+.btn.success{color:var(--green);border-color:rgba(63,185,80,.3)}
+.btn.success:hover{background:rgba(63,185,80,.1)}
+.btn.sm{padding:3px 10px;font-size:.72rem}
+
+/* ── Form ── */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.form-field label{display:block;font-size:.72rem;color:var(--muted);margin-bottom:4px}
+.form-field input,.form-field select{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 10px;font-size:.82rem;font-family:inherit;outline:none}
+.form-field input:focus,.form-field select:focus{border-color:var(--blue)}
+.form-span-2{grid-column:1/-1}
+
+/* ── Badge ── */
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.68rem;font-weight:600}
+.badge.active{background:rgba(63,185,80,.15);color:var(--green)}
+.badge.expired{background:rgba(240,136,62,.15);color:var(--orange)}
+.badge.revoked{background:rgba(248,81,73,.15);color:var(--red)}
+
+/* ── Link box ── */
+.link-box{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-family:var(--mono);font-size:.72rem;color:var(--blue);word-break:break-all;cursor:pointer;transition:border-color .15s}
+.link-box:hover{border-color:var(--blue)}
+
+/* ── Alert ── */
+.alert{border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:.82rem}
+.alert.info{background:rgba(88,166,255,.08);border:1px solid rgba(88,166,255,.2);color:var(--blue)}
+.alert.success{background:rgba(63,185,80,.08);border:1px solid rgba(63,185,80,.2);color:var(--green)}
+.alert.error{background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.2);color:var(--red)}
+
+/* ── Panel ── */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px}
+.panel-title{font-weight:600;font-size:.9rem;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+
+/* ── Toast ── */
+#toast{position:fixed;bottom:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:6px}
+.toast-item{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:.8rem;animation:fadeIn .2s}
+.toast-item.ok{border-color:rgba(63,185,80,.4);color:var(--green)}
+.toast-item.err{border-color:rgba(248,81,73,.4);color:var(--red)}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Misc ── */
+.flex{display:flex;align-items:center;gap:8px}
+.flex-between{display:flex;align-items:center;justify-content:space-between}
+.mt{margin-top:12px}
+.empty-state{text-align:center;padding:48px 20px;color:var(--muted);font-size:.85rem}
+.countdown{font-family:var(--mono);font-weight:700}
+hr{border:none;border-top:1px solid var(--border);margin:20px 0}
+</style>
+</head>
+<body>
+<div id="shell">
+
+<!-- ── Sidebar ── -->
+<div id="sidebar">
+  <div class="sb-logo">
+    <div class="dot"></div>
+    <div>
+      <span>NetGuard</span>
+      <small>Admin Panel</small>
+    </div>
+  </div>
+
+  <div class="sb-section">Clientes</div>
+  <button class="sb-item active" onclick="nav('trials',this)"><span class="icon">🔗</span>Trials<span class="sb-badge" id="sb-trials-badge">0</span></button>
+  <button class="sb-item" onclick="nav('webhooks',this)"><span class="icon">🔔</span>Webhooks</button>
+
+  <div class="sb-section">Sistema</div>
+  <button class="sb-item" onclick="nav('overview',this)"><span class="icon">📊</span>Overview</button>
+  <button class="sb-item" onclick="nav('demo',this)"><span class="icon">⚡</span>Demo</button>
+
+  <div class="sb-footer">
+    <div style="margin-bottom:6px">NetGuard IDS v3.0</div>
+    <a href="/">← Voltar ao Dashboard</a>
+  </div>
+</div>
+
+<!-- ── Main ── -->
+<div id="main">
+
+  <!-- ═══════════════ TRIALS ═══════════════ -->
+  <div class="page active" id="page-trials">
+    <div class="flex-between" style="margin-bottom:6px">
+      <div>
+        <div class="page-title">🔗 Trials de Clientes</div>
+        <div class="page-sub">Gere links com tempo limitado para prospects avaliarem o produto.</div>
+      </div>
+      <button class="btn primary" onclick="toggleForm('trial-form')">+ Novo Trial</button>
+    </div>
+
+    <div class="stat-grid" id="trial-stats"></div>
+
+    <!-- Formulário novo trial -->
+    <div class="panel" id="trial-form" style="display:none">
+      <div class="panel-title">Gerar link de trial</div>
+      <div class="form-grid">
+        <div class="form-field"><label>Nome do contato *</label><input id="f-name" placeholder="João Silva"></div>
+        <div class="form-field"><label>Empresa *</label><input id="f-company" placeholder="ACME Ltda"></div>
+        <div class="form-field"><label>E-mail *</label><input id="f-email" type="email" placeholder="joao@acme.com"></div>
+        <div class="form-field"><label>Duração</label>
+          <select id="f-hours">
+            <option value="24">24 horas</option>
+            <option value="48">48 horas</option>
+            <option value="72" selected>72 horas — 3 dias</option>
+            <option value="168">7 dias</option>
+            <option value="336">14 dias</option>
+          </select>
+        </div>
+        <div class="form-field form-span-2"><label>Observações</label><input id="f-notes" placeholder="Prospect via LinkedIn, interesse em compliance..."></div>
+      </div>
+      <div class="flex">
+        <button class="btn primary" onclick="createTrial()">Gerar link</button>
+        <button class="btn" onclick="toggleForm('trial-form')">Cancelar</button>
+      </div>
+      <div id="trial-result" style="margin-top:12px"></div>
+    </div>
+
+    <!-- Tabela de trials -->
+    <div class="panel">
+      <div class="flex-between" style="margin-bottom:12px">
+        <div class="panel-title" style="margin:0;border:none;padding:0">Todos os trials</div>
+        <button class="btn sm" onclick="loadTrials()">↻ Atualizar</button>
+      </div>
+      <div id="trial-table"><div class="empty-state">Carregando…</div></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ WEBHOOKS ═══════════════ -->
+  <div class="page" id="page-webhooks">
+    <div class="flex-between" style="margin-bottom:6px">
+      <div>
+        <div class="page-title">🔔 Webhooks</div>
+        <div class="page-sub">Alertas automáticos para Slack, Teams, Discord, Telegram e WhatsApp.</div>
+      </div>
+      <button class="btn primary" onclick="toggleForm('wh-form')">+ Novo Webhook</button>
+    </div>
+
+    <div class="panel" id="wh-form" style="display:none">
+      <div class="panel-title">Novo Webhook</div>
+      <div class="form-grid">
+        <div class="form-field"><label>Nome</label><input id="wh-name" placeholder="Slack #alertas"></div>
+        <div class="form-field"><label>Tipo</label>
+          <select id="wh-type">
+            <option value="slack">Slack</option>
+            <option value="teams">Microsoft Teams</option>
+            <option value="discord">Discord</option>
+            <option value="telegram">Telegram</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="generic">HTTP Genérico</option>
+          </select>
+        </div>
+        <div class="form-field form-span-2"><label>URL do Webhook</label><input id="wh-url" placeholder="https://hooks.slack.com/services/..."></div>
+        <div class="form-field"><label>Severidade mínima</label>
+          <select id="wh-sev">
+            <option value="critical">CRITICAL</option>
+            <option value="high" selected>HIGH</option>
+            <option value="medium">MEDIUM</option>
+            <option value="low">LOW</option>
+          </select>
+        </div>
+        <div class="form-field"><label>Secret / token (opcional)</label><input id="wh-secret" placeholder="token de validação"></div>
+      </div>
+      <div class="flex">
+        <button class="btn primary" onclick="createWebhook()">Salvar</button>
+        <button class="btn" onclick="toggleForm('wh-form')">Cancelar</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="flex-between" style="margin-bottom:12px">
+        <div class="panel-title" style="margin:0;border:none;padding:0">Webhooks configurados</div>
+        <button class="btn sm" onclick="loadWebhooks()">↻ Atualizar</button>
+      </div>
+      <div id="wh-table"><div class="empty-state">Carregando…</div></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ OVERVIEW ═══════════════ -->
+  <div class="page" id="page-overview">
+    <div class="page-title">📊 Overview do Sistema</div>
+    <div class="page-sub">Status em tempo real de todos os subsistemas.</div>
+    <div id="overview-content"><div class="empty-state">Carregando…</div></div>
+  </div>
+
+  <!-- ═══════════════ DEMO ═══════════════ -->
+  <div class="page" id="page-demo">
+    <div class="page-title">⚡ Demo Público</div>
+    <div class="page-sub">Controle do ambiente de demonstração compartilhado.</div>
+
+    <div class="panel">
+      <div class="panel-title">Acesso demo</div>
+      <p style="color:var(--muted);font-size:.83rem;margin-bottom:12px">O link de demo público dá acesso ao dashboard com dados fictícios por 4 horas, sem necessidade de cadastro.</p>
+      <div class="link-box" onclick="copyText(window.location.origin+'/demo')" title="Clique para copiar">
+        <span id="demo-link"></span>
+      </div>
+      <div class="flex mt">
+        <button class="btn" onclick="window.open('/demo','_blank')">↗ Abrir demo</button>
+        <button class="btn danger" onclick="resetDemo()">↻ Resetar dados do demo</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Diferença: Demo vs Trial</div>
+      <table class="tbl">
+        <thead><tr><th>Característica</th><th>Demo Público</th><th>Trial Personalizado</th></tr></thead>
+        <tbody>
+          <tr><td>URL</td><td>/demo</td><td>/trial/ng_trial_xxx</td></tr>
+          <tr><td>Identificação do cliente</td><td>Nenhuma</td><td>Nome, empresa, email</td></tr>
+          <tr><td>Tempo</td><td>4h (renova a cada acesso)</td><td>Configurável (24h–14 dias)</td></tr>
+          <tr><td>Dados</td><td>Compartilhados</td><td>Isolados por tenant</td></tr>
+          <tr><td>Acesso analytics</td><td>Não</td><td>Sim (contagem, primeiro acesso)</td></tr>
+          <tr><td>Revogação manual</td><td>Não</td><td>Sim</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /main -->
+</div><!-- /shell -->
+
+<div id="toast"></div>
+
+<script>
+const BASE = '';
+
+// ── Navegação ─────────────────────────────────────────────────────
+function nav(page, el){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.sb-item').forEach(b=>b.classList.remove('active'));
+  document.getElementById('page-'+page)?.classList.add('active');
+  el?.classList.add('active');
+  if(page==='trials')   loadTrials();
+  if(page==='webhooks') loadWebhooks();
+  if(page==='overview') loadOverview();
+  if(page==='demo')     initDemo();
+}
+
+function toggleForm(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.style.display = el.style.display==='none'?'block':'none';
+}
+
+// ── API helper ────────────────────────────────────────────────────
+async function api(path, opts={}){
+  try{
+    const r = await fetch(BASE+'/api'+path, opts);
+    return await r.json();
+  }catch{ return null; }
+}
+
+// ── Toast ─────────────────────────────────────────────────────────
+function toast(msg, type='ok'){
+  const box = document.getElementById('toast');
+  const el  = document.createElement('div');
+  el.className = 'toast-item '+(type==='err'?'err':'ok');
+  el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(()=>el.remove(), 3500);
+}
+
+function copyText(txt){
+  navigator.clipboard.writeText(txt)
+    .then(()=>toast('Link copiado!'))
+    .catch(()=>{ prompt('Copie o link:', txt); });
+}
+
+// ══════════════════════════════════════ TRIALS ═══════════════════
+
+async function loadTrials(){
+  const r = await api('/admin/trials');
+  if(!r){ document.getElementById('trial-table').innerHTML='<div class="empty-state">Erro ao carregar. Verifique se o servidor está rodando.</div>'; return; }
+
+  // Stats
+  const s = r.stats || {};
+  document.getElementById('sb-trials-badge').textContent = s.active || 0;
+  document.getElementById('trial-stats').innerHTML = [
+    ['Total gerados', s.total||0, 'var(--blue)'],
+    ['Ativos agora',  s.active||0,'var(--green)'],
+    ['Expirados',     s.expired||0,'var(--orange)'],
+    ['Revogados',     s.revoked||0,'var(--red)'],
+  ].map(([l,v,c])=>`<div class="stat-card">
+    <div class="val" style="color:${c}">${v}</div>
+    <div class="lbl">${l}</div>
+  </div>`).join('');
+
+  const trials = r.trials || [];
+  if(!trials.length){
+    document.getElementById('trial-table').innerHTML='<div class="empty-state">Nenhum trial gerado ainda.</div>';
+    return;
+  }
+
+  document.getElementById('trial-table').innerHTML = `
+  <table class="tbl">
+    <thead><tr>
+      <th>Cliente</th><th>Status</th><th>Restante</th><th>Acessos</th><th>Criado</th><th>Expira</th><th>Ações</th>
+    </tr></thead>
+    <tbody>${trials.map(t=>`
+    <tr>
+      <td>
+        <div style="font-weight:600">${t.company||t.name||'—'}</div>
+        <div style="color:var(--muted);font-size:.72rem">${t.email}</div>
+      </td>
+      <td><span class="badge ${t.status}">${{active:'● Ativo',expired:'○ Expirado',revoked:'✕ Revogado'}[t.status]||t.status}</span></td>
+      <td class="countdown" style="color:${t.status==='active'&&t.remaining_h<3?'var(--red)':'var(--muted)'}">${t.status==='active'?t.remaining_h+'h':'—'}</td>
+      <td style="color:var(--muted)">${t.access_count}</td>
+      <td style="color:var(--muted);font-size:.72rem">${(t.created_at||'').replace('T',' ').replace('Z','')}</td>
+      <td style="color:var(--muted);font-size:.72rem">${(t.expires_at||'').replace('T',' ').replace('Z','')}</td>
+      <td>
+        <div class="flex">
+          <button class="btn sm" onclick="copyText('${t.trial_url}')" title="Copiar link">🔗</button>
+          <button class="btn sm" onclick="window.open('${t.trial_url}','_blank')" title="Abrir">↗</button>
+          ${t.status!=='revoked'?`<button class="btn sm success" onclick="extendTrial('${t.token}')" title="+24h">+24h</button>`:''}
+          ${t.status==='active'?`<button class="btn sm danger" onclick="revokeTrial('${t.token}')">Revogar</button>`:''}
+        </div>
+        <div class="link-box" style="margin-top:4px;font-size:.65rem" onclick="copyText('${t.trial_url}')" title="Clique para copiar">${t.trial_url}</div>
+      </td>
+    </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+async function createTrial(){
+  const name    = document.getElementById('f-name')?.value.trim();
+  const company = document.getElementById('f-company')?.value.trim();
+  const email   = document.getElementById('f-email')?.value.trim();
+  const hours   = document.getElementById('f-hours')?.value;
+  const notes   = document.getElementById('f-notes')?.value.trim();
+  if(!name||!email){ toast('Nome e e-mail são obrigatórios','err'); return; }
+
+  const r = await api('/admin/trials',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name,company,email,duration_h:parseInt(hours),notes})
+  });
+  if(!r?.ok){ toast(r?.error||'Erro ao criar trial','err'); return; }
+
+  const url = r.trial.trial_url;
+  document.getElementById('trial-result').innerHTML = `
+  <div class="alert success">
+    <div style="font-weight:600;margin-bottom:8px">✔ Trial criado para ${company||name}!</div>
+    <div style="margin-bottom:8px;font-size:.78rem">Envie este link para o cliente:</div>
+    <div class="link-box" onclick="copyText('${url}')">${url}</div>
+    <div class="flex mt">
+      <button class="btn sm primary" onclick="copyText('${url}')">📋 Copiar link</button>
+      <button class="btn sm" onclick="window.open('${url}','_blank')">↗ Abrir</button>
+    </div>
+  </div>`;
+
+  ['f-name','f-company','f-email','f-notes'].forEach(id=>{
+    const el = document.getElementById(id); if(el) el.value='';
+  });
+  loadTrials();
+}
+
+async function revokeTrial(token){
+  if(!confirm('Revogar este trial? O cliente perderá acesso imediatamente.')) return;
+  const r = await api(`/admin/trials/${token}/revoke`,{method:'POST'});
+  if(r?.ok) toast('Trial revogado');
+  else toast('Erro ao revogar','err');
+  loadTrials();
+}
+
+async function extendTrial(token){
+  const r = await api(`/admin/trials/${token}/extend`,{
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({hours:24})
+  });
+  if(r?.ok) toast('+24 horas adicionadas');
+  else toast('Erro ao estender','err');
+  loadTrials();
+}
+
+// ══════════════════════════════════════ WEBHOOKS ═════════════════
+
+async function loadWebhooks(){
+  const r = await api('/webhooks');
+  const whs = r?.webhooks || [];
+  const el = document.getElementById('wh-table');
+  if(!whs.length){
+    el.innerHTML='<div class="empty-state">Nenhum webhook configurado.</div>';
+    return;
+  }
+  const typeIcon = {slack:'💬',teams:'💼',discord:'🎮',telegram:'✈️',whatsapp:'📱',generic:'🌐'};
+  el.innerHTML = `<table class="tbl">
+    <thead><tr><th>Nome</th><th>Tipo</th><th>Severidade min.</th><th>Hits</th><th>Status</th><th>Ações</th></tr></thead>
+    <tbody>${whs.map(w=>`<tr>
+      <td><span style="font-weight:600">${typeIcon[w.type]||'🌐'} ${w.name}</span><div style="color:var(--muted);font-size:.7rem;font-family:monospace;margin-top:2px">${w.url.substring(0,60)}${w.url.length>60?'…':''}</div></td>
+      <td style="text-transform:capitalize">${w.type}</td>
+      <td><span class="badge ${w.min_severity==='critical'?'revoked':w.min_severity==='high'?'expired':'active'}">${(w.min_severity||'').toUpperCase()}</span></td>
+      <td style="color:var(--muted)">${w.hit_count||0} <span style="color:var(--red)">/ ${w.fail_count||0} falhas</span></td>
+      <td><span class="badge ${w.enabled?'active':'expired'}">${w.enabled?'● Ativo':'○ Pausado'}</span></td>
+      <td><div class="flex">
+        <button class="btn sm success" onclick="testWebhook(${w.id})" title="Testar">⚡ Teste</button>
+        <button class="btn sm" onclick="toggleWebhook(${w.id})">${w.enabled?'Pausar':'Ativar'}</button>
+        <button class="btn sm danger" onclick="deleteWebhook(${w.id})">✕</button>
+      </div></td>
+    </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+async function createWebhook(){
+  const name   = document.getElementById('wh-name')?.value.trim();
+  const url    = document.getElementById('wh-url')?.value.trim();
+  const type   = document.getElementById('wh-type')?.value;
+  const sev    = document.getElementById('wh-sev')?.value;
+  const secret = document.getElementById('wh-secret')?.value.trim();
+  if(!name||!url){ toast('Nome e URL obrigatórios','err'); return; }
+  const r = await api('/webhooks',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name,url,type,min_severity:sev,secret})});
+  if(r?.ok){ toast('Webhook criado'); toggleForm('wh-form'); loadWebhooks(); }
+  else toast(r?.error||'Erro ao criar','err');
+}
+
+async function testWebhook(id){
+  toast('Enviando evento de teste…');
+  const r = await api(`/webhooks/${id}/test`,{method:'POST'});
+  if(r?.ok) toast(`Enviado! HTTP ${r.status_code||'ok'}`);
+  else toast(`Falhou: ${r?.error||'erro'}`, 'err');
+}
+
+async function toggleWebhook(id){
+  await api(`/webhooks/${id}/toggle`,{method:'POST'});
+  loadWebhooks();
+}
+
+async function deleteWebhook(id){
+  if(!confirm('Remover este webhook?')) return;
+  await api(`/webhooks/${id}`,{method:'DELETE'});
+  toast('Webhook removido'); loadWebhooks();
+}
+
+// ══════════════════════════════════════ OVERVIEW ═════════════════
+
+async function loadOverview(){
+  const r = await api('/health');
+  if(!r){ document.getElementById('overview-content').innerHTML='<div class="empty-state">Erro ao carregar status.</div>'; return; }
+  const subs = r.subsystems || {};
+  const statusColor = r.status==='healthy'?'var(--green)':'var(--orange)';
+  document.getElementById('overview-content').innerHTML = `
+  <div class="stat-grid" style="margin-bottom:16px">
+    <div class="stat-card"><div class="val" style="color:${statusColor}">${r.status==='healthy'?'✔':'⚠'}</div><div class="lbl">Status Geral</div></div>
+    <div class="stat-card"><div class="val" style="color:var(--blue)">${r.uptime_cycles||0}</div><div class="lbl">Ciclos Monitor</div></div>
+    <div class="stat-card"><div class="val" style="color:var(--muted)">${r.version||'—'}</div><div class="lbl">Versão</div></div>
+    <div class="stat-card"><div class="val" style="color:var(--muted)">${r.connections_active||0}</div><div class="lbl">Conexões Ativas</div></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Subsistemas</div>
+    <table class="tbl">${Object.entries(subs).map(([k,v])=>`
+    <tr><td style="color:var(--muted);width:160px;text-transform:capitalize">${k.replace(/_/g,' ')}</td>
+        <td style="color:${v.startsWith('ok')||v.startsWith('ativo')?'var(--green)':'var(--muted)'}">${v}</td>
+    </tr>`).join('')}
+    </table>
+  </div>`;
+}
+
+// ══════════════════════════════════════ DEMO ═════════════════════
+
+function initDemo(){
+  document.getElementById('demo-link').textContent = window.location.origin+'/demo';
+}
+
+async function resetDemo(){
+  if(!confirm('Resetar todos os dados do demo público? Clientes ativos perderão os dados atuais.')) return;
+  const r = await api('/demo/reset',{method:'POST'});
+  if(r?.ok) toast(`Demo resetado — ${r.events} eventos criados`);
+  else toast('Erro ao resetar','err');
+}
+
+// ══════════════════════════════════════ INIT ═════════════════════
+
+loadTrials();
+</script>
+</body>
+</html>
