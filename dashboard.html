@@ -164,7 +164,7 @@ html,body{
 .pscroll::-webkit-scrollbar-thumb{background:var(--b2);border-radius:1px}
 
 /* ── OVERVIEW: 3-COLUMN LAYOUT ──────────────────────────────────── */
-#p-overview{flex-direction:row}
+#p-overview{flex-direction:row;overflow-y:auto}
 #ov-left{width:260px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid #102840;background:#060e1c}
 #ov-center{flex:1;display:flex;flex-direction:column;border-right:1px solid var(--b1);min-width:0}
 #ov-right{width:340px;flex-shrink:0;display:flex;flex-direction:column;border-left:1px solid #102840;background:#060e1c}
@@ -2018,7 +2018,7 @@ th.sortable:hover{color:var(--cyn)}
     <div class="tab" onclick="goPage('compliance',this)" title="Conformidade">📋 Compliance</div>
     <div class="tab" onclick="goPage('custom-rules',this)" title="Regras Customizadas">⚙ My Rules</div>
     <div class="tab" onclick="goPage('webhooks',this)" title="Webhook Alerts">🔔 Webhooks</div>
-    <div class="tab" onclick="goPage('trials',this)" title="Trials de Clientes">🔗 Trials</div>
+    <div class="tab" id="tab-trials-btn" style="display:none" onclick="goPage('trials',this)" title="Trials de Clientes">🔗 Trials</div>
     <div class="tab" onclick="goPage('mitre',this)" title="MITRE ATT&CK">🗺 ATT&CK</div>
     <div class="tab" onclick="goPage('threat-intel',this)" title="Threat Intelligence Feeds">🌐 Threat Intel</div>
     <div class="tab" onclick="goPage('playbooks',this)" title="Incident Response Playbooks">📋 Playbooks</div>
@@ -3492,6 +3492,28 @@ const GROUP_DEFAULT_PAGE={
 (function tick(){document.getElementById('utc').textContent=new Date().toISOString().replace('T',' ').slice(0,19)+' UTC';setTimeout(tick,1000);})();
 
 // ── Nav ───────────────────────────────────────────────────────────
+const UI_ACCESS_RULES = {
+  trials: ctx => !!ctx?.is_admin,
+  'new-trial': ctx => !!ctx?.is_admin,
+  admin: ctx => !!ctx?.can_see_admin_tab,
+};
+function currentUserCtx(){
+  return window._ngMe || {};
+}
+function canAccessUi(key){
+  const rule = UI_ACCESS_RULES[key];
+  return rule ? !!rule(currentUserCtx()) : true;
+}
+function syncSensitiveUi(){
+  const trialsBtn = document.getElementById('tab-trials-btn');
+  if(trialsBtn) trialsBtn.style.display = canAccessUi('trials') ? '' : 'none';
+
+  const tabBtn = document.getElementById('tab-admin-btn');
+  if(tabBtn) tabBtn.style.display = canAccessUi('admin') ? '' : 'none';
+
+  const hdrBtn = document.getElementById('hdr-admin-btn');
+  if(hdrBtn) hdrBtn.style.display = canAccessUi('admin') ? 'inline-block' : 'none';
+}
 function scrollTabs(delta){
   const t=document.getElementById('main-tabs');
   if(!t)return;
@@ -3522,7 +3544,8 @@ function syncTabGroup(group){
   });
   document.querySelectorAll('#main-tabs .tab').forEach(tab=>{
     const tabGroup=tab.dataset.group || 'ops';
-    tab.hidden = tabGroup !== group;
+    const pageKey = tab.dataset.page || '';
+    tab.hidden = tabGroup !== group || !canAccessUi(pageKey);
   });
   const tabs=document.getElementById('main-tabs');
   if(tabs){
@@ -3671,18 +3694,8 @@ document.addEventListener('DOMContentLoaded',function(){
         planEl.style.display = 'inline-block';
       }
 
-      if (me.can_see_admin_tab) {
-        // Mostra a aba Admin na barra de tabs
-        const tabBtn = document.getElementById('tab-admin-btn');
-        if (tabBtn) tabBtn.style.display = '';
-
-        // Mostra botão Admin no header (mais visível)
-        const hdrBtn = document.getElementById('hdr-admin-btn');
-        if (hdrBtn) hdrBtn.style.display = 'inline-block';
-      }
-
-      // Armazena globalmente para uso por outros módulos
       window._ngMe = me;
+      syncSensitiveUi();
     } catch(e) {
       // silencioso — usuário não autenticado ou endpoint indisponível
     }
@@ -3690,6 +3703,10 @@ document.addEventListener('DOMContentLoaded',function(){
 });
 
 function goPage(name,el){
+  if(!canAccessUi(name)){
+    toast(name==='trials' ? 'Aba restrita a administradores' : 'Acesso restrito','err');
+    return;
+  }
   const targetGroup=PAGE_GROUPS[name];
   if(targetGroup && targetGroup!==activeTabGroup){
     syncTabGroup(targetGroup);
@@ -3713,7 +3730,7 @@ function goPage(name,el){
   if(pg)pg.classList.add('on');if(el)el.classList.add('on');
   if(name==='stats')       loadStats();
   if(name==='connections') loadConn();
-  if(name==='system')      loadSys();
+  if(name==='system')      loadSys(true);
   if(name==='overview')    loadFeed();
   if(name==='owasp')       {loadOwaspStats();loadOwaspPayloads();}
   if(name==='killchain')   loadKillChain();
@@ -3729,23 +3746,23 @@ function goPage(name,el){
   if(name==='dns')         loadDNS();
   if(name==='honeypot')    loadHoneypot();
   if(name==='ioc')         loadIOC();
-  if(name==='ml-anomaly')  loadMLAnomaly();
+  if(name==='ml-anomaly')  loadMLAnomaly(true);
   if(name==='compliance')  loadCompliance();
   if(name==='custom-rules') loadCustomRules();
   if(name==='webhooks')      loadWebhooks();
   if(name==='trials')        loadTrials();
   if(name==='mitre')         loadMitre();
-  if(name==='threat-intel')  loadThreatIntel();
-  if(name==='playbooks')     loadPlaybooks();
-  if(name==='forensics')     loadForensics();
+  if(name==='threat-intel')  loadThreatIntel(true);
+  if(name==='playbooks')     loadPlaybooks(true);
+  if(name==='forensics')     loadForensics(true);
   if(name==='geomap'){
     loadGeo();
     if(liveInterval)clearInterval(liveInterval);
     liveInterval=setInterval(()=>{ if(!document.hidden) loadGeo(); },15000);
   } else if(name==='live'){
-    loadLive();
+    loadLive(true);
     if(liveInterval)clearInterval(liveInterval);
-    liveInterval=setInterval(()=>{ if(!document.hidden){ if(_logStreamState!=='open') loadLiveLog(); loadGraph(); } },5000);
+    liveInterval=setInterval(()=>{ if(!document.hidden) loadLive(); },5000);
   } else if(name!=='geomap'){
     if(liveInterval){clearInterval(liveInterval);liveInterval=null;}
   }
@@ -3816,6 +3833,39 @@ async function api(path,opts={}){
   }
 }
 
+const _tabLoadState = new Map();
+function _tabState(name){
+  let state=_tabLoadState.get(name);
+  if(!state){
+    state={lastAt:0,lastResult:null,inflight:null};
+    _tabLoadState.set(name,state);
+  }
+  return state;
+}
+async function _guardedTabLoad(name, loader, opts={}){
+  const state=_tabState(name);
+  const cooldownMs=opts.cooldownMs||0;
+  const force=!!opts.force;
+  if(state.inflight){
+    return state.inflight;
+  }
+  if(!force && cooldownMs && state.lastAt && (Date.now()-state.lastAt)<cooldownMs){
+    return state.lastResult ?? null;
+  }
+  const run=(async()=>{
+    try{
+      const result=await loader();
+      state.lastAt=Date.now();
+      state.lastResult=result ?? null;
+      return result;
+    }finally{
+      state.inflight=null;
+    }
+  })();
+  state.inflight=run;
+  return run;
+}
+
 // ── Intel ─────────────────────────────────────────────────────────
 function intel(ip){
   if(!ip||PRIV.some(p=>ip.startsWith(p)))return{cat:'local',score:0,lbl:'Rede privada'};
@@ -3829,20 +3879,30 @@ function ibadge(ip){
   return`<span class="ibadge ${m[i.cat]||'ok'}">${i.cat.toUpperCase()}</span>`;
 }
 
+let _lastOverviewStatsPoll = 0;
+let _lastOverviewSystemPoll = 0;
+
 // ── KPIs + health polling ──────────────────────────────────────────
 async function pollHealth(){
-  const wantsStats = pageOn('overview') || pageOn('stats');
-  const wantsSystem = pageOn('overview') || pageOn('system');
+  const now = Date.now();
+  const wantsStats =
+    pageOn('stats') ||
+    (pageOn('overview') && (!_lastOverviewStatsPoll || (now - _lastOverviewStatsPoll) >= 15000));
+  const wantsSystem =
+    pageOn('system') ||
+    (pageOn('overview') && (!_lastOverviewSystemPoll || (now - _lastOverviewSystemPoll) >= 30000));
   const [h,stats,sys]=await Promise.all([
     api('/health'),
     wantsStats ? api('/statistics') : Promise.resolve(null),
     wantsSystem ? api('/system') : Promise.resolve(null),
   ]);
   if(stats){
-    setKpi('k-cr',stats.by_severity?.critical||0,'cr');
-    setKpi('k-hi',stats.by_severity?.high||0,'hi');
-    setKpi('k-me',stats.by_severity?.medium||0,'me');
-    setKpi('k-lo',stats.by_severity?.low||0,'lo');
+    if(pageOn('overview')) _lastOverviewStatsPoll = now;
+    const bysev=stats.by_severity||{};
+    setKpi('k-cr',(bysev.critical||bysev.CRITICAL||0),'cr');
+    setKpi('k-hi',(bysev.high||bysev.HIGH||0),'hi');
+    setKpi('k-me',(bysev.medium||bysev.MEDIUM||0),'me');
+    setKpi('k-lo',(bysev.low||bysev.LOW||0),'lo');
     setKpi('k-tot',stats.total||0,'to');
   }
   if(h){
@@ -3851,6 +3911,7 @@ async function pollHealth(){
     if(h.uptime_cycles !== undefined)$('mon-cycle','#'+h.uptime_cycles);
   }
   if(sys){
+    if(pageOn('overview')) _lastOverviewSystemPoll = now;
     const cpu=sys.cpu_percent||0;
     setKpi('k-cpu',cpu+'%','sy');
     bar('m-cpu','mv-cpu',cpu,cpu+'%');
@@ -3860,7 +3921,7 @@ async function pollHealth(){
     document.getElementById('mv-net').textContent='↑'+net+' MB';
   }
 }
-function setKpi(id,val){
+function setKpi(id,val,cls){
   const el=document.getElementById(id);
   if(!el)return;
   el.textContent=val;
@@ -3881,10 +3942,11 @@ async function loadFeed(){
   if(sta)q+='&status='+sta;
   const [data,stats]=await Promise.all([api(q),api('/statistics')]);
   if(stats){
-    setKpi('k-cr',stats.by_severity?.critical||0,'cr');
-    setKpi('k-hi',stats.by_severity?.high||0,'hi');
-    setKpi('k-me',stats.by_severity?.medium||0,'me');
-    setKpi('k-lo',stats.by_severity?.low||0,'lo');
+    const bysev=stats.by_severity||{};
+    setKpi('k-cr',(bysev.critical||bysev.CRITICAL||0),'cr');
+    setKpi('k-hi',(bysev.high||bysev.HIGH||0),'hi');
+    setKpi('k-me',(bysev.medium||bysev.MEDIUM||0),'me');
+    setKpi('k-lo',(bysev.low||bysev.LOW||0),'lo');
     setKpi('k-tot',stats.total||0,'to');
   }
   if(!data)return;
@@ -4257,11 +4319,19 @@ function renderConn(){
 function togP(p){if(expProcs.has(p))expProcs.delete(p);else expProcs.add(p);renderConn();}
 
 // ── System ────────────────────────────────────────────────────────
-async function loadSys(){
-  const [sys,procs,ports]=await Promise.all([api('/system'),api('/processes'),api('/ports')]);
-  if(sys)renderSysMetrics(sys);
-  if(procs)renderProcs(procs);
-  if(ports)renderPorts(ports);
+async function loadSys(force=false){
+  return _guardedTabLoad('system', async()=>{
+    const sysPromise=api('/system');
+    const procsPromise=api('/processes');
+    const portsPromise=api('/ports');
+
+    const sys=await sysPromise;
+    if(sys)renderSysMetrics(sys);
+
+    const [procs,ports]=await Promise.allSettled([procsPromise,portsPromise]);
+    if(procs.status==='fulfilled' && procs.value)renderProcs(procs.value);
+    if(ports.status==='fulfilled' && ports.value)renderPorts(ports.value);
+  }, {cooldownMs: 8000, force});
 }
 function renderSysMetrics(s){
   const b=(v,col)=>`<div class="gauge"><div class="gauge-f" style="width:${v}%;background:${col}"></div></div>`;
@@ -4690,8 +4760,10 @@ function startLiveStream(){
   }
 }
 
-async function loadLive(){
-  await Promise.all([loadGraph(),loadLiveLog()]);
+async function loadLive(force=false){
+  return _guardedTabLoad('live', async()=>{
+    await Promise.all([loadGraph(),loadLiveLog()]);
+  }, {cooldownMs: 3000, force});
 }
 
 // ── Kill Chain ──────────────────────────────────────────────────────
@@ -6308,19 +6380,20 @@ async function importIOC(input){
 // ═══════════════════════════════════════════════════════════════
 // ── ML ANOMALY ────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
-async function loadMLAnomaly(){
-  const [status,detect]=await Promise.all([api('/ml/anomaly/status'),api('/ml/anomaly/detect')]);
-  const pg=document.getElementById('p-ml-anomaly');
-  if(!pg)return;
-  const anomalies=detect?.anomalies||[];
-  const sevColor=s=>s==='CRITICAL'?'var(--red)':s==='HIGH'?'var(--ora)':'var(--yel)';
-  pg.innerHTML=`
+async function loadMLAnomaly(force=false){
+  return _guardedTabLoad('ml-anomaly', async()=>{
+    const [status,detect]=await Promise.all([api('/ml/anomaly/status'),api('/ml/anomaly/detect')]);
+    const pg=document.getElementById('p-ml-anomaly');
+    if(!pg)return;
+    const anomalies=detect?.anomalies||[];
+    const sevColor=s=>s==='CRITICAL'?'var(--red)':s==='HIGH'?'var(--ora)':'var(--yel)';
+    pg.innerHTML=`
   <div class="module-shell">
     <div class="module-toolbar">
       <span class="module-title">🤖 ML Anomaly Detection — Isolation Forest</span>
       <div class="module-actions">
         <button class="fbtn action-primary-soft" onclick="trainMLAnomaly()">⚡ Treinar Modelo</button>
-        <button class="fbtn" onclick="loadMLAnomaly()">↻ Atualizar</button>
+        <button class="fbtn" onclick="loadMLAnomaly(true)">↻ Atualizar</button>
       </div>
     </div>
     <div class="stats-grid-4">
@@ -6366,6 +6439,7 @@ async function loadMLAnomaly(){
         </div>`).join('')}
     </div>`}
   </div>`;
+  }, {cooldownMs: 12000, force});
 }
 async function trainMLAnomaly(){
   // Show inline progress bar
@@ -6416,7 +6490,7 @@ async function trainMLAnomaly(){
       bar.style.display='none';
       if(res.trained) toast(`✓ Modelo treinado com ${res.windows||'?'} janelas!`,'ok');
       else toast(res.message||'Dados insuficientes para treino','err');
-      loadMLAnomaly();
+      loadMLAnomaly(true);
     } else if(!prog.running && prog.status?.startsWith('Erro')){
       done=true;
       bar.style.display='none';
@@ -6921,6 +6995,15 @@ let trialFormOpen = false;
 async function loadTrials(){
   const pg = document.getElementById('p-trials');
   if(!pg) return;
+  if(!window._ngMe?.is_admin){
+    pg.innerHTML = `
+    <div class="page-shell">
+      <div class="panel-card module-empty tall">
+        <span>Acesso restrito a administradores do tenant.</span>
+      </div>
+    </div>`;
+    return;
+  }
   pg.innerHTML = `
   <div class="page-shell">
     <div class="page-header tight">
@@ -6936,7 +7019,11 @@ async function loadTrials(){
   </div>`;
 
   const r = await api('/admin/trials');
-  if(!r){ document.getElementById('trial-list').innerHTML='<div class="empty"><span>Erro ao carregar trials</span></div>'; return; }
+  if(!r || r.error){
+    document.getElementById('trial-stats-row').innerHTML='';
+    document.getElementById('trial-list').innerHTML=`<div class="panel-card module-empty tall"><span>${r?.error||'Erro ao carregar trials'}</span></div>`;
+    return;
+  }
 
   // Stats
   const s = r.stats || {};
@@ -7343,7 +7430,8 @@ async function showMitreTech(techId){
 let _tiSource = null;
 let _tiType   = null;
 
-async function loadThreatIntel(){
+async function loadThreatIntel(force=false){
+  return _guardedTabLoad('threat-intel', async()=>{
   const pg = document.getElementById('p-threat-intel');
   if(!pg) return;
 
@@ -7439,6 +7527,7 @@ async function loadThreatIntel(){
     }
   }
   tiLoadTable();
+  }, {cooldownMs: 10000, force});
 }
 
 async function tiLoadTable(){
@@ -7474,13 +7563,13 @@ async function tiLoadTable(){
 async function tiRefreshFeed(feed){
   toast(`Atualizando feed ${feed}…`, 'info');
   const r = await api(`/ti/feeds/${feed}/refresh`, {method:'POST'});
-  if(r?.ok) { toast(`Feed ${feed} em atualização!`, 'ok'); setTimeout(loadThreatIntel, 3000); }
+  if(r?.ok) { toast(`Feed ${feed} em atualização!`, 'ok'); setTimeout(()=>loadThreatIntel(true), 3000); }
 }
 
 async function tiRefreshAll(){
   toast('Atualizando todos os feeds TI…', 'info');
   const r = await api('/ti/feeds/refresh_all', {method:'POST'});
-  if(r?.ok) { toast('Feeds em atualização — aguarde ~30s', 'ok'); setTimeout(loadThreatIntel, 5000); }
+  if(r?.ok) { toast('Feeds em atualização — aguarde ~30s', 'ok'); setTimeout(()=>loadThreatIntel(true), 5000); }
 }
 
 async function tiLookup(value){
@@ -7514,7 +7603,8 @@ async function tiLookup(value){
 
 let _pbIncidents = [];
 
-async function loadPlaybooks(){
+async function loadPlaybooks(force=false){
+  return _guardedTabLoad('playbooks', async()=>{
   const pg = document.getElementById('p-playbooks');
   if(!pg) return;
 
@@ -7577,6 +7667,7 @@ async function loadPlaybooks(){
 
   // Incidents
   await pbLoadIncidents();
+  }, {cooldownMs: 10000, force});
 }
 
 async function pbLoadIncidents(){
@@ -7705,7 +7796,8 @@ async function pbSetStatus(incidentId, status, btn){
 
 // ══════════════════════════════════════ FORENSICS ════════════════
 
-async function loadForensics(){
+async function loadForensics(force=false){
+  return _guardedTabLoad('forensics', async()=>{
   const pg = document.getElementById('p-forensics');
   if(!pg) return;
 
@@ -7762,12 +7854,13 @@ async function loadForensics(){
   : `<div style="padding:24px;text-align:center;color:var(--txt3);font-size:.8rem">
       Nenhum snapshot. Snapshots são capturados automaticamente em alertas críticos,<br>ou clique em "Capturar Agora".
     </div>`;
+  }, {cooldownMs: 8000, force});
 }
 
 async function forensicsCapture(){
   toast('Iniciando captura forense…', 'info');
   const r = await api('/forensics/snapshots', {method:'POST', body:JSON.stringify({severity:'high'})});
-  if(r?.ok) { toast('Captura em andamento! Aguarde ~10s', 'ok'); setTimeout(loadForensics, 12000); }
+  if(r?.ok) { toast('Captura em andamento! Aguarde ~10s', 'ok'); setTimeout(()=>loadForensics(true), 12000); }
 }
 
 async function forensicsShowSnap(snapId){
@@ -8563,94 +8656,5 @@ const _CP_ACTIONS = [
   {icon:'↻',label:'Atualizar dashboard',hint:'action',action:()=>{closePalette();location.reload();}},
   {icon:'⬇',label:'Exportar IOCs (CSV)',hint:'action',action:()=>{closePalette();window.open('/api/ioc/export','_blank');}},
   {icon:'📑',label:'Gerar Relatório',hint:'action',action:()=>{closePalette();goPage('analyze',null);}},
-  {icon:'🔗',label:'Novo Trial',hint:'action',action:()=>{closePalette();goPage('trials',null);setTimeout(showNewTrial,400);}},
-];
-let _cpIdx=0, _cpFiltered=[];
-
-function openPalette(){
-  const el=document.getElementById('cmd-palette');
-  if(!el)return;
-  el.style.display='flex';
-  const inp=document.getElementById('cmdpal-input');
-  if(inp){inp.value='';inp.focus();}
-  _cpIdx=0;_cpFilter();
-}
-function closePalette(){
-  const el=document.getElementById('cmd-palette');
-  if(el) el.style.display='none';
-}
-function _cpFilter(){
-  const q=(document.getElementById('cmdpal-input')?.value||'').toLowerCase().trim();
-  const esc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-  const hl=(txt)=>q?txt.replace(new RegExp(esc(q),'gi'),m=>`<mark>${m}</mark>`):txt;
-  const tabs=_CP_TABS.filter(t=>!q||t.label.toLowerCase().includes(q)||t.key.includes(q));
-  const acts=_CP_ACTIONS.filter(a=>!q||a.label.toLowerCase().includes(q));
-  _cpFiltered=[...tabs.map(t=>({...t,_type:'tab'})),...acts.map(a=>({...a,_type:'action'}))];
-  if(_cpIdx>=_cpFiltered.length) _cpIdx=0;
-  const list=document.getElementById('cmdpal-list');
-  if(!list)return;
-  let html='';
-  if(tabs.length){
-    html+='<div class="cmdpal-section">Navegação</div>';
-    tabs.forEach((t,i)=>{
-      const globalIdx=i;
-      const sel=_cpFiltered[_cpIdx]?.key===t.key&&_cpFiltered[_cpIdx]?._type==='tab';
-      html+=`<div class="cmdpal-item${sel?' selected':''}" onclick="_cpGo(${globalIdx})" onmouseover="_cpHover(this)">
-        <span class="cmdpal-item-icon">${t.icon}</span>
-        <span class="cmdpal-item-label">${hl(t.label)}</span>
-        <span class="cmdpal-item-hint">${t.hint}</span>
-      </div>`;
-    });
-  }
-  if(acts.length){
-    html+='<div class="cmdpal-section">Ações</div>';
-    acts.forEach((a,i)=>{
-      const globalIdx=tabs.length+i;
-      const sel=_cpIdx===globalIdx;
-      html+=`<div class="cmdpal-item${sel?' selected':''}" onclick="_cpGo(${globalIdx})" onmouseover="_cpHover(this)">
-        <span class="cmdpal-item-icon">${a.icon}</span>
-        <span class="cmdpal-item-label">${hl(a.label)}</span>
-        <span class="cmdpal-item-hint">${a.hint}</span>
-      </div>`;
-    });
-  }
-  if(!html) html='<div class="cmdpal-section" style="padding:20px 16px;text-align:center;color:var(--txt3)">Nenhum resultado</div>';
-  list.innerHTML=html;
-}
-function _cpHover(el){
-  document.querySelectorAll('.cmdpal-item.selected').forEach(e=>e.classList.remove('selected'));
-  el.classList.add('selected');
-  const items=document.querySelectorAll('.cmdpal-item');
-  items.forEach((item,i)=>{if(item===el)_cpIdx=i;});
-}
-function _cpGo(idx){
-  const item=_cpFiltered[idx];
-  if(!item)return;
-  closePalette();
-  if(item._type==='tab'){
-    const tabEl=document.querySelector(`.tab[onclick*="'${item.key}'"]`);
-    goPage(item.key,tabEl);
-  } else if(item.action){
-    item.action();
-  }
-}
-function _cpKey(e){
-  const items=document.querySelectorAll('.cmdpal-item');
-  if(e.key==='ArrowDown'){e.preventDefault();_cpIdx=Math.min(_cpIdx+1,_cpFiltered.length-1);}
-  else if(e.key==='ArrowUp'){e.preventDefault();_cpIdx=Math.max(_cpIdx-1,0);}
-  else if(e.key==='Enter'){e.preventDefault();_cpGo(_cpIdx);return;}
-  else if(e.key==='Escape'){closePalette();return;}
-  // Update selected state
-  items.forEach((el,i)=>el.classList.toggle('selected',i===_cpIdx));
-  const sel=items[_cpIdx];
-  if(sel) sel.scrollIntoView({block:'nearest'});
-}
-// Global keyboard shortcut
-document.addEventListener('keydown',e=>{
-  if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openPalette();}
-  if(e.key==='Escape'){closePalette();}
-});
-
-</script>
-</body>
-</html>
+  {id:'new-trial',icon:'🔗',label:'Novo Trial',hint:'action',action:()=>{closePalette();goPage('trials',null);setTimeout(showNewTr
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
