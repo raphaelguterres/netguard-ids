@@ -878,6 +878,7 @@ _ti_feed_singleton = None
 _ti_feed_scheduler_started = False
 _playbook_engine_singleton = None
 _forensics_engine_singleton = None
+_xdr_pipeline_singleton = None
 
 
 def _cache_invalidate_prefixes(cache: dict, lock: threading.Lock, prefixes):
@@ -903,6 +904,38 @@ def _swr_cached_value(cache: dict, lock: threading.Lock, key: str,
             _trigger_bg_refresh(job_key, _cache_value_refresh, cache, lock, key, compute_fn)
         return value
     return _cache_value_refresh(cache, lock, key, compute_fn)
+
+
+def _get_xdr_pipeline():
+    global _xdr_pipeline_singleton
+    with _engine_singletons_lock:
+        if _xdr_pipeline_singleton is None:
+            from xdr.pipeline import XDRPipeline
+
+            _xdr_pipeline_singleton = XDRPipeline()
+        return _xdr_pipeline_singleton
+
+
+def _get_tenant_event_repo():
+    return EventRepository(
+        db_path=getattr(repo, "db_path", None),
+        tenant_id=_resolve_tenant_id(),
+    )
+
+
+def _persist_xdr_outcomes(outcomes):
+    tenant_repo = _get_tenant_event_repo()
+    saved = 0
+    for outcome in outcomes:
+        security_events = outcome.to_security_events()
+        saved += tenant_repo.save_batch(security_events)
+        if RISK_AVAILABLE and risk_engine:
+            for event in security_events:
+                try:
+                    risk_engine.ingest_event(event.to_dict())
+                except Exception:
+                    pass
+    return saved
 
 
 _SYSTEM_CACHE_TTL = 6.0
@@ -2712,6 +2745,61 @@ def yara_stats():
     return jsonify(_yara_engine.stats())
 
 # ── Agent Push API ────────────────────────────────────────────────
+
+@app.route("/api/xdr/events", methods=["POST"])
+@auth
+def xdr_events_ingest():
+    """Recebe eventos estruturados de endpoint para o pipeline EDR/XDR."""
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"error": "invalid_json"}), 400
+
+    batch = payload.get("events") if isinstance(payload, dict) else payload
+    if isinstance(batch, list) and len(batch) > 500:
+        return jsonify({"error": "batch_too_large", "max_events": 500}), 400
+
+    try:
+        outcomes = _get_xdr_pipeline().process_payload(payload)
+    except ValueError as exc:
+        return jsonify({"error": "invalid_event", "detail": str(exc)}), 400
+    except Exception:
+        logger.exception("XDR ingest failed | tenant=%s", _resolve_tenant_id())
+        return jsonify({
+            "error": "xdr_ingest_failed",
+            "request_id": getattr(_request_ctx, "request_id", ""),
+        }), 500
+
+    saved = _persist_xdr_outcomes(outcomes)
+    host_states = {}
+    flattened_actions = []
+    detections = 0
+    correlations = 0
+    for outcome in outcomes:
+        detections += len(outcome.detections)
+        correlations += len(outcome.correlations)
+        host_states[outcome.event.host_id] = {
+            "host_id": outcome.event.host_id,
+            "risk_score": outcome.host_risk_score,
+            "risk_level": outcome.host_risk_level,
+            "highest_severity": outcome.highest_severity,
+        }
+        flattened_actions.extend(action.to_dict() for action in outcome.actions)
+
+    logger.info(
+        "XDR ingest | tenant=%s | events=%d | detections=%d | correlations=%d | saved=%d",
+        _resolve_tenant_id(), len(outcomes), detections, correlations, saved,
+    )
+    return jsonify({
+        "ok": True,
+        "tenant_id": _resolve_tenant_id(),
+        "processed": len(outcomes),
+        "saved_events": saved,
+        "detections": detections,
+        "correlations": correlations,
+        "actions": flattened_actions[:50],
+        "hosts": list(host_states.values()),
+    })
 
 @app.route("/api/agent/push", methods=["POST"])
 @auth
@@ -5830,191 +5918,4 @@ def playbooks_open_incident():
         )
         tenant_id = _resolve_tenant_id()
         _cache_invalidate_prefixes(
-            _endpoint_swr_cache, _endpoint_swr_lock,
-            [f"playbooks:{tenant_id}", f"playbooks:incidents:{tenant_id}:"],
-        )
-        return jsonify({"ok": True, "incident": inc}), 201
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-
-@app.route("/api/playbooks/incidents/<incident_id>")
-@auth
-def playbooks_get_incident(incident_id):
-    if not PLAYBOOK_AVAILABLE:
-        return jsonify({"available": False}), 503
-    inc = _get_playbook_engine().get_incident(incident_id)
-    if not inc:
-        return jsonify({"error": "Incidente não encontrado"}), 404
-    return jsonify(inc)
-
-@app.route("/api/playbooks/incidents/<incident_id>/status", methods=["POST"])
-@auth
-@csrf_protect
-@require_role("analyst", "admin")
-def playbooks_update_status(incident_id):
-    if not PLAYBOOK_AVAILABLE:
-        return jsonify({"available": False}), 503
-    data   = request.get_json(force=True) or {}
-    status = data.get("status", "")
-    notes  = data.get("notes", "")
-    tenant_id = _resolve_tenant_id()
-    _get_playbook_engine().update_incident_status(incident_id, status, notes)
-    _cache_invalidate_prefixes(
-        _endpoint_swr_cache, _endpoint_swr_lock,
-        [f"playbooks:{tenant_id}", f"playbooks:incidents:{tenant_id}:"],
-    )
-    return jsonify({"ok": True})
-
-@app.route("/api/playbooks/incidents/<incident_id>/steps/<int:step_order>", methods=["POST"])
-@auth
-@csrf_protect
-@require_role("analyst", "admin")
-def playbooks_update_step(incident_id, step_order):
-    if not PLAYBOOK_AVAILABLE:
-        return jsonify({"available": False}), 503
-    data   = request.get_json(force=True) or {}
-    status = data.get("status", "done")
-    output = data.get("output", "")
-    tenant_id = _resolve_tenant_id()
-    _get_playbook_engine().update_step(incident_id, step_order, status, output)
-    _cache_invalidate_prefixes(
-        _endpoint_swr_cache, _endpoint_swr_lock,
-        [f"playbooks:{tenant_id}", f"playbooks:incidents:{tenant_id}:"],
-    )
-    return jsonify({"ok": True})
-
-# ── Forensics Snapshots ───────────────────────────────────────────────────────
-
-def _get_forensics_engine():
-    db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
-    global _forensics_engine_singleton
-    with _engine_singletons_lock:
-        if _forensics_engine_singleton is None:
-            _forensics_engine_singleton = get_forensics_engine(db)
-        return _forensics_engine_singleton
-
-@app.route("/api/forensics/snapshots")
-@auth
-def forensics_list():
-    if not FORENSICS_AVAILABLE:
-        return jsonify({"available": False}), 503
-    tenant_id = _resolve_tenant_id()
-    limit     = min(int(request.args.get("limit", 50)), 200)
-    key = f"forensics:{tenant_id}:{limit}"
-    payload = _swr_cached_value(
-        _endpoint_swr_cache, _endpoint_swr_lock,
-        key,
-        _FORENSICS_CACHE_TTL, _FORENSICS_STALE_TTL,
-        key,
-        lambda: (lambda eng: {
-            "snapshots": eng.list_snapshots(tenant_id=tenant_id, limit=limit),
-            "stats": eng.stats(tenant_id=tenant_id),
-            "available": True,
-        })(_get_forensics_engine()),
-    )
-    return jsonify(payload)
-
-@app.route("/api/forensics/snapshots", methods=["POST"])
-@auth
-@csrf_protect
-@require_role("analyst", "admin")
-def forensics_capture():
-    if not FORENSICS_AVAILABLE:
-        return jsonify({"available": False}), 503
-    data      = request.get_json(force=True) or {}
-    tenant_id = _resolve_tenant_id()
-    def _run():
-        try:
-            _get_forensics_engine().capture(
-                trigger_type="manual",
-                trigger_event=data,
-                severity=data.get("severity", "high"),
-                tenant_id=tenant_id,
-            )
-            _cache_invalidate_prefixes(
-                _endpoint_swr_cache, _endpoint_swr_lock,
-                [f"forensics:{tenant_id}:"],
-            )
-        except Exception as e:
-            logger.error("Forensics capture error: %s", e)
-    threading.Thread(target=_run, daemon=True, name="forensics-manual").start()
-    return jsonify({"ok": True, "status": "capture_started"}), 202
-
-@app.route("/api/forensics/snapshots/<snapshot_id>")
-@auth
-def forensics_get(snapshot_id):
-    if not FORENSICS_AVAILABLE:
-        return jsonify({"available": False}), 503
-    snap = _get_forensics_engine().get_snapshot(snapshot_id)
-    if not snap:
-        return jsonify({"error": "Snapshot não encontrado"}), 404
-    return jsonify(snap)
-
-@app.route("/api/forensics/snapshots/<snapshot_id>", methods=["DELETE"])
-@auth
-@csrf_protect
-@require_role("analyst", "admin")
-def forensics_delete(snapshot_id):
-    if not FORENSICS_AVAILABLE:
-        return jsonify({"available": False}), 503
-    tenant_id = _resolve_tenant_id()
-    _get_forensics_engine().delete_snapshot(snapshot_id)
-    _cache_invalidate_prefixes(
-        _endpoint_swr_cache, _endpoint_swr_lock,
-        [f"forensics:{tenant_id}:"],
-    )
-    return jsonify({"ok": True})
-
-# ═══════════════════════════════════════════════════════════════════
-
-@app.route("/")
-def index():
-    """Landing page pública — apresentação do produto."""
-    from flask import render_template
-    contact_email = CONTACT_EMAIL if BILLING_OK else "contato@netguard.io"
-    return render_template("landing.html", contact_email=contact_email)
-
-
-@app.route("/dashboard")
-@require_session
-def dashboard():
-    p = pathlib.Path(__file__).parent/"dashboard.html"
-    if not p.exists(): return "dashboard.html nao encontrado",404
-    from flask import make_response
-    resp = make_response(p.read_text(encoding="utf-8"), 200)
-    resp.headers["Content-Type"] = "text/html;charset=utf-8"
-    _set_no_cache_headers(resp)
-    return resp
-
-# ── Inicialização ─────────────────────────────────────────────────
-def iniciar_monitoramento():
-    if os.environ.get("IDS_DISABLE_BACKGROUND", "false").lower() == "true" or "pytest" in sys.modules:
-        monitor_status["captura"] = "desativada"
-        logger.info("Monitoramento em background desativado neste contexto")
-        return
-    threading.Thread(target=loop_monitor, kwargs={"intervalo":30},
-                     daemon=True, name="ids-monitor").start()
-    try:
-        from packet_capture import PacketCapture, detectar_interface_ativa
-        interface = detectar_interface_ativa()
-        capture   = PacketCapture(callback=analisar, interface=interface)
-        capture.iniciar()
-        monitor_status["captura"] = f"ativa | interface={interface}"
-        logger.info("Captura de pacotes iniciada | interface=%s", interface)
-    except Exception as e:
-        monitor_status["captura"] = f"indisponivel: {e}"
-        logger.warning("Captura de pacotes indisponivel: %s", e)
-
-iniciar_monitoramento()
-
-if __name__=="__main__":
-    host     = os.environ.get("IDS_HOST","127.0.0.1")
-    port     = int(os.environ.get("IDS_PORT",5000))
-    debug    = os.environ.get("IDS_DEBUG","false").lower()=="true"
-    ssl_ctx  = get_ssl_context()
-    print_startup_info()
-    if ssl_ctx:
-        app.run(host=host, port=HTTPS_PORT, debug=debug,
-                use_reloader=False, ssl_context=ssl_ctx)
-    else:
-        app.run(host=host, port=port, debug=debug, use_reloader=False)
+       

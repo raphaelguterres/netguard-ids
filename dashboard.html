@@ -8666,4 +8666,5 @@ const _CP_ACTIONS = [
   {icon:'↻',label:'Atualizar dashboard',hint:'action',action:()=>{closePalette();location.reload();}},
   {icon:'⬇',label:'Exportar IOCs (CSV)',hint:'action',action:()=>{closePalette();window.open('/api/ioc/export','_blank');}},
   {icon:'📑',label:'Gerar Relatório',hint:'action',action:()=>{closePalette();goPage('analyze',null);}},
-  {id:'new-trial',icon:'🔗',label:'Novo Trial',hint:'action',action:()=>{closePalette();goPage('trials',null);setTimeout(showNewTr
+  {id:'new-trial',icon:'🔗',label:'Novo Trial',hint:'action',action:()=>{closePalette();goPage('trials',null);setTimeout(showNewTrial,300);}},
+];

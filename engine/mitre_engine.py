@@ -494,31 +494,4 @@ class MitreEngine:
         except sqlite3.OperationalError as exc:
             if self._is_locked_error(exc):
                 logger.warning("MITRE stats fallback due to locked database | tenant=%s", self.tenant_id)
-                return self._fallback_stats()
-            if self._is_missing_table_error(exc):
-                logger.warning("MITRE stats fallback because schema is not ready | tenant=%s", self.tenant_id)
-                return self._fallback_stats()
-            raise
-
-        total_techniques = len(TECHNIQUES)
-        payload = {
-            "total_hits": total_hits,
-            "unique_techniques_hit": unique_techniques_hit,
-            "unique_tactics_hit": unique_tactics_hit,
-            "total_techniques": total_techniques,
-            "total_tactics": len(TACTICS),
-            "coverage_pct": round(unique_techniques_hit / total_techniques * 100, 1) if total_techniques else 0.0,
-        }
-        return self._cache_set("stats", payload)
-
-
-_engines: dict[str, MitreEngine] = {}
-_lock = threading.Lock()
-
-
-def get_mitre_engine(db_path: str, tenant_id: str = "default") -> MitreEngine:
-    key = f"{db_path}::{tenant_id}"
-    with _lock:
-        if key not in _engines:
-            _engines[key] = MitreEngine(db_path, tenant_id)
-    return _engines[key]
+                return self._fallback_
