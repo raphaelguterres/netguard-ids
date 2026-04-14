@@ -36,7 +36,7 @@
         {% if host_rows %}
           {% for host in host_rows %}
           <tr>
-            <td><strong><a class="soc-inline-link" href="{{ url_for('soc_preview_host_detail', host_id=host.host_name) }}">{{ host.host_name }}</a></strong></td>
+            <td><strong><a class="soc-inline-link" href="/soc/hosts/{{ host.host_name }}">{{ host.host_name }}</a></strong></td>
             <td><span class="soc-severity-chip {{ host.risk_level }}">{{ host.risk_score }}</span></td>
             <td>{{ host.last_seen }}</td>
             <td>{{ host.active_alerts }}</td>
@@ -46,7 +46,7 @@
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="6"><div class="soc-empty-state">Os hosts ainda nÃ£o apareceram no preview XDR. Envie eventos para `/api/xdr/events` ou rode o agente em modo `xdr`.</div></td>
+            <td colspan="6"><div class="soc-empty-state">Os hosts ainda nao apareceram no preview XDR. Envie eventos para `/api/xdr/events` ou rode o agente em modo `xdr`.</div></td>
           </tr>
         {% endif %}
       </tbody>

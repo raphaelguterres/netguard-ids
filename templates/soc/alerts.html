@@ -40,7 +40,7 @@
           <tr>
             <td><strong>{{ alert.title }}</strong></td>
             <td>{{ alert.description }}</td>
-            <td><a class="soc-inline-link" href="{{ url_for('soc_preview_host_detail', host_id=alert.host) }}">{{ alert.host }}</a></td>
+            <td><a class="soc-inline-link" href="/soc/hosts/{{ alert.host }}">{{ alert.host }}</a></td>
             <td>{{ alert.timestamp }}</td>
             <td><span class="soc-severity-chip {{ alert.severity }}">{{ alert.severity|capitalize }}</span></td>
             <td>{{ alert.recommended_action }}</td>

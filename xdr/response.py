@@ -54,7 +54,7 @@ class ResponseEngine:
                 )
             )
 
-        if event.pid and any(item.rule_id in {"NG-EDR-001", "NG-EDR-002", "NG-EDR-005"} for item in detections):
+        if event.pid and any(self._has_any_tag(item, {"script_abuse", "process_tree", "execution_chain"}) for item in detections):
             actions.append(
                 ResponseAction(
                     action_type="kill_process",
@@ -66,7 +66,7 @@ class ResponseEngine:
                 )
             )
 
-        if event.command_line and any(item.rule_id in {"NG-EDR-001", "NG-EDR-002"} for item in detections):
+        if event.command_line and any(self._has_any_tag(item, {"script_abuse", "encoded_command"}) for item in detections):
             actions.append(
                 ResponseAction(
                     action_type="block_execution_pattern",
@@ -78,7 +78,7 @@ class ResponseEngine:
                 )
             )
 
-        if event.auth_source_ip and any(item.rule_id == "NG-EDR-003" for item in detections):
+        if event.auth_source_ip and any(self._has_any_tag(item, {"auth_abuse", "bruteforce", "credential_abuse"}) for item in detections):
             actions.append(
                 ResponseAction(
                     action_type="block_source_ip",
@@ -97,3 +97,7 @@ class ResponseEngine:
                 deduped.append(action)
                 seen.add(key)
         return deduped
+
+    @staticmethod
+    def _has_any_tag(record: DetectionRecord, candidates: set[str]) -> bool:
+        return any(tag in candidates for tag in (record.tags or []))

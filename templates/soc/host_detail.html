@@ -10,6 +10,13 @@
 {% block page %}
 <header class="soc-page-header">
   <div>
+    <div class="soc-breadcrumbs">
+      <a class="soc-inline-link" href="/soc">Overview</a>
+      <span>/</span>
+      <a class="soc-inline-link" href="/soc/hosts">Hosts</a>
+      <span>/</span>
+      <span>{{ host.host_name|default("Unknown host") }}</span>
+    </div>
     <h1 class="soc-page-title">Host Detail</h1>
     <p class="soc-page-copy">Endpoint-centric investigation view with posture, active anomalies, and chronological evidence.</p>
   </div>

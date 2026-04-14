@@ -26,9 +26,10 @@ class WeakSignalCorrelationEngine:
             self._prune(bucket, now)
             recent = [item for _, item in bucket]
 
-        suspicious_scripts = [item for item in recent if item.rule_id in {"NG-EDR-001", "NG-EDR-002"}]
-        persistence = [item for item in recent if item.rule_id == "NG-EDR-004"]
-        brute_force = [item for item in recent if item.rule_id == "NG-EDR-003"]
+        suspicious_scripts = [item for item in recent if self._has_any_tag(item, {"script_abuse", "encoded_command"})]
+        persistence = [item for item in recent if self._has_any_tag(item, {"persistence"})]
+        brute_force = [item for item in recent if self._has_any_tag(item, {"auth_abuse", "bruteforce"})]
+        beaconing = [item for item in recent if self._has_any_tag(item, {"beaconing", "c2_suspected"})]
 
         if len(suspicious_scripts) >= 3:
             correlations.append(
@@ -72,6 +73,20 @@ class WeakSignalCorrelationEngine:
                 )
             )
 
+        if beaconing and suspicious_scripts:
+            correlations.append(
+                CorrelationRecord(
+                    rule_id="NG-XDR-COR-004",
+                    rule_name="Suspicious execution with outbound beaconing",
+                    severity="critical",
+                    summary="Script abuse coincided with repeated beacon-like outbound traffic on the same host.",
+                    confidence=0.89,
+                    signal_count=len(beaconing) + len(suspicious_scripts),
+                    tags=["correlation", "execution_to_c2"],
+                    details={"host_id": host},
+                )
+            )
+
         return correlations
 
     @staticmethod
@@ -79,3 +94,7 @@ class WeakSignalCorrelationEngine:
         cutoff = now - (20 * 60)
         while bucket and bucket[0][0] < cutoff:
             bucket.popleft()
+
+    @staticmethod
+    def _has_any_tag(record: DetectionRecord, candidates: set[str]) -> bool:
+        return any(tag in candidates for tag in (record.tags or []))

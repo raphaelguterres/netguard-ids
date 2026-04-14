@@ -130,6 +130,34 @@ class TestResolveIpNonBlocking(unittest.TestCase):
 # 3. /api/health endpoint
 # ══════════════════════════════════════════════════════════════════
 
+class TestSocPreviewRoutes(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import app as _app
+        _app.app.config["TESTING"] = True
+        cls.client = _app.app.test_client()
+
+    def test_overview_preview_renders(self):
+        resp = self.client.get("/soc-preview")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Security Overview", resp.get_data(as_text=True))
+
+    def test_hosts_preview_renders(self):
+        resp = self.client.get("/soc-preview/hosts")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Endpoint Inventory", resp.get_data(as_text=True))
+
+    def test_alerts_preview_renders(self):
+        resp = self.client.get("/soc-preview/alerts")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Detection Queue", resp.get_data(as_text=True))
+
+    def test_host_detail_preview_falls_back_without_404(self):
+        resp = self.client.get("/soc-preview/hosts/nonexistent-host")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("nonexistent-host", resp.get_data(as_text=True))
+
+
 class TestHealthEndpoint(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -392,4 +420,327 @@ class TestGraphEndpoint(unittest.TestCase):
         cls.app_mod = _app
         cls.auth_headers = {"X-API-Token": get_or_create_token()}
 
-   
+    def setUp(self):
+        # Clear graph cache between tests
+        with self.app_mod._graph_cache_lock:
+            self.app_mod._graph_cache.clear()
+
+    @patch("subprocess.run")
+    def test_graph_returns_200(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="", returncode=0)
+        resp = self.client.get("/api/graph", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 200)
+
+    @patch("subprocess.run")
+    def test_graph_response_has_nodes_and_edges(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="", returncode=0)
+        resp = self.client.get("/api/graph", headers=self.auth_headers)
+        data = resp.get_json()
+        self.assertIsNotNone(data)
+        self.assertIn("nodes", data)
+        self.assertIn("edges", data)
+
+    @patch("subprocess.run")
+    def test_graph_second_call_is_cached(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="", returncode=0)
+        self.client.get("/api/graph", headers=self.auth_headers)   # cold
+        resp2 = self.client.get("/api/graph", headers=self.auth_headers)  # should be cached
+        data = resp2.get_json()
+        self.assertTrue(data.get("cached"), "Second call should return cached=True")
+
+    @patch("subprocess.run")
+    def test_graph_stale_cache_triggers_bg_refresh(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="", returncode=0)
+        # Inject a stale entry (age=50s, fresh_ttl=30, stale_ttl=120)
+        with self.app_mod._graph_cache_lock:
+            self.app_mod._graph_cache["default"] = {
+                "ts":   time.time() - 50,
+                "data": {"nodes": [], "edges": [], "timestamp": "old"},
+            }
+        refresh_triggered = threading.Event()
+        original_trigger = self.app_mod._trigger_bg_refresh
+
+        def fake_trigger(key, fn, *args):
+            refresh_triggered.set()
+            return original_trigger(key, fn, *args)
+
+        with patch.object(self.app_mod, "_trigger_bg_refresh", side_effect=fake_trigger):
+            resp = self.client.get("/api/graph", headers=self.auth_headers)
+            data = resp.get_json()
+
+        self.assertTrue(data.get("stale"), "Stale cache should return stale=True")
+        self.assertTrue(refresh_triggered.is_set(), "Stale hit must trigger bg refresh")
+
+    @patch("subprocess.run")
+    def test_graph_has_timestamp(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="", returncode=0)
+        resp = self.client.get("/api/graph", headers=self.auth_headers)
+        data = resp.get_json()
+        self.assertIn("timestamp", data)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 5. /api/geo — stale-while-revalidate
+# ══════════════════════════════════════════════════════════════════
+
+class TestGeoEndpoint(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import app as _app
+        from auth import get_or_create_token
+        _app.app.config["TESTING"] = True
+        cls.client  = _app.app.test_client()
+        cls.app_mod = _app
+        cls.auth_headers = {"X-API-Token": get_or_create_token()}
+
+    def setUp(self):
+        with self.app_mod._geo_cache_lock:
+            self.app_mod._geo_cache.clear()
+
+    @patch("platform_utils.get_connections", return_value=[])
+    def test_geo_returns_200(self, _mock):
+        resp = self.client.get("/api/geo", headers=self.auth_headers)
+        self.assertIn(resp.status_code, [200, 500])  # 500 only if geo_ip not installed
+
+    @patch("platform_utils.get_connections", return_value=[])
+    def test_geo_second_call_cached(self, _mock):
+        # Pre-populate cache so we don't need geo_ip installed
+        with self.app_mod._geo_cache_lock:
+            self.app_mod._geo_cache["default"] = {
+                "ts":   time.time(),
+                "data": {"points": [], "total": 0, "timestamp": "t"},
+            }
+        resp = self.client.get("/api/geo", headers=self.auth_headers)
+        data = resp.get_json()
+        self.assertTrue(data.get("cached"), "Hit on fresh cache should return cached=True")
+
+    @patch("platform_utils.get_connections", return_value=[])
+    def test_geo_stale_triggers_bg_refresh(self, _mock):
+        with self.app_mod._geo_cache_lock:
+            self.app_mod._geo_cache["default"] = {
+                "ts":   time.time() - 90,   # stale (> 60s fresh TTL, < 300s stale TTL)
+                "data": {"points": [], "total": 0, "timestamp": "old"},
+            }
+        triggered = threading.Event()
+        original  = self.app_mod._trigger_bg_refresh
+
+        def fake(key, fn, *args):
+            triggered.set()
+            return original(key, fn, *args)
+
+        with patch.object(self.app_mod, "_trigger_bg_refresh", side_effect=fake):
+            resp = self.client.get("/api/geo", headers=self.auth_headers)
+            data = resp.get_json()
+
+        self.assertTrue(data.get("stale"))
+        self.assertTrue(triggered.is_set())
+
+
+# ══════════════════════════════════════════════════════════════════
+# 6. /trial/<token> routes
+# ══════════════════════════════════════════════════════════════════
+
+class TestTrialRoutes(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import app as _app
+        _app.app.config["TESTING"] = True
+        cls.client  = _app.app.test_client()
+        cls.app_mod = _app
+
+    def test_unknown_token_returns_404_or_410(self):
+        resp = self.client.get("/trial/ng_trial_doesnotexist123456789")
+        self.assertIn(resp.status_code, [404, 410])
+
+    def test_valid_trial_returns_html_dashboard(self):
+        """Create a trial and access its URL — should return HTML."""
+        import tempfile, os
+        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        db.close()
+        try:
+            from engine.trial_engine import TrialEngine
+            eng = TrialEngine(db.name)
+            trial = eng.create_trial(email="demo@test.com", name="Demo")
+
+            # Patch the app's trial engine to use our test DB
+            with patch.object(self.app_mod, "_get_trial_engine", return_value=eng):
+                resp = self.client.get(f"/trial/{trial['token']}")
+            # Should serve dashboard HTML (200) — or redirect to it
+            self.assertIn(resp.status_code, [200, 302])
+        finally:
+            try:
+                os.unlink(db.name)
+            except OSError:
+                pass
+
+
+# ══════════════════════════════════════════════════════════════════
+# 7. /api/admin/trials CRUD
+# ══════════════════════════════════════════════════════════════════
+
+class TestTrialAdminAPI(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import app as _app
+        from auth import get_or_create_token
+        _app.app.config["TESTING"] = True
+        cls.client  = _app.app.test_client()
+        cls.app_mod = _app
+        cls.auth_headers = {"X-API-Token": get_or_create_token()}
+
+    def _auth_header(self):
+        return dict(self.auth_headers)
+
+    def test_list_trials_returns_200(self):
+        resp = self.client.get("/api/admin/trials", headers=self._auth_header())
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIsNotNone(data)
+
+    def test_create_trial_via_api(self):
+        payload = {"email": "api@test.com", "name": "API User", "company": "Test Inc"}
+        resp = self.client.post(
+            "/api/admin/trials",
+            json=payload,
+            headers=self._auth_header(),
+        )
+        self.assertEqual(resp.status_code, 201)
+        data = resp.get_json()
+        self.assertIn("trial", data)
+        self.assertTrue(data["trial"]["token"].startswith("ng_trial_"))
+
+    def test_create_trial_invalid_email_returns_400(self):
+        resp = self.client.post(
+            "/api/admin/trials",
+            json={"email": "notvalid"},
+            headers=self._auth_header(),
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_create_trial_missing_email_returns_400(self):
+        resp = self.client.post(
+            "/api/admin/trials",
+            json={"name": "No Email"},
+            headers=self._auth_header(),
+        )
+        self.assertEqual(resp.status_code, 400)
+
+
+class TestXDREndpoints(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import app as _app
+        from auth import get_or_create_token
+
+        _app.app.config["TESTING"] = True
+        cls.client = _app.app.test_client()
+        cls.auth_headers = {"X-API-Token": get_or_create_token()}
+
+    def test_xdr_events_ingest_returns_summary(self):
+        resp = self.client.post(
+            "/api/xdr/events",
+            json={
+                "events": [
+                    {
+                        "host_id": "host-01",
+                        "event_type": "process_execution",
+                        "severity": "medium",
+                        "timestamp": "2026-04-13T12:00:00Z",
+                        "process_name": "powershell.exe",
+                        "command_line": "powershell.exe -enc ZQBjAGgAbwA=",
+                        "parent_process": "winword.exe",
+                        "pid": 4242,
+                        "source": "agent",
+                        "platform": "windows",
+                        "details": {},
+                    }
+                ]
+            },
+            headers=self.auth_headers,
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data["ok"])
+        self.assertGreaterEqual(data["processed"], 1)
+        self.assertGreaterEqual(data["detections"], 1)
+        self.assertGreaterEqual(data["saved_events"], 1)
+        self.assertEqual(data["hosts"][0]["host_id"], "host-01")
+
+    def test_xdr_events_rejects_invalid_type(self):
+        resp = self.client.post(
+            "/api/xdr/events",
+            json={
+                "host_id": "broken",
+                "event_type": "not_supported",
+                "severity": "low",
+                "timestamp": "2026-04-13T12:00:00Z",
+                "source": "agent",
+                "details": {},
+            },
+            headers=self.auth_headers,
+        )
+        self.assertEqual(resp.status_code, 400)
+        data = resp.get_json()
+        self.assertEqual(data["error"], "invalid_event")
+
+    def test_xdr_summary_returns_host_risks_and_recent_events(self):
+        import app as _app
+        from storage.event_repository import EventRepository
+
+        tenant_repo = EventRepository(
+            db_path=getattr(_app.repo, "db_path", None),
+            tenant_id="admin",
+        )
+        conn = tenant_repo._conn()
+        conn.execute("DELETE FROM events WHERE tenant_id = ? AND source LIKE 'xdr.%'", ("admin",))
+        conn.commit()
+
+        ingest = self.client.post(
+            "/api/xdr/events",
+            json={
+                "events": [
+                    {
+                        "host_id": "host-summary-01",
+                        "event_type": "process_execution",
+                        "severity": "medium",
+                        "timestamp": "2026-04-13T12:05:00Z",
+                        "process_name": "powershell.exe",
+                        "command_line": "powershell.exe -nop -enc ZQBjAGgAbwA=",
+                        "parent_process": "winword.exe",
+                        "pid": 5151,
+                        "source": "agent",
+                        "platform": "windows",
+                        "details": {},
+                    }
+                ]
+            },
+            headers=self.auth_headers,
+        )
+        self.assertEqual(ingest.status_code, 200)
+
+        pipeline = _app._get_xdr_pipeline()
+        with pipeline._risk_lock:
+            pipeline._host_risk_scores.clear()
+
+        resp = self.client.get("/api/xdr/summary", headers=self.auth_headers)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data["ok"])
+        self.assertGreaterEqual(data["total_hosts_at_risk"], 1)
+        self.assertTrue(any(item["host_id"] == "host-summary-01" for item in data["host_risks"]))
+        self.assertGreaterEqual(len(data["recent_events"]), 1)
+
+    def test_xdr_summary_accepts_bearer_token(self):
+        from auth import get_or_create_token
+
+        resp = self.client.get(
+            "/api/xdr/summary",
+            headers={"Authorization": f"Bearer {get_or_create_token()}"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data["ok"])
+
+
+if __name__ == "__main__":
+    unittest.main()

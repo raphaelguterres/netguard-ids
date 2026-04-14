@@ -1,11 +1,14 @@
 <header class="soc-topbar">
-  <div>
+  <div class="soc-topbar-left">
     <div class="soc-pill">
       <span class="soc-pill-dot" aria-hidden="true"></span>
       <span>Ingestion healthy</span>
     </div>
+    <div class="soc-topbar-caption">Falcon-style XDR workspace preview built on live NetGuard telemetry.</div>
   </div>
   <div class="soc-topbar-meta">
+    <a class="soc-topbar-link" href="/dashboard">Legacy Console</a>
+    <a class="soc-topbar-link soc-topbar-link-primary" href="/soc">SOC Home</a>
     <div class="soc-pill">{{ tenant_name|default("Demo Tenant") }}</div>
     <div class="soc-pill">UTC {{ current_time|default("2026-04-13 19:00") }}</div>
     <div class="soc-pill">Hosts {{ monitored_hosts|default(128) }}</div>

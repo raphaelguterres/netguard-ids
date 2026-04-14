@@ -153,7 +153,7 @@ class EndpointEvent:
         if details:
             event_details.update(details)
         clean_tags = list(dict.fromkeys((self.tags or []) + (tags or [])))
-        return make_event(
+        security_event = make_event(
             event_type=self.event_type,
             severity=(severity or self.severity).upper(),
             source=f"xdr.{self.source}",
@@ -163,6 +163,9 @@ class EndpointEvent:
             tags=clean_tags,
             raw=self.command_line or "",
         )
+        security_event.host_id = self.host_id
+        security_event.timestamp = self.timestamp or security_event.timestamp
+        return security_event
 
 
 @dataclass
@@ -174,6 +177,8 @@ class DetectionRecord:
     confidence: float
     tags: list[str] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
+    related_events: list[dict[str, Any]] = field(default_factory=list)
+    recommended_action: str = "investigate"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -254,7 +259,13 @@ class PipelineOutcome:
                     rule_id=detection.rule_id,
                     rule_name=detection.rule_name,
                     tags=["xdr", "detection"] + detection.tags,
-                    details={"summary": detection.summary, "confidence": detection.confidence, **detection.details},
+                    details={
+                        "summary": detection.summary,
+                        "confidence": detection.confidence,
+                        "recommended_action": detection.recommended_action,
+                        "related_events": detection.related_events,
+                        **detection.details,
+                    },
                 )
             )
         for correlation in self.correlations:

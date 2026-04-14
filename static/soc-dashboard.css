@@ -155,11 +155,48 @@ body.soc-shell {
   backdrop-filter: blur(14px);
 }
 
+.soc-topbar-left {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.soc-topbar-caption {
+  color: var(--soc-text-dim);
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .soc-topbar-meta {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.soc-topbar-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--soc-border);
+  color: var(--soc-text-muted);
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.02);
+  transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+}
+
+.soc-topbar-link:hover {
+  border-color: rgba(61, 212, 255, 0.2);
+  color: var(--soc-text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.soc-topbar-link-primary {
+  color: var(--soc-accent-2);
+  border-color: rgba(61, 212, 255, 0.18);
 }
 
 .soc-pill {
@@ -189,6 +226,29 @@ body.soc-shell {
   gap: 24px;
 }
 
+.soc-preview-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(61, 212, 255, 0.16);
+  background: linear-gradient(90deg, rgba(61, 212, 255, 0.08), rgba(255, 255, 255, 0.02));
+}
+
+.soc-preview-banner-kicker {
+  color: var(--soc-accent-2);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+}
+
+.soc-preview-banner-copy {
+  color: var(--soc-text-muted);
+  font-size: 0.88rem;
+}
+
 .soc-page-header {
   display: flex;
   justify-content: space-between;
@@ -208,6 +268,17 @@ body.soc-shell {
   color: var(--soc-text-muted);
   max-width: 720px;
   line-height: 1.55;
+}
+
+.soc-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--soc-text-dim);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
 }
 
 .soc-kpi-grid {
@@ -487,18 +558,29 @@ body.soc-shell {
   .soc-sidebar {
     border-right: none;
     border-bottom: 1px solid var(--soc-border);
-    padding-bottom: 16px;
+    padding: 18px 14px 14px;
+    gap: 16px;
   }
 
   .soc-nav {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .soc-nav-link {
+    min-width: 170px;
   }
 
   .soc-topbar,
   .soc-page {
     padding-left: 18px;
     padding-right: 18px;
+  }
+
+  .soc-preview-banner {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 
@@ -517,5 +599,19 @@ body.soc-shell {
 
   .soc-nav {
     grid-template-columns: 1fr;
+  }
+
+  .soc-topbar-meta {
+    width: 100%;
+  }
+
+  .soc-topbar-link {
+    width: calc(50% - 6px);
+    justify-content: center;
+  }
+
+  .soc-pill {
+    width: auto;
+    justify-content: center;
   }
 }

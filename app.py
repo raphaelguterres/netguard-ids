@@ -1232,8 +1232,8 @@ def _build_soc_preview_context():
     }
 
 
-def _build_soc_host_detail_context(host_id: str):
-    context = _build_soc_preview_context()
+def _build_soc_host_detail_context(host_id: str, context: dict | None = None):
+    context = context or _build_soc_preview_context()
     selected_host = next(
         (dict(item) for item in context["hosts"] if str(item.get("host_name")) == str(host_id)),
         None,
@@ -1242,9 +1242,14 @@ def _build_soc_host_detail_context(host_id: str):
         return None
 
     host_alerts = [item for item in context["alerts"] if str(item.get("host")) == str(host_id)][:10]
+    tenant_repo = _get_tenant_event_repo()
+    host_recent = tenant_repo.query(limit=120, host_id=host_id)
     host_events = []
-    for event_dict in context["xdr_summary"].get("recent_events", []):
-        if str(event_dict.get("host_id") or "") != str(host_id):
+    for event_dict in host_recent:
+        if not (
+            str(event_dict.get("source", "")).startswith("xdr")
+            or event_dict.get("category") in ("detection", "correlation", "response")
+        ):
             continue
         details = event_dict.get("details") or {}
         host_events.append({
@@ -6146,3 +6151,63 @@ def webhooks_types():
     if not WEBHOOK_AVAILABLE:
         return jsonify({"error": "Webhook Engine indisponível"}), 503
     return jsonify({"types": _get_webhook_engine().supported_types()})
+
+
+@app.route("/soc")
+@app.route("/soc-preview")
+@require_session
+def soc_preview_overview():
+    from flask import render_template
+
+    return render_template("soc/overview.html", **_build_soc_preview_context())
+
+
+@app.route("/soc/hosts")
+@app.route("/soc-preview/hosts")
+@require_session
+def soc_preview_hosts():
+    from flask import render_template
+
+    return render_template("soc/hosts.html", **_build_soc_preview_context())
+
+
+@app.route("/soc/alerts")
+@app.route("/soc-preview/alerts")
+@require_session
+def soc_preview_alerts():
+    from flask import render_template
+
+    return render_template("soc/alerts.html", **_build_soc_preview_context())
+
+
+@app.route("/soc/hosts/<host_id>")
+@app.route("/soc-preview/hosts/<host_id>")
+@require_session
+def soc_preview_host_detail(host_id):
+    from flask import render_template
+
+    base_context = _build_soc_preview_context()
+    context = _build_soc_host_detail_context(host_id, context=base_context)
+    if not context:
+        context = {
+            **base_context,
+            "selected_host": {
+                "host_name": host_id,
+                "risk_score": 0,
+                "risk_level": "low",
+                "highest_severity": "low",
+                "last_seen": "unknown",
+                "active_alerts": 0,
+                "operating_system": "Unknown",
+                "status": "offline",
+            },
+            "host_alerts": [],
+            "host_events": [],
+            "host_metadata": [
+                ("Tenant", base_context["tenant_name"]),
+                ("Operating System", "Unknown"),
+                ("Status", "Offline"),
+                ("Sensor", "NetGuard Agent / XDR Pipeline"),
+            ],
+        }
+    return render_template("soc/host_detail.html", **context)

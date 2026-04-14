@@ -28,6 +28,7 @@ import os
 import smtplib
 import ssl
 import threading
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr, formatdate
@@ -43,10 +44,15 @@ def _smtp_configured() -> bool:
     return bool(_cfg("SMTP_HOST"))
 
 
+def smtp_configured() -> bool:
+    """Indica se o SMTP está configurado para envio real."""
+    return _smtp_configured()
+
+
 # ── Envio base ────────────────────────────────────────────────────
 
 def _send(to_email: str, to_name: str, subject: str,
-          html: str, plain: str) -> None:
+          html: str, plain: str, attachments: list[dict] | None = None) -> None:
     """
     Envia um e-mail via SMTP. Levanta exceção em caso de falha.
     Chamado sempre dentro de uma thread de background.
@@ -59,15 +65,28 @@ def _send(to_email: str, to_name: str, subject: str,
     use_ssl  = _cfg("SMTP_SSL",      "false").lower() == "true"
     starttls = _cfg("SMTP_STARTTLS", "true").lower()  != "false"
 
-    msg = MIMEMultipart("alternative")
+    msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"]    = formataddr(("NetGuard IDS", from_raw))
     msg["To"]      = formataddr((to_name, to_email))
     msg["Date"]    = formatdate(localtime=False)
     msg["X-Mailer"] = "NetGuard-IDS/3.0"
 
-    msg.attach(MIMEText(plain, "plain", "utf-8"))
-    msg.attach(MIMEText(html,  "html",  "utf-8"))
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(plain, "plain", "utf-8"))
+    alt.attach(MIMEText(html,  "html",  "utf-8"))
+    msg.attach(alt)
+
+    for attachment in attachments or []:
+        data = attachment.get("data")
+        filename = attachment.get("filename") or "attachment.bin"
+        if not data:
+            continue
+        part = MIMEApplication(data, Name=filename)
+        if attachment.get("content_type"):
+            part.set_type(attachment["content_type"])
+        part["Content-Disposition"] = f'attachment; filename="{filename}"'
+        msg.attach(part)
 
     ctx = ssl.create_default_context()
 
@@ -101,6 +120,71 @@ def _send_async(to_email: str, to_name: str, subject: str,
 
     t = threading.Thread(target=_worker, daemon=True, name="mailer")
     t.start()
+
+
+def _send_async_email(
+    *,
+    to_email: str,
+    to_name: str,
+    subject: str,
+    html: str,
+    plain: str,
+    attachments: list[dict] | None = None,
+) -> None:
+    """Versão assíncrona com suporte a anexos."""
+    if not _smtp_configured():
+        logger.info("[mailer:dry-run] Para: %s | Assunto: %s", to_email, subject)
+        return
+
+    def _worker():
+        try:
+            _send(to_email, to_name, subject, html, plain, attachments=attachments)
+            logger.info("[mailer] E-mail enviado -> %s | %s", to_email, subject)
+        except Exception as exc:
+            logger.error("[mailer] Falha ao enviar para %s: %s", to_email, exc)
+
+    t = threading.Thread(target=_worker, daemon=True, name="mailer-generic")
+    t.start()
+
+
+def send_email(
+    *,
+    to_email: str,
+    subject: str,
+    html: str,
+    plain: str = "",
+    to_name: str = "",
+    attachments: list[dict] | None = None,
+    async_send: bool = True,
+) -> None:
+    """Envia um e-mail genérico, com suporte opcional a anexos."""
+    if not to_email:
+        logger.warning("[mailer] send_email ignorado â€” email vazio")
+        return
+
+    if async_send:
+        _send_async_email(
+            to_email=to_email,
+            to_name=to_name or to_email,
+            subject=subject,
+            html=html,
+            plain=plain or subject,
+            attachments=attachments,
+        )
+        return
+
+    if not _smtp_configured():
+        logger.info("[mailer:dry-run] Para: %s | Assunto: %s", to_email, subject)
+        return
+
+    _send(
+        to_email,
+        to_name or to_email,
+        subject,
+        html,
+        plain or subject,
+        attachments=attachments,
+    )
 
 
 # ── Templates ─────────────────────────────────────────────────────

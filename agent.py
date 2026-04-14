@@ -20,11 +20,13 @@ import sys
 import time
 import json
 import socket
+import platform
 import logging
 import argparse
 import threading  # noqa: F401
 import urllib.request
 import urllib.error
+from pathlib import Path
 from datetime import datetime, timezone
 
 # Importações opcionais
@@ -36,6 +38,15 @@ except ImportError:
     print("[WARN] psutil não instalado. Instale: pip install psutil")
 
 # ── Configuração de logging ───────────────────────────────────────
+try:
+    from xdr.agent import LocalEventBuffer, SnapshotAgentService, XDRIngestionClient
+    XDR_AGENT_OK = True
+except Exception:
+    LocalEventBuffer = None
+    SnapshotAgentService = None
+    XDRIngestionClient = None
+    XDR_AGENT_OK = False
+
 logging.basicConfig(
     level   = logging.INFO,
     format  = '{"ts":"%(asctime)s","level":"%(levelname)s","msg":"%(message)s"}',
@@ -61,18 +72,32 @@ class NetGuardAgent:
     """
 
     def __init__(self, hub_url: str, token: str = "",
-                 interval: int = 30, host_id: str = ""):
+                 interval: int = 30, host_id: str = "",
+                 mode: str = "", buffer_path: str = "", timeout: int = 10):
+        normalized_mode = (mode or os.environ.get("NETGUARD_MODE", "legacy")).strip().lower()
+        if normalized_mode not in {"legacy", "xdr", "both"}:
+            normalized_mode = "legacy"
+
         self.hub_url  = hub_url.rstrip("/")
         self.token    = token
         self.interval = interval
         self.host_id  = host_id or self._get_host_id()
+        self.mode     = normalized_mode
+        self.platform = platform.system().lower()
+        self.timeout  = timeout
+        self.buffer_path = Path(
+            buffer_path
+            or os.environ.get("NETGUARD_AGENT_BUFFER")
+            or f".netguard-agent-buffer-{self.host_id}.jsonl"
+        )
         self._running = False
         self._cycle   = 0
         self._errors  = 0
         self._sent    = 0
+        self._xdr_service = self._build_xdr_service()
 
-        logger.info("Agente iniciado | host=%s | hub=%s | interval=%ds",
-                    self.host_id, self.hub_url, self.interval)
+        logger.info("Agente iniciado | host=%s | hub=%s | interval=%ds | mode=%s",
+                    self.host_id, self.hub_url, self.interval, self.mode)
 
     def _get_host_id(self) -> str:
         """Retorna identificador único do host."""
@@ -83,12 +108,26 @@ class NetGuardAgent:
         except Exception:
             return socket.gethostname()
 
+    def _build_xdr_service(self):
+        if self.mode not in {"xdr", "both"}:
+            return None
+        if not XDR_AGENT_OK:
+            return None
+        client = XDRIngestionClient(
+            base_url=self.hub_url,
+            token=self.token,
+            timeout=self.timeout,
+        )
+        buffer = LocalEventBuffer(self.buffer_path)
+        return SnapshotAgentService(client=client, buffer=buffer)
+
     def collect(self) -> dict:
         """Coleta snapshot completo do sistema."""
         snapshot = {
             "timestamp":  datetime.now(timezone.utc).isoformat(),
             "host_id":    self.host_id,
             "agent_v":    "1.0",
+            "platform":   self.platform,
             "processes":  [],
             "connections":[],
             "ports":      [],
@@ -176,8 +215,8 @@ class NetGuardAgent:
 
         return snapshot
 
-    def send(self, snapshot: dict) -> bool:
-        """Envia snapshot para o hub central."""
+    def _send_legacy(self, snapshot: dict) -> bool:
+        """Envia snapshot legado para o hub central."""
         url  = f"{self.hub_url}/api/agent/push"
         data = json.dumps(snapshot).encode("utf-8")
         headers = {
@@ -203,14 +242,45 @@ class NetGuardAgent:
         self._errors += 1
         return False
 
+    def _send_xdr(self, snapshot: dict) -> bool:
+        """Envia snapshot convertido em eventos XDR estruturados."""
+        if not self._xdr_service:
+            logger.warning("Modo XDR indisponÃ­vel neste ambiente; usando fallback legado")
+            return self._send_legacy(snapshot)
+
+        try:
+            result = self._xdr_service.ship_snapshot(snapshot)
+            if result.get("ok"):
+                self._sent += 1
+                return True
+            logger.warning("XDR ingest falhou | queued=%d | detail=%s",
+                           result.get("queued", 0), result.get("response", {}))
+        except Exception as e:
+            logger.error("XDR send error: %s", e)
+
+        self._errors += 1
+        return False
+
+    def send(self, snapshot: dict) -> bool:
+        """Envia snapshot para o hub central."""
+        if self.mode == "legacy":
+            return self._send_legacy(snapshot)
+        if self.mode == "xdr":
+            return self._send_xdr(snapshot)
+
+        legacy_ok = self._send_legacy(snapshot)
+        xdr_ok = self._send_xdr(snapshot)
+        return legacy_ok or xdr_ok
+
     def run_once(self):
         """Coleta e envia um snapshot."""
         self._cycle += 1
         snapshot = self.collect()
         ok       = self.send(snapshot)
         logger.info(
-            "Ciclo #%d | procs=%d conns=%d ports=%d | send=%s | erros=%d",
+            "Ciclo #%d | mode=%s | procs=%d conns=%d ports=%d | send=%s | erros=%d",
             self._cycle,
+            self.mode,
             len(snapshot["processes"]),
             len(snapshot["connections"]),
             len(snapshot["ports"]),
@@ -278,11 +348,24 @@ def main():
         help="Envia um snapshot e sai (útil para teste)"
     )
 
+    parser.add_argument(
+        "--mode",
+        default=os.environ.get("NETGUARD_MODE", "legacy"),
+        choices=["legacy", "xdr", "both"],
+        help="Modo de envio: legacy, xdr ou both"
+    )
+    parser.add_argument(
+        "--buffer-path",
+        default=os.environ.get("NETGUARD_AGENT_BUFFER", ""),
+        help="Arquivo de buffer local para eventos XDR"
+    )
+
     args = parser.parse_args()
 
     print(f"  Hub:      {args.hub}")
     print(f"  Token:    {'configurado' if args.token else 'nenhum'}")
     print(f"  Intervalo: {args.interval}s")
+    print(f"  Mode:     {args.mode}")
     print()
 
     agent = NetGuardAgent(
@@ -290,6 +373,8 @@ def main():
         token    = args.token,
         interval = args.interval,
         host_id  = args.host_id,
+        mode     = args.mode,
+        buffer_path = args.buffer_path,
     )
 
     if args.once:

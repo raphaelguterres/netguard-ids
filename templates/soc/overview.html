@@ -85,14 +85,14 @@
             <span class="soc-severity-chip {{ alert.severity }}">{{ alert.severity|capitalize }}</span>
           </div>
           <div class="soc-meta-inline">
-            <span>Host: <a class="soc-inline-link" href="{{ url_for('soc_preview_host_detail', host_id=alert.host) }}">{{ alert.host }}</a></span>
+            <span>Host: <a class="soc-inline-link" href="/soc/hosts/{{ alert.host }}">{{ alert.host }}</a></span>
             <span>{{ alert.timestamp }}</span>
           </div>
           <div class="soc-list-copy">{{ alert.description }}</div>
         </div>
         {% endfor %}
       {% else %}
-        <div class="soc-empty-state">Ainda nÃ£o hÃ¡ detecÃ§Ãµes XDR recentes para este tenant.</div>
+        <div class="soc-empty-state">Ainda nao ha deteccoes XDR recentes para este tenant.</div>
       {% endif %}
     </div>
   </article>
@@ -117,7 +117,7 @@
           {% if host_risks %}
             {% for host in host_risks %}
             <tr>
-              <td><a class="soc-inline-link" href="{{ url_for('soc_preview_host_detail', host_id=host.host_name) }}">{{ host.host_name }}</a></td>
+              <td><a class="soc-inline-link" href="/soc/hosts/{{ host.host_name }}">{{ host.host_name }}</a></td>
               <td><span class="soc-severity-chip {{ host.risk_level }}">{{ host.risk_score }}</span></td>
               <td>{{ host.last_seen }}</td>
               <td class="soc-status-{{ host.status }}">{{ host.status|title }}</td>

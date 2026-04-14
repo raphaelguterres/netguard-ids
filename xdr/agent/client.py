@@ -15,14 +15,16 @@ class XDRIngestionClient:
 
     def send_events(self, events: list[dict]) -> tuple[bool, dict]:
         payload = json.dumps({"events": events}).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "NetGuard-XDR-Agent/1.0",
+        }
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
         req = urllib.request.Request(
             f"{self.base_url}/api/xdr/events",
             data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.token}",
-                "User-Agent": "NetGuard-XDR-Agent/1.0",
-            },
+            headers=headers,
             method="POST",
         )
         try:

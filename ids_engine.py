@@ -659,4 +659,25 @@ class LogProcessor:
         if m: return {"source_ip":m.group(1),"timestamp":m.group(3),
                       "method":m.group(4),"url":m.group(5),
                       "status_code":int(m.group(6)),"field":"url","raw":line}
-        return {"field
+        return {"field":"url","raw":line}
+
+    @classmethod
+    def parse_firewall(cls, line):
+        m = cls._FIREWALL_RE.search(line)
+        if m: return {"source_ip":m.group(1),"dest_ip":m.group(2),
+                      "protocol":m.group(3),"dest_port":int(m.group(4)),
+                      "field":"firewall","raw":line}
+        return {"field":"firewall","raw":line}
+
+    @classmethod
+    def detect_format(cls, line):
+        if re.match(r'\w{3}\s+\d+\s+\d+:\d+:\d+', line): return "syslog"
+        if re.search(r'SRC=[\d.]+ DST=', line):           return "firewall"
+        if re.match(r'[\d.]+ - .+\[.+\] "[A-Z]+ ', line): return "apache"
+        return "raw"
+
+    @classmethod
+    def parse_auto(cls, line):
+        fmt = cls.detect_format(line)
+        return {"syslog":cls.parse_syslog,"firewall":cls.parse_firewall,
+                "apache":cls.parse_apache}.get(fmt, lambda l:{"field":"raw","raw":l,"message":l})(line)
