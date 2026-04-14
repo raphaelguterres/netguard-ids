@@ -3910,13 +3910,13 @@ async function pollHealth(){
     setKpi('k-tot',stats.total||0,'to');
   }
   if(h){
-    const conns=h.connections_active||0;
+    const conns=h.connections_active??0;
     setKpi('k-con',conns,'co');
     if(h.uptime_cycles !== undefined)$('mon-cycle','#'+h.uptime_cycles);
   }
   if(sys){
     if(pageOn('overview')) _lastOverviewSystemPoll = now;
-    const cpu=sys.cpu_percent||0;
+    const cpu=sys.cpu_percent??0;
     setKpi('k-cpu',cpu+'%','sy');
     bar('m-cpu','mv-cpu',cpu,cpu+'%');
     bar('m-ram','mv-ram',sys.mem_percent,sys.mem_percent+'%');
