@@ -1,0 +1,59 @@
+{% extends "soc/base.html" %}
+{% set active_page = "alerts" %}
+{% set alert_rows = alerts if alerts is defined else [] %}
+
+{% block title %}NetGuard SOC | Alerts{% endblock %}
+
+{% block page %}
+<header class="soc-page-header">
+  <div>
+    <h1 class="soc-page-title">Alerts Queue</h1>
+    <p class="soc-page-copy">Centralized analyst view with severity, host, status, and recommended action aligned for SOC workflow.</p>
+  </div>
+  <div class="soc-filter-bar">
+    <div class="soc-pill">Open {{ alert_rows|length }}</div>
+    <div class="soc-pill">Critical {{ alert_rows|selectattr('severity', 'equalto', 'critical')|list|length }}</div>
+    <div class="soc-pill">High {{ alert_rows|selectattr('severity', 'equalto', 'high')|list|length }}</div>
+  </div>
+</header>
+
+<article class="soc-panel">
+  <div class="soc-panel-header">
+    <h2 class="soc-panel-title">Detection Queue</h2>
+  </div>
+  <div class="soc-table-wrap">
+    <table class="soc-table">
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Description</th>
+          <th>Host</th>
+          <th>Timestamp</th>
+          <th>Severity</th>
+          <th>Recommended Action</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if alert_rows %}
+          {% for alert in alert_rows %}
+          <tr>
+            <td><strong>{{ alert.title }}</strong></td>
+            <td>{{ alert.description }}</td>
+            <td><a class="soc-inline-link" href="{{ url_for('soc_preview_host_detail', host_id=alert.host) }}">{{ alert.host }}</a></td>
+            <td>{{ alert.timestamp }}</td>
+            <td><span class="soc-severity-chip {{ alert.severity }}">{{ alert.severity|capitalize }}</span></td>
+            <td>{{ alert.recommended_action }}</td>
+            <td>{{ alert.status|capitalize }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="7"><div class="soc-empty-state">Nenhum alerta XDR aberto no momento.</div></td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</article>
+{% endblock %}

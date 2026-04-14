@@ -1,0 +1,13 @@
+<header class="soc-topbar">
+  <div>
+    <div class="soc-pill">
+      <span class="soc-pill-dot" aria-hidden="true"></span>
+      <span>Ingestion healthy</span>
+    </div>
+  </div>
+  <div class="soc-topbar-meta">
+    <div class="soc-pill">{{ tenant_name|default("Demo Tenant") }}</div>
+    <div class="soc-pill">UTC {{ current_time|default("2026-04-13 19:00") }}</div>
+    <div class="soc-pill">Hosts {{ monitored_hosts|default(128) }}</div>
+  </div>
+</header>

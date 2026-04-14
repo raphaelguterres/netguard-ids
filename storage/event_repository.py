@@ -770,7 +770,8 @@ class EventRepository:
                       plan: str = "free", max_hosts: int = 1,
                       email: str = "",
                       stripe_customer_id: str = "",
-                      stripe_subscription_id: str = "") -> bool:
+                      stripe_subscription_id: str = "",
+                      role: str = "analyst") -> bool:
         ph = self._placeholder()
         try:
             from security import hash_token as _ht
@@ -783,26 +784,45 @@ class EventRepository:
                 cur = self._conn().cursor()
                 cur.execute(f"""
                     INSERT INTO tenants
-                        (tenant_id, name, token, token_hash, token_prefix, plan, max_hosts, email,
+                        (tenant_id, name, token, token_hash, token_prefix, role, plan, max_hosts, email,
                          stripe_customer_id, stripe_subscription_id)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
                     ON CONFLICT (tenant_id) DO NOTHING
-                """, (tenant_id, name, token_ref, token_hash, token_prefix, plan, max_hosts, email,
+                """, (tenant_id, name, token_ref, token_hash, token_prefix, role, plan, max_hosts, email,
                       stripe_customer_id, stripe_subscription_id))
                 self._conn().commit()
                 cur.close()
             else:
                 self._conn().execute(f"""
                     INSERT OR IGNORE INTO tenants
-                        (tenant_id, name, token, token_hash, token_prefix, plan, max_hosts, email,
+                        (tenant_id, name, token, token_hash, token_prefix, role, plan, max_hosts, email,
                          stripe_customer_id, stripe_subscription_id)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
-                """, (tenant_id, name, token_ref, token_hash, token_prefix, plan, max_hosts, email,
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+                """, (tenant_id, name, token_ref, token_hash, token_prefix, role, plan, max_hosts, email,
                       stripe_customer_id, stripe_subscription_id))
                 self._conn().commit()
             return True
         except Exception as e:
             logger.error("create_tenant error: %s", e)
+            return False
+
+    def update_tenant_role(self, tenant_id: str, role: str) -> bool:
+        """Atualiza o role de um tenant existente."""
+        ph = self._placeholder()
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(f"UPDATE tenants SET role={ph} WHERE tenant_id={ph}", (role, tenant_id))
+                self._conn().commit()
+                cur.close()
+            else:
+                self._conn().execute(
+                    f"UPDATE tenants SET role={ph} WHERE tenant_id={ph}", (role, tenant_id)
+                )
+                self._conn().commit()
+            return True
+        except Exception as e:
+            logger.error("update_tenant_role error: %s", e)
             return False
 
     def list_tenants(self) -> list:

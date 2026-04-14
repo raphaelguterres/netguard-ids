@@ -547,6 +547,9 @@ def _resolve_tenant_with_role() -> tuple[str, str]:
       3. Token ng_ de tenant SaaS → lê role do banco
       4. Sem token → viewer (apenas endpoints públicos)
     """
+    # Modo local (AUTH_ENABLED=False): usuário único, acesso total — SEMPRE admin
+    if not AUTH_ENABLED:
+        return "admin", "admin"
     try:
         token = _extract_token()
         if token and AUTH_MODULE_OK:
@@ -562,9 +565,6 @@ def _resolve_tenant_with_role() -> tuple[str, str]:
                     return tid, role
     except Exception:
         pass
-    # Modo local (AUTH_ENABLED=False): usuário único, acesso total
-    if not AUTH_ENABLED:
-        return "admin", "admin"
     return "default", "viewer"
 
 
@@ -917,9 +917,18 @@ def _get_xdr_pipeline():
 
 
 def _get_tenant_event_repo():
+    tenant_id = None
+    try:
+        from flask import g
+
+        tenant_id = getattr(g, "tenant_id", None)
+    except Exception:
+        tenant_id = None
+    if not tenant_id:
+        tenant_id = _resolve_tenant_id()
     return EventRepository(
         db_path=getattr(repo, "db_path", None),
-        tenant_id=_resolve_tenant_id(),
+        tenant_id=tenant_id,
     )
 
 
@@ -936,6 +945,341 @@ def _persist_xdr_outcomes(outcomes):
                 except Exception:
                     pass
     return saved
+
+
+_XDR_RISK_FALLBACK_BY_SEVERITY = {
+    "critical": 80,
+    "high": 60,
+    "medium": 40,
+    "low": 20,
+    "info": 5,
+}
+_XDR_SEVERITY_ORDER = {
+    "info": 0,
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+    "critical": 4,
+}
+
+
+def _xdr_risk_level(score: int) -> str:
+    if score >= 80:
+        return "critical"
+    if score >= 60:
+        return "high"
+    if score >= 40:
+        return "medium"
+    if score >= 20:
+        return "low"
+    return "info"
+
+
+def _xdr_extract_risk_score(event_dict: dict) -> int | None:
+    details = event_dict.get("details") or {}
+    if not isinstance(details, dict):
+        return None
+    value = details.get("host_risk_score")
+    if value in (None, ""):
+        return None
+    try:
+        return max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _xdr_rebuild_host_risks(xdr_events: list[dict]) -> list[dict]:
+    host_states: dict[str, dict] = {}
+    for event_dict in xdr_events:
+        host_id = str(event_dict.get("host_id") or "").strip()
+        if not host_id:
+            continue
+
+        severity = str(event_dict.get("severity") or "low").strip().lower()
+        if severity not in _XDR_SEVERITY_ORDER:
+            severity = "low"
+
+        state = host_states.setdefault(
+            host_id,
+            {
+                "host_id": host_id,
+                "risk_score": 0,
+                "risk_level": "info",
+                "highest_severity": severity,
+                "_has_persisted_score": False,
+            },
+        )
+
+        if _XDR_SEVERITY_ORDER.get(severity, 0) > _XDR_SEVERITY_ORDER.get(state["highest_severity"], 0):
+            state["highest_severity"] = severity
+
+        persisted_score = _xdr_extract_risk_score(event_dict)
+        if persisted_score is not None and not state["_has_persisted_score"]:
+            state["risk_score"] = persisted_score
+            state["risk_level"] = _xdr_risk_level(persisted_score)
+            state["_has_persisted_score"] = True
+            continue
+
+        if not state["_has_persisted_score"]:
+            fallback_score = _XDR_RISK_FALLBACK_BY_SEVERITY.get(severity, 20)
+            if fallback_score > state["risk_score"]:
+                state["risk_score"] = fallback_score
+                state["risk_level"] = _xdr_risk_level(fallback_score)
+
+    return [
+        {
+            "host_id": item["host_id"],
+            "risk_score": item["risk_score"],
+            "risk_level": item["risk_level"],
+            "highest_severity": item["highest_severity"],
+        }
+        for item in sorted(
+            host_states.values(),
+            key=lambda item: (item["risk_score"], _XDR_SEVERITY_ORDER.get(item["highest_severity"], 0), item["host_id"]),
+            reverse=True,
+        )
+        if item["risk_score"] > 0
+    ]
+
+
+def _build_xdr_summary_payload(*, query_limit: int = 250, recent_limit: int = 30, host_limit: int = 20) -> dict:
+    pipeline = _get_xdr_pipeline()
+    tenant_repo = _get_tenant_event_repo()
+    recent_raw = tenant_repo.query(limit=max(query_limit, recent_limit))
+    xdr_events = [
+        e for e in recent_raw
+        if str(e.get("source", "")).startswith("xdr")
+        or e.get("category") in ("detection", "correlation", "response")
+    ]
+
+    host_state_map = {
+        item["host_id"]: dict(item)
+        for item in _xdr_rebuild_host_risks(xdr_events)
+    }
+
+    with pipeline._risk_lock:
+        for host_id, score in pipeline._host_risk_scores.items():
+            if score <= 0:
+                continue
+            state = host_state_map.get(host_id)
+            if state:
+                if score > state["risk_score"]:
+                    state["risk_score"] = score
+                    state["risk_level"] = _xdr_risk_level(score)
+            else:
+                host_state_map[host_id] = {
+                    "host_id": host_id,
+                    "risk_score": score,
+                    "risk_level": _xdr_risk_level(score),
+                    "highest_severity": _xdr_risk_level(score),
+                }
+
+    host_risks = sorted(
+        host_state_map.values(),
+        key=lambda item: (
+            item["risk_score"],
+            _XDR_SEVERITY_ORDER.get(item.get("highest_severity", "info"), 0),
+            item["host_id"],
+        ),
+        reverse=True,
+    )
+
+    return {
+        "ok": True,
+        "host_risks": host_risks[:host_limit],
+        "total_hosts_at_risk": len(host_risks),
+        "recent_events": xdr_events[:recent_limit],
+        "pipeline_stats": {
+            "hosts_tracked": len(host_risks),
+            "critical": sum(1 for item in host_risks if item["risk_score"] >= 80),
+            "high": sum(1 for item in host_risks if 60 <= item["risk_score"] < 80),
+            "medium": sum(1 for item in host_risks if 40 <= item["risk_score"] < 60),
+            "low": sum(1 for item in host_risks if 20 <= item["risk_score"] < 40),
+        },
+    }
+
+
+def _parse_soc_timestamp(raw: str):
+    try:
+        if not raw:
+            return None
+        value = str(raw).strip()
+        if value.endswith("Z"):
+            value = value[:-1] + "+00:00"
+        dt = datetime.fromisoformat(value)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _format_soc_last_seen(dt_obj):
+    if not dt_obj:
+        return "unknown"
+    now = datetime.now(timezone.utc)
+    delta = max(0, int((now - dt_obj).total_seconds()))
+    if delta < 60:
+        return f"{delta}s ago"
+    if delta < 3600:
+        return f"{delta // 60} min ago"
+    if delta < 86400:
+        return f"{delta // 3600} h ago"
+    return dt_obj.strftime("%d %b %H:%M UTC")
+
+
+def _build_soc_preview_context():
+    tenant_id = _resolve_tenant_id()
+    summary = _build_xdr_summary_payload(query_limit=300, recent_limit=60, host_limit=50)
+
+    host_rows: dict[str, dict] = {
+        item["host_id"]: {
+            "host_name": item["host_id"],
+            "risk_score": item["risk_score"],
+            "risk_level": item["risk_level"],
+            "highest_severity": item.get("highest_severity", item["risk_level"]),
+            "last_seen_ts": None,
+            "last_seen": "unknown",
+            "active_alerts": 0,
+            "operating_system": "Unknown",
+            "status": "offline",
+        }
+        for item in summary["host_risks"]
+    }
+
+    alert_rows = []
+    for event_dict in summary["recent_events"]:
+        host_id = str(event_dict.get("host_id") or "").strip()
+        if not host_id:
+            continue
+        details = event_dict.get("details") or {}
+        host = host_rows.setdefault(
+            host_id,
+            {
+                "host_name": host_id,
+                "risk_score": _xdr_extract_risk_score(event_dict) or _XDR_RISK_FALLBACK_BY_SEVERITY.get(str(event_dict.get("severity", "low")).lower(), 20),
+                "risk_level": _xdr_risk_level(_xdr_extract_risk_score(event_dict) or _XDR_RISK_FALLBACK_BY_SEVERITY.get(str(event_dict.get("severity", "low")).lower(), 20)),
+                "highest_severity": str(event_dict.get("severity") or "low").lower(),
+                "last_seen_ts": None,
+                "last_seen": "unknown",
+                "active_alerts": 0,
+                "operating_system": "Unknown",
+                "status": "offline",
+            },
+        )
+
+        dt_obj = _parse_soc_timestamp(event_dict.get("timestamp"))
+        if dt_obj and (host["last_seen_ts"] is None or dt_obj > host["last_seen_ts"]):
+            host["last_seen_ts"] = dt_obj
+            host["last_seen"] = _format_soc_last_seen(dt_obj)
+            host["status"] = "online" if (datetime.now(timezone.utc) - dt_obj).total_seconds() <= 300 else "offline"
+
+        platform_name = str(details.get("platform") or details.get("os") or "").strip()
+        if platform_name:
+            host["operating_system"] = platform_name.title()
+
+        rule_id = str(event_dict.get("rule_id") or "").strip()
+        if rule_id and rule_id != "XDR-RAW":
+            host["active_alerts"] += 1
+            alert_rows.append(
+                {
+                    "title": str(event_dict.get("rule_name") or event_dict.get("event_type") or "Alert"),
+                    "description": str(details.get("summary") or details.get("description") or "Behavioral alert generated by detection engine."),
+                    "host": host_id,
+                    "timestamp": event_dict.get("timestamp"),
+                    "severity": str(event_dict.get("severity") or "low").lower(),
+                    "recommended_action": str(details.get("recommended_action") or "investigate"),
+                    "status": "open",
+                    "event": event_dict,
+                }
+            )
+
+    alert_rows.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
+    host_list = sorted(
+        host_rows.values(),
+        key=lambda item: (item["risk_score"], item["active_alerts"], item["host_name"]),
+        reverse=True,
+    )
+    for item in host_list:
+        item.pop("last_seen_ts", None)
+
+    severity_counts = {
+        "critical": sum(1 for item in alert_rows if item["severity"] == "critical"),
+        "high": sum(1 for item in alert_rows if item["severity"] == "high"),
+        "medium": sum(1 for item in alert_rows if item["severity"] == "medium"),
+        "low": sum(1 for item in alert_rows if item["severity"] == "low"),
+    }
+
+    overview = {
+        "monitored_hosts": len(host_list),
+        "active_alerts": len(alert_rows),
+        "critical_alerts": severity_counts["critical"],
+        "average_risk": int(sum(item["risk_score"] for item in host_list) / len(host_list)) if host_list else 0,
+        "severity_critical": severity_counts["critical"],
+        "severity_high": severity_counts["high"],
+        "severity_medium": severity_counts["medium"],
+        "severity_low": severity_counts["low"],
+        "recent_detections": alert_rows[:8],
+        "host_risks": host_list[:8],
+    }
+
+    return {
+        "tenant_name": "Admin Workspace" if tenant_id == "admin" else tenant_id,
+        "current_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
+        "monitored_hosts": len(host_list),
+        "overview": overview,
+        "hosts": host_list,
+        "alerts": alert_rows[:50],
+        "xdr_summary": summary,
+    }
+
+
+def _build_soc_host_detail_context(host_id: str):
+    context = _build_soc_preview_context()
+    selected_host = next(
+        (dict(item) for item in context["hosts"] if str(item.get("host_name")) == str(host_id)),
+        None,
+    )
+    if not selected_host:
+        return None
+
+    host_alerts = [item for item in context["alerts"] if str(item.get("host")) == str(host_id)][:10]
+    host_events = []
+    for event_dict in context["xdr_summary"].get("recent_events", []):
+        if str(event_dict.get("host_id") or "") != str(host_id):
+            continue
+        details = event_dict.get("details") or {}
+        host_events.append({
+            "title": str(event_dict.get("rule_name") or event_dict.get("event_type") or "Telemetry event"),
+            "severity": str(event_dict.get("severity") or selected_host.get("highest_severity") or "low").lower(),
+            "timestamp": str(event_dict.get("timestamp") or "unknown"),
+            "description": str(
+                details.get("summary")
+                or details.get("description")
+                or details.get("message")
+                or "Structured telemetry received from endpoint."
+            ),
+            "process_name": str(details.get("process_name") or details.get("parent_process") or details.get("command_line") or ""),
+            "recommended_action": str(details.get("recommended_action") or "investigate"),
+            "username": str(details.get("username") or ""),
+        })
+
+    host_metadata = [
+        ("Tenant", context["tenant_name"]),
+        ("Operating System", selected_host.get("operating_system", "Unknown")),
+        ("Status", str(selected_host.get("status", "offline")).title()),
+        ("Sensor", "NetGuard Agent / XDR Pipeline"),
+    ]
+
+    latest_user = next((item["username"] for item in host_events if item.get("username")), "")
+    if latest_user:
+        host_metadata.append(("Last Active User", latest_user))
+
+    return {
+        **context,
+        "selected_host": selected_host,
+        "host_alerts": host_alerts,
+        "host_events": host_events[:20],
+        "host_metadata": host_metadata,
+    }
 
 
 _SYSTEM_CACHE_TTL = 6.0
@@ -2807,35 +3151,47 @@ def xdr_events_ingest():
 def xdr_summary():
     """Retorna resumo do pipeline XDR: host risk scores + detecções recentes."""
     try:
+        return jsonify(_build_xdr_summary_payload())
         pipeline = _get_xdr_pipeline()
-        with pipeline._risk_lock:
-            host_risks = [
-                {
-                    "host_id": hid,
-                    "risk_score": pipeline._host_risk_scores[hid],
-                    "risk_level": (
-                        "critical" if pipeline._host_risk_scores[hid] >= 80 else
-                        "high"     if pipeline._host_risk_scores[hid] >= 60 else
-                        "medium"   if pipeline._host_risk_scores[hid] >= 40 else
-                        "low"      if pipeline._host_risk_scores[hid] >= 20 else
-                        "info"
-                    ),
-                }
-                for hid in sorted(
-                    pipeline._host_risk_scores,
-                    key=lambda h: pipeline._host_risk_scores[h],
-                    reverse=True,
-                )
-                if pipeline._host_risk_scores[hid] > 0
-            ]
-
         tenant_repo = _get_tenant_event_repo()
-        recent_raw = tenant_repo.recent(50)
+        recent_raw = tenant_repo.query(limit=250)
         xdr_events = [
             e for e in recent_raw
-            if e.get("source", "").startswith("xdr")
+            if str(e.get("source", "")).startswith("xdr")
             or e.get("category") in ("detection", "correlation", "response")
         ]
+
+        host_state_map = {
+            item["host_id"]: dict(item)
+            for item in _xdr_rebuild_host_risks(xdr_events)
+        }
+
+        with pipeline._risk_lock:
+            for host_id, score in pipeline._host_risk_scores.items():
+                if score <= 0:
+                    continue
+                state = host_state_map.get(host_id)
+                if state:
+                    if score > state["risk_score"]:
+                        state["risk_score"] = score
+                        state["risk_level"] = _xdr_risk_level(score)
+                else:
+                    host_state_map[host_id] = {
+                        "host_id": host_id,
+                        "risk_score": score,
+                        "risk_level": _xdr_risk_level(score),
+                        "highest_severity": _xdr_risk_level(score),
+                    }
+
+        host_risks = sorted(
+            host_state_map.values(),
+            key=lambda item: (
+                item["risk_score"],
+                _XDR_SEVERITY_ORDER.get(item.get("highest_severity", "info"), 0),
+                item["host_id"],
+            ),
+            reverse=True,
+        )
 
         return jsonify({
             "ok": True,
@@ -2843,11 +3199,11 @@ def xdr_summary():
             "total_hosts_at_risk": len(host_risks),
             "recent_events": xdr_events[:30],
             "pipeline_stats": {
-                "hosts_tracked": len(pipeline._host_risk_scores),
-                "critical": sum(1 for s in pipeline._host_risk_scores.values() if s >= 80),
-                "high":     sum(1 for s in pipeline._host_risk_scores.values() if 60 <= s < 80),
-                "medium":   sum(1 for s in pipeline._host_risk_scores.values() if 40 <= s < 60),
-                "low":      sum(1 for s in pipeline._host_risk_scores.values() if 20 <= s < 40),
+                "hosts_tracked": len(host_risks),
+                "critical": sum(1 for item in host_risks if item["risk_score"] >= 80),
+                "high":     sum(1 for item in host_risks if 60 <= item["risk_score"] < 80),
+                "medium":   sum(1 for item in host_risks if 40 <= item["risk_score"] < 60),
+                "low":      sum(1 for item in host_risks if 20 <= item["risk_score"] < 40),
             },
         })
     except Exception:
@@ -5789,339 +6145,4 @@ def webhooks_types():
     """Lista os tipos de webhook suportados com instruções de configuração."""
     if not WEBHOOK_AVAILABLE:
         return jsonify({"error": "Webhook Engine indisponível"}), 503
-    return jsonify({"types": _get_webhook_engine().supported_types()})
-
-
-# ── Threat Intel Feed ────────────────────────────────────────────────────────
-
-def _get_ti_feed():
-    global _ti_feed_singleton, _ti_feed_scheduler_started
-    db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
-    with _engine_singletons_lock:
-        if _ti_feed_singleton is None:
-            _ti_feed_singleton = get_ti_feed(db)
-        if not _ti_feed_scheduler_started:
-            _ti_feed_singleton.start_scheduler(interval_check_s=300)
-            _ti_feed_scheduler_started = True
-        return _ti_feed_singleton
-
-@app.route("/api/ti/stats")
-@auth
-def ti_stats():
-    if not TI_AVAILABLE:
-        return jsonify({"available": False}), 503
-    tenant_id = _resolve_tenant_id()
-    payload = _swr_cached_value(
-        _endpoint_swr_cache, _endpoint_swr_lock,
-        f"ti:stats:{tenant_id}",
-        _TI_CACHE_TTL_SHORT, _TI_STALE_TTL_SHORT,
-        f"ti:stats:{tenant_id}",
-        lambda: {"available": True, **_get_ti_feed().stats(tenant_id=tenant_id)},
-    )
-    return jsonify(payload)
-
-@app.route("/api/ti/iocs")
-@auth
-def ti_iocs():
-    if not TI_AVAILABLE:
-        return jsonify({"available": False}), 503
-    tenant_id = _resolve_tenant_id()
-    source    = request.args.get("source")
-    ioc_type  = request.args.get("type")
-    limit     = min(int(request.args.get("limit", 200)), 1000)
-    offset    = int(request.args.get("offset", 0))
-    key = f"ti:iocs:{tenant_id}:{source or '*'}:{ioc_type or '*'}:{limit}:{offset}"
-    payload = _swr_cached_value(
-        _endpoint_swr_cache, _endpoint_swr_lock,
-        key,
-        _TI_CACHE_TTL_SHORT, _TI_STALE_TTL_SHORT,
-        key,
-        lambda: {
-            "iocs": _get_ti_feed().list_iocs(
-                source=source, ioc_type=ioc_type,
-                limit=limit, offset=offset, tenant_id=tenant_id,
-            ),
-            "count": 0,
-        },
-    )
-    if payload.get("count") == 0 and payload.get("iocs"):
-        payload = dict(payload)
-        payload["count"] = len(payload["iocs"])
-    return jsonify(payload)
-
-@app.route("/api/ti/lookup")
-@auth
-def ti_lookup():
-    if not TI_AVAILABLE:
-        return jsonify({"available": False}), 503
-    value     = request.args.get("value", "").strip()
-    tenant_id = _resolve_tenant_id()
-    if not value:
-        return jsonify({"error": "value required"}), 400
-    match = _get_ti_feed().lookup(value, tenant_id=tenant_id)
-    return jsonify({"value": value, "match": match, "found": match is not None})
-
-@app.route("/api/ti/feeds/<feed_name>/refresh", methods=["POST"])
-@auth
-@csrf_protect
-@require_role("analyst", "admin")
-def ti_refresh_feed(feed_name):
-    if not TI_AVAILABLE:
-        return jsonify({"available": False}), 503
-    tenant_id = _resolve_tenant_id()
-    def _run():
-        try:
-            _get_ti_feed().refresh_feed(feed_name)
-            _cache_invalidate_prefixes(
-                _endpoint_swr_cache, _endpoint_swr_lock,
-                [f"ti:stats:{tenant_id}", f"ti:iocs:{tenant_id}:"],
-            )
-        except Exception as e:
-            logger.error("TI refresh error: %s", e)
-    threading.Thread(target=_run, daemon=True, name=f"ti-refresh-{feed_name}").start()
-    return jsonify({"ok": True, "feed": feed_name, "status": "refresh_started"})
-
-@app.route("/api/ti/feeds/refresh_all", methods=["POST"])
-@auth
-@csrf_protect
-@require_role("analyst", "admin")
-def ti_refresh_all():
-    if not TI_AVAILABLE:
-        return jsonify({"available": False}), 503
-    tenant_id = _resolve_tenant_id()
-    def _run():
-        try:
-            _get_ti_feed().refresh_all()
-            _cache_invalidate_prefixes(
-                _endpoint_swr_cache, _endpoint_swr_lock,
-                [f"ti:stats:{tenant_id}", f"ti:iocs:{tenant_id}:"],
-            )
-        except Exception as e:
-            logger.error("TI refresh_all error: %s", e)
-    threading.Thread(target=_run, daemon=True, name="ti-refresh-all").start()
-    return jsonify({"ok": True, "status": "refresh_all_started"})
-
-# ── Incident Response Playbooks ───────────────────────────────────────────────
-
-def _get_playbook_engine():
-    db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
-    global _playbook_engine_singleton
-    with _engine_singletons_lock:
-        if _playbook_engine_singleton is None:
-            _playbook_engine_singleton = get_playbook_engine(db)
-        return _playbook_engine_singleton
-
-@app.route("/api/playbooks")
-@auth
-def playbooks_list_route():
-    if not PLAYBOOK_AVAILABLE:
-        return jsonify({"available": False}), 503
-    tenant_id = _resolve_tenant_id()
-    payload = _swr_cached_value(
-        _endpoint_swr_cache, _endpoint_swr_lock,
-        f"playbooks:{tenant_id}",
-        _PLAYBOOK_CACHE_TTL, _PLAYBOOK_STALE_TTL,
-        f"playbooks:{tenant_id}",
-        lambda: (lambda eng: {
-            "available": True,
-            "playbooks": eng.playbooks_list(),
-            "stats": eng.stats(tenant_id),
-        })(_get_playbook_engine()),
-    )
-    return jsonify(payload)
-
-@app.route("/api/playbooks/incidents")
-@auth
-def playbooks_incidents():
-    if not PLAYBOOK_AVAILABLE:
-        return jsonify({"available": False}), 503
-    tenant_id = _resolve_tenant_id()
-    status    = request.args.get("status")
-    limit     = min(int(request.args.get("limit", 50)), 200)
-    key = f"playbooks:incidents:{tenant_id}:{status or '*'}:{limit}"
-    payload = _swr_cached_value(
-        _endpoint_swr_cache, _endpoint_swr_lock,
-        key,
-        _PLAYBOOK_CACHE_TTL, _PLAYBOOK_STALE_TTL,
-        key,
-        lambda: {
-            "incidents": _get_playbook_engine().list_incidents(
-                tenant_id=tenant_id, status=status, limit=limit
-            ),
-            "count": 0,
-        },
-    )
-    if payload.get("count") == 0 and payload.get("incidents"):
-        payload = dict(payload)
-        payload["count"] = len(payload["incidents"])
-    return jsonify(payload)
-
-@app.route("/api/playbooks/incidents", methods=["POST"])
-@auth
-@csrf_protect
-@require_role("analyst", "admin")
-def playbooks_open_incident():
-    if not PLAYBOOK_AVAILABLE:
-        return jsonify({"available": False}), 503
-    data = request.get_json(force=True) or {}
-    pb_key = data.get("playbook")
-    if not pb_key:
-        return jsonify({"error": "playbook required"}), 400
-    try:
-        inc = _get_playbook_engine().open_incident(
-            pb_key,
-            trigger_event=data.get("trigger_event", {}),
-            tenant_id=_resolve_tenant_id(),
-        )
-        return jsonify({"ok": True, "incident": inc}), 201
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-
-@app.route("/api/playbooks/incidents/<incident_id>")
-@auth
-def playbooks_get_incident(incident_id):
-    if not PLAYBOOK_AVAILABLE:
-        return jsonify({"available": False}), 503
-    inc = _get_playbook_engine().get_incident(incident_id)
-    if not inc:
-        return jsonify({"error": "Incidente não encontrado"}), 404
-    return jsonify(inc)
-
-@app.route("/api/playbooks/incidents/<incident_id>/status", methods=["POST"])
-@auth
-@csrf_protect
-@require_role("analyst", "admin")
-def playbooks_update_status(incident_id):
-    if not PLAYBOOK_AVAILABLE:
-        return jsonify({"available": False}), 503
-    data   = request.get_json(force=True) or {}
-    status = data.get("status", "")
-    notes  = data.get("notes", "")
-    _get_playbook_engine().update_incident_status(incident_id, status, notes)
-    return jsonify({"ok": True})
-
-@app.route("/api/playbooks/incidents/<incident_id>/steps/<int:step_order>", methods=["POST"])
-@auth
-@csrf_protect
-@require_role("analyst", "admin")
-def playbooks_update_step(incident_id, step_order):
-    if not PLAYBOOK_AVAILABLE:
-        return jsonify({"available": False}), 503
-    data   = request.get_json(force=True) or {}
-    status = data.get("status", "done")
-    output = data.get("output", "")
-    _get_playbook_engine().update_step(incident_id, step_order, status, output)
-    return jsonify({"ok": True})
-
-# ── Forensics Snapshots ───────────────────────────────────────────────────────
-
-def _get_forensics_engine():
-    db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
-    return get_forensics_engine(db)
-
-@app.route("/api/forensics/snapshots")
-@auth
-def forensics_list():
-    if not FORENSICS_AVAILABLE:
-        return jsonify({"available": False}), 503
-    tenant_id = _resolve_tenant_id()
-    limit     = min(int(request.args.get("limit", 50)), 200)
-    snaps = _get_forensics_engine().list_snapshots(tenant_id=tenant_id, limit=limit)
-    stats = _get_forensics_engine().stats(tenant_id=tenant_id)
-    return jsonify({"snapshots": snaps, "stats": stats, "available": True})
-
-@app.route("/api/forensics/snapshots", methods=["POST"])
-@auth
-@csrf_protect
-@require_role("analyst", "admin")
-def forensics_capture():
-    if not FORENSICS_AVAILABLE:
-        return jsonify({"available": False}), 503
-    data      = request.get_json(force=True) or {}
-    tenant_id = _resolve_tenant_id()
-    def _run():
-        try:
-            _get_forensics_engine().capture(
-                trigger_type="manual",
-                trigger_event=data,
-                severity=data.get("severity", "high"),
-                tenant_id=tenant_id,
-            )
-        except Exception as e:
-            logger.error("Forensics capture error: %s", e)
-    threading.Thread(target=_run, daemon=True, name="forensics-manual").start()
-    return jsonify({"ok": True, "status": "capture_started"}), 202
-
-@app.route("/api/forensics/snapshots/<snapshot_id>")
-@auth
-def forensics_get(snapshot_id):
-    if not FORENSICS_AVAILABLE:
-        return jsonify({"available": False}), 503
-    snap = _get_forensics_engine().get_snapshot(snapshot_id)
-    if not snap:
-        return jsonify({"error": "Snapshot não encontrado"}), 404
-    return jsonify(snap)
-
-@app.route("/api/forensics/snapshots/<snapshot_id>", methods=["DELETE"])
-@auth
-@csrf_protect
-@require_role("analyst", "admin")
-def forensics_delete(snapshot_id):
-    if not FORENSICS_AVAILABLE:
-        return jsonify({"available": False}), 503
-    _get_forensics_engine().delete_snapshot(snapshot_id)
-    return jsonify({"ok": True})
-
-# ═══════════════════════════════════════════════════════════════════
-
-@app.route("/")
-def index():
-    """Landing page pública — apresentação do produto."""
-    from flask import render_template
-    contact_email = CONTACT_EMAIL if BILLING_OK else "contato@netguard.io"
-    return render_template("landing.html", contact_email=contact_email)
-
-
-@app.route("/dashboard")
-@require_session
-def dashboard():
-    p = pathlib.Path(__file__).parent/"dashboard.html"
-    if not p.exists(): return "dashboard.html nao encontrado",404
-    from flask import make_response
-    resp = make_response(p.read_text(encoding="utf-8"), 200)
-    resp.headers["Content-Type"] = "text/html;charset=utf-8"
-    _set_no_cache_headers(resp)
-    return resp
-
-# ── Inicialização ─────────────────────────────────────────────────
-def iniciar_monitoramento():
-    if os.environ.get("IDS_DISABLE_BACKGROUND", "false").lower() == "true" or "pytest" in sys.modules:
-        monitor_status["captura"] = "desativada"
-        logger.info("Monitoramento em background desativado neste contexto")
-        return
-    threading.Thread(target=loop_monitor, kwargs={"intervalo":30},
-                     daemon=True, name="ids-monitor").start()
-    try:
-        from packet_capture import PacketCapture, detectar_interface_ativa
-        interface = detectar_interface_ativa()
-        capture   = PacketCapture(callback=analisar, interface=interface)
-        capture.iniciar()
-        monitor_status["captura"] = f"ativa | interface={interface}"
-        logger.info("Captura de pacotes iniciada | interface=%s", interface)
-    except Exception as e:
-        monitor_status["captura"] = f"indisponivel: {e}"
-        logger.warning("Captura de pacotes indisponivel: %s", e)
-
-iniciar_monitoramento()
-
-if __name__=="__main__":
-    host     = os.environ.get("IDS_HOST","127.0.0.1")
-    port     = int(os.environ.get("IDS_PORT",5000))
-    debug    = os.environ.get("IDS_DEBUG","false").lower()=="true"
-    ssl_ctx  = get_ssl_context()
-    print_startup_info()
-    if ssl_ctx:
-        app.run(host=host, port=HTTPS_PORT, debug=debug,
-                use_reloader=False, ssl_context=ssl_ctx)
-    else:
-        app.run(host=host, port=port, debug=debug, use_reloader=False)
+    return jsonify({"t

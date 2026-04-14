@@ -1,0 +1,98 @@
+{% extends "soc/base.html" %}
+{% set active_page = "hosts" %}
+{% set host = selected_host if selected_host is defined else {} %}
+{% set host_events = host_events if host_events is defined else [] %}
+{% set host_alerts = host_alerts if host_alerts is defined else [] %}
+{% set host_metadata = host_metadata if host_metadata is defined else [] %}
+
+{% block title %}NetGuard SOC | Host Detail{% endblock %}
+
+{% block page %}
+<header class="soc-page-header">
+  <div>
+    <h1 class="soc-page-title">Host Detail</h1>
+    <p class="soc-page-copy">Endpoint-centric investigation view with posture, active anomalies, and chronological evidence.</p>
+  </div>
+</header>
+
+<section class="soc-panel soc-host-hero">
+  <div>
+    <div class="soc-stat-label">Host</div>
+    <h2 style="margin: 8px 0 0; font-family: var(--soc-font-head); font-size: 1.8rem;">{{ host.host_name|default("Unknown host") }}</h2>
+    <div class="soc-meta-inline" style="margin-top: 14px;">
+      <span>{{ host.operating_system|default("Unknown OS") }}</span>
+      <span>Last seen {{ host.last_seen|default("unknown") }}</span>
+      <span class="soc-status-{{ host.status|default('offline') }}">{{ host.status|default("offline")|title }}</span>
+    </div>
+  </div>
+  <div class="soc-risk-gauge">
+    <div class="soc-risk-ring">{{ host.risk_score|default(0) }}</div>
+    <div>
+      <div class="soc-stat-label">Risk Level</div>
+      <div style="margin-top: 8px;"><span class="soc-severity-chip {{ host.risk_level|default('low') }}">{{ host.risk_level|default("low")|capitalize }}</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="soc-host-layout">
+  <div class="soc-panel">
+    <div class="soc-panel-header">
+      <h2 class="soc-panel-title">Event Timeline</h2>
+    </div>
+    <div class="soc-timeline">
+      {% if host_events %}
+        {% for item in host_events %}
+        <article class="soc-timeline-item">
+          <div class="soc-list-top">
+            <span class="soc-list-title">{{ item.title }}</span>
+            <span class="soc-severity-chip {{ item.severity }}">{{ item.severity|capitalize }}</span>
+          </div>
+          <div class="soc-meta-inline">
+            <span>{{ item.timestamp }}</span>
+            {% if item.process_name %}<span>{{ item.process_name }}</span>{% endif %}
+            <span>Recommended: {{ item.recommended_action }}</span>
+          </div>
+          <div class="soc-list-copy">{{ item.description }}</div>
+        </article>
+        {% endfor %}
+      {% else %}
+        <div class="soc-empty-state">Nenhum evento XDR recente encontrado para este host.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="soc-list">
+    <article class="soc-panel">
+      <div class="soc-panel-header">
+        <h2 class="soc-panel-title">Active Alerts</h2>
+      </div>
+      <div class="soc-list">
+        {% if host_alerts %}
+          {% for alert in host_alerts %}
+          <div class="soc-list-item">
+            <div class="soc-list-top">
+              <span class="soc-list-title">{{ alert.title }}</span>
+              <span class="soc-severity-chip {{ alert.severity }}">{{ alert.severity|capitalize }}</span>
+            </div>
+            <div class="soc-list-copy">{{ alert.description }}</div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="soc-empty-state">Sem alertas ativos para este host neste recorte do preview.</div>
+        {% endif %}
+      </div>
+    </article>
+
+    <article class="soc-panel">
+      <div class="soc-panel-header">
+        <h2 class="soc-panel-title">Host Metadata</h2>
+      </div>
+      <div class="soc-list">
+        {% for label, value in host_metadata %}
+        <div class="soc-list-item"><div class="soc-meta-inline"><span>{{ label }}</span><strong>{{ value }}</strong></div></div>
+        {% endfor %}
+      </div>
+    </article>
+  </div>
+</section>
+{% endblock %}

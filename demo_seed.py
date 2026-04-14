@@ -192,10 +192,16 @@ def seed_demo(repo, n_events: int = 350, verbose: bool = True,
                     token     = DEMO_TOKEN,
                     plan      = DEMO_PLAN,
                     max_hosts = 50,
+                    role      = "admin",
                 )
                 if verbose:
                     print(f"[demo] Tenant criado: {_TENANT_ID}")
             else:
+                # Garante que tenant existente tenha role=admin
+                try:
+                    repo.update_tenant_role(DEMO_TENANT_ID, "admin")
+                except Exception:
+                    pass
                 if verbose:
                     print(f"[demo] Tenant já existe: {_TENANT_ID}")
         except Exception as e:

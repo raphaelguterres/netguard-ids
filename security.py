@@ -295,6 +295,13 @@ def require_role(*roles: str):
             # Importa dentro da função para evitar circular import
             try:
                 from flask import g, jsonify
+                # Modo local sem autenticação → acesso total (sem RBAC)
+                try:
+                    from auth import AUTH_ENABLED as _auth_on
+                except Exception:
+                    _auth_on = False
+                if not _auth_on:
+                    return fn(*args, **kwargs)
                 tenant_role = getattr(g, "tenant_role", "viewer")
                 if tenant_role not in roles and tenant_role != "admin":
                     logger.warning(

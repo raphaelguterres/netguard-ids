@@ -1,0 +1,56 @@
+{% extends "soc/base.html" %}
+{% set active_page = "hosts" %}
+{% set host_rows = hosts if hosts is defined else [] %}
+
+{% block title %}NetGuard SOC | Hosts{% endblock %}
+
+{% block page %}
+<header class="soc-page-header">
+  <div>
+    <h1 class="soc-page-title">Monitored Hosts</h1>
+    <p class="soc-page-copy">Endpoint inventory with risk-first ordering, last-seen confidence, and clear operational status.</p>
+  </div>
+  <div class="soc-filter-bar">
+    <div class="soc-pill">Hosts {{ host_rows|length }}</div>
+    <div class="soc-pill">At risk {{ xdr_summary.total_hosts_at_risk if xdr_summary is defined else host_rows|length }}</div>
+  </div>
+</header>
+
+<article class="soc-panel">
+  <div class="soc-panel-header">
+    <h2 class="soc-panel-title">Endpoint Inventory</h2>
+  </div>
+  <div class="soc-table-wrap">
+    <table class="soc-table">
+      <thead>
+        <tr>
+          <th>Host Name</th>
+          <th>Risk Score</th>
+          <th>Last Seen</th>
+          <th>Active Alerts</th>
+          <th>Operating System</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if host_rows %}
+          {% for host in host_rows %}
+          <tr>
+            <td><strong><a class="soc-inline-link" href="{{ url_for('soc_preview_host_detail', host_id=host.host_name) }}">{{ host.host_name }}</a></strong></td>
+            <td><span class="soc-severity-chip {{ host.risk_level }}">{{ host.risk_score }}</span></td>
+            <td>{{ host.last_seen }}</td>
+            <td>{{ host.active_alerts }}</td>
+            <td>{{ host.operating_system }}</td>
+            <td class="soc-status-{{ host.status }}">{{ host.status|title }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="6"><div class="soc-empty-state">Os hosts ainda nÃ£o apareceram no preview XDR. Envie eventos para `/api/xdr/events` ou rode o agente em modo `xdr`.</div></td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</article>
+{% endblock %}

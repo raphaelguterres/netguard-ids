@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}NetGuard SOC{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='soc-dashboard.css') }}">
+</head>
+<body class="soc-shell">
+  <div class="soc-app">
+    {% include "soc/partials/sidebar.html" %}
+    <main class="soc-main">
+      {% include "soc/partials/topbar.html" %}
+      <section class="soc-page">
+        {% block page %}{% endblock %}
+      </section>
+    </main>
+  </div>
+</body>
+</html>
