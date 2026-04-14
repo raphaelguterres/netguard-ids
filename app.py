@@ -6145,4 +6145,4 @@ def webhooks_types():
     """Lista os tipos de webhook suportados com instruções de configuração."""
     if not WEBHOOK_AVAILABLE:
         return jsonify({"error": "Webhook Engine indisponível"}), 503
-    return jsonify({"t
+    return jsonify({"types": _get_webhook_engine().supported_types()})
