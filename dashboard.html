@@ -3963,7 +3963,7 @@ async function loadFeed(){
   const tbody=document.getElementById('fbody');
   if(!changed&&dets.length>0)return; // skip DOM rebuild if same data
   if(!dets.length){
-    tbody.innerHTML=`<tr><td colspan="8"><div class="empty"><span style="font-size:24px;opacity:.2">⬡</span><span>Rede monitorada · sem ameaças detectadas</span></div></td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="8"><div class="empty"><span style="font-size:24px;opacity:.2">⬡</span><span>Nenhuma detecção ainda — o motor está ativo e monitorando.<br><small>Simule um ataque: acesse /demo para ver dados de exemplo, ou inicie tráfego suspeito na rede.</small></span></div></td></tr>`;
     return;
   }
   const meth={ids:'IDS',sigma:'Σ Sigma',owasp_crs:'OWASP',packet:'Packet'};
@@ -6263,6 +6263,12 @@ async function loadIOC(resetPage=true){
 }
 
 function _renderIOCTable(){
+  const wrap=document.getElementById('ioc-table-wrap');
+  if(!wrap)return;
+  if(_iocAll.length===0){
+    wrap.innerHTML=`<div class="module-empty tall">☣ Nenhum IOC cadastrado. Importe um feed CSV de threat intelligence (ex: Feodo Tracker, abuse.ch) ou adicione IPs, domínios e hashes manualmente.</div>`;
+    return;
+  }
   const q=(document.getElementById('ioc-search')?.value||'').toLowerCase();
   const ft=document.getElementById('ioc-ft')?.value||'';
   const fs=document.getElementById('ioc-fs')?.value||'';
@@ -6284,8 +6290,6 @@ function _renderIOCTable(){
   const slice=rows.slice(start,start+_IOC_PER_PAGE);
   const lbl=document.getElementById('ioc-count-label');
   if(lbl) lbl.textContent=total===_iocAll.length?`${total} IOCs`:`${total} de ${_iocAll.length} IOCs`;
-  const wrap=document.getElementById('ioc-table-wrap');
-  if(!wrap)return;
   const escRe=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
   wrap.innerHTML=`
     <div class="table-shell"><table class="module-table">
@@ -6606,7 +6610,7 @@ async function loadCustomRules(){
       <div id="cr-test-result" class="test-result-panel" style="display:none"></div>
     </div>
     <div class="table-shell">
-      ${rules.length===0?`<div class="module-empty tall">Nenhuma regra customizada criada.<br><small>Clique em "+ Nova Regra" para começar.</small></div>`:`
+      ${rules.length===0?`<div class="module-empty tall">⚙ Nenhuma regra criada. Crie sua primeira regra de detecção sem código — combine condições como "hora do dia", "IP de origem" e "tipo de evento" com lógica AND/OR.</div>`:`
       <table class="module-table">
         <thead><tr>
           <th class="left">ID</th><th class="left">Nome</th>
@@ -6732,7 +6736,7 @@ async function loadWebhooks(){
   if(!list) return;
   const whs = r?.webhooks || [];
   if(!whs.length){
-    list.innerHTML = `<div class="panel-card module-empty tall"><span>Nenhum webhook configurado. Clique em "+ Novo Webhook" para começar.</span></div>`;
+    list.innerHTML = `<div class="panel-card module-empty tall"><span>🔔 Nenhum webhook configurado. Conecte o NetGuard ao Slack, Teams, Discord, Telegram ou WhatsApp para receber alertas críticos em tempo real.</span></div>`;
     return;
   }
   const typeIcon = {
@@ -6820,18 +6824,19 @@ const WH_TYPE_META = {
 };
 
 function whTypeChanged(){
-  const type = document.getElementById('wh-type')?.value || 'telegram';
-  const meta = WH_TYPE_META[type] || WH_TYPE_META.generic;
-  const urlEl    = document.getElementById('wh-url');
-  const urlHint  = document.getElementById('wh-url-hint');
-  const secLabel = document.getElementById('wh-secret-label');
-  const secHint  = document.getElementById('wh-secret-hint');
-  const secEl    = document.getElementById('wh-secret');
-  if(urlEl)    urlEl.placeholder    = meta.url;
-  if(urlHint)  urlHint.textContent  = meta.urlHint;
-  if(secLabel) secLabel.textContent = meta.secretLabel;
-  if(secHint)  secHint.textContent  = meta.secretHint;
-  if(secEl)    secEl.placeholder    = meta.secretPH;
+  const type = document.getElementById('wh-type')?.value;
+  const urlInput = document.getElementById('wh-url');
+  const hint = document.getElementById('wh-url-hint');
+  const hints = {
+    slack:    ['https://hooks.slack.com/services/T.../B.../...', '📋 Webhook URL do Slack — crie em: App Settings → Incoming Webhooks'],
+    teams:    ['https://xxx.webhook.office.com/webhookb2/...', '📋 URL do Teams — crie em: Canal → Conectores → Incoming Webhook'],
+    discord:  ['https://discord.com/api/webhooks/...', '📋 URL do Discord — crie em: Canal → Integrações → Webhooks'],
+    telegram: ['https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}', '📋 Substitua {TOKEN} pelo token do @BotFather e {CHAT_ID} pelo ID do chat'],
+    whatsapp: ['https://api.z-api.io/instances/{INSTANCE}/token/{TOKEN}/send-text', '📋 Z-API: use a URL da sua instância. Twilio: coloque "twilio" no campo Secret'],
+    generic:  ['https://meuservidor.com/webhook', '📋 Qualquer endpoint HTTP que aceite POST com JSON'],
+  };
+  if(urlInput && hints[type]) urlInput.placeholder = hints[type][0];
+  if(hint && hints[type]) { hint.textContent = hints[type][1]; hint.style.display='block'; }
 }
 
 async function saveWebhook(){
@@ -7042,7 +7047,7 @@ async function loadTrials(){
   const trials = r.trials || [];
   const list = document.getElementById('trial-list');
   if(!trials.length){
-    list.innerHTML='<div class="panel-card module-empty tall"><span>Nenhum trial gerado ainda. Clique em "+ Novo Trial" para começar.</span></div>';
+    list.innerHTML='<div class="panel-card module-empty tall"><span>🔗 Nenhum trial gerado ainda. Crie um link de acesso com tempo limitado para um cliente em potencial — ele acessa o dashboard com dados de demo sem precisar instalar nada.</span></div>';
     return;
   }
 
@@ -7263,10 +7268,16 @@ async function loadXdr(){
 
   let data;
   try {
-    const r = await _api('/api/xdr/summary');
-    data = await r.json();
+    data = await api('/xdr/summary');
   } catch(e) {
     document.getElementById('xdr-stats').innerHTML = `<div style="color:var(--txt3);font-size:.84rem;padding:20px 0">Sem dados XDR — ingira eventos via <code>/api/xdr/events</code>.</div>`;
+    return;
+  }
+  if(!data || data.error || data.ok===false){
+    const err = _xdrEsc(data?.error || 'xdr_summary_unavailable');
+    document.getElementById('xdr-stats').innerHTML = `<div style="color:var(--txt3);font-size:.84rem;padding:20px 0">Resumo XDR indisponível no momento <code>${err}</code>.</div>`;
+    document.getElementById('xdr-hosts').innerHTML = '';
+    document.getElementById('xdr-events').innerHTML = '';
     return;
   }
 
@@ -8767,7 +8778,4 @@ const _CP_ACTIONS = [
   {icon:'↻',label:'Atualizar dashboard',hint:'action',action:()=>{closePalette();location.reload();}},
   {icon:'⬇',label:'Exportar IOCs (CSV)',hint:'action',action:()=>{closePalette();window.open('/api/ioc/export','_blank');}},
   {icon:'📑',label:'Gerar Relatório',hint:'action',action:()=>{closePalette();goPage('analyze',null);}},
-  {id:'new-trial',icon:'🔗',label:'Novo Trial',hint:'action',action:()=>{closePalette();goPage('trials',null);setTimeout(showNewTrial,300);}},
-  {icon:'🛡',label:'XDR Pipeline',hint:'action',action:()=>{closePalette();goPage('xdr',document.querySelector('.tab[onclick*="xdr"]'));}},
-  {icon:'🔔',label:'Webhooks',hint:'action',action:()=>{closePalette();goPage('webhooks',document.querySelector('.tab[onclick*="webhooks"]'));}},
-];
+  {id:'new-trial',icon:'🔗',label:'Novo Tria
