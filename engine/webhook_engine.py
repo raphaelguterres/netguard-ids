@@ -319,6 +319,12 @@ class WebhookEngine:
 
         if not name or not url:
             raise ValueError("name e url são obrigatórios")
+        if len(name) > 120:
+            raise ValueError("name: máximo 120 caracteres")
+        if len(url) > 2048:
+            raise ValueError("url: máximo 2048 caracteres")
+        if secret and len(str(secret)) > 512:
+            raise ValueError("secret: máximo 512 caracteres")
         if wtype not in FORMATTERS:
             raise ValueError(f"type inválido: {wtype}")
         if min_sev not in SEVERITY_ORDER:

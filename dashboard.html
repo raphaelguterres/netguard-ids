@@ -2024,6 +2024,7 @@ th.sortable:hover{color:var(--cyn)}
     <div class="tab" onclick="goPage('threat-intel',this)" title="Threat Intelligence Feeds">🌐 Threat Intel</div>
     <div class="tab" onclick="goPage('playbooks',this)" title="Incident Response Playbooks">📋 Playbooks</div>
     <div class="tab" onclick="goPage('forensics',this)" title="Forensics Snapshots">🔬 Forensics</div>
+    <div class="tab" onclick="goPage('security-score',this)" title="Security Posture Score">🛡 Posture</div>
     <div class="tab tab-admin" id="tab-admin-btn" data-group="control"
          style="display:none"
          onclick="location.href='/admin'" title="Painel de Administração — planos pagos">⚡ Admin</div>
@@ -3055,6 +3056,9 @@ th.sortable:hover{color:var(--cyn)}
 <div class="page" id="p-playbooks"></div>
 <div class="page" id="p-forensics"></div>
 
+<!-- ── SECURITY POSTURE ──────────────────────────────────────────── -->
+<div class="page" id="p-security-score"></div>
+
 <!-- ── STATS ───────────────────────────────────────────────────────── -->
 <div class="page" id="p-stats">
   <!-- Barra de ações do relatório -->
@@ -3367,6 +3371,143 @@ th.sortable:hover{color:var(--cyn)}
   text-transform: uppercase;
   letter-spacing: .08em;
   font-family: var(--mono);
+}
+
+/* ── Security Posture Score ──────────────────────────────────────── */
+.sec-hero {
+  display: flex;
+  gap: 28px;
+  align-items: center;
+  background: var(--s2);
+  border: 1px solid var(--b2);
+  border-radius: 12px;
+  padding: 24px 28px;
+  margin-bottom: 20px;
+}
+.sec-ring-wrap { flex-shrink: 0; }
+.sec-hero-info { flex: 1; }
+.sec-grade-label {
+  font-family: var(--head);
+  font-size: 1.6rem;
+  font-weight: 900;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+.sec-score-detail {
+  font-family: var(--mono);
+  font-size: .85rem;
+  color: var(--txt2);
+  margin-bottom: 10px;
+}
+.sec-checks-summary {
+  display: flex;
+  gap: 14px;
+  font-size: .8rem;
+  font-family: var(--mono);
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.sec-tip {
+  font-size: .78rem;
+  color: var(--txt3);
+  font-style: italic;
+}
+.sec-section-head {
+  font-family: var(--head);
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--txt3);
+  margin: 18px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--b1);
+  padding-bottom: 6px;
+}
+.sec-cat-score {
+  margin-left: auto;
+  font-size: .7rem;
+  color: var(--txt2);
+  font-weight: 400;
+}
+.sec-checks-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sec-check-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--b2);
+  background: var(--s2);
+}
+.sec-check-card.ok  { border-left: 3px solid #2ea44f; }
+.sec-check-card.fail { border-left: 3px solid #f85149; }
+.sec-check-status {
+  font-size: 1rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.sec-check-card.ok  .sec-check-status { color: #2ea44f; }
+.sec-check-card.fail .sec-check-status { color: #f85149; }
+.sec-check-body { flex: 1; min-width: 0; }
+.sec-check-label {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--txt1);
+  margin-bottom: 2px;
+}
+.sec-check-value {
+  font-size: .75rem;
+  font-family: var(--mono);
+  color: var(--txt3);
+}
+.sec-check-rec {
+  font-size: .73rem;
+  color: var(--ora);
+  margin-top: 4px;
+  font-style: italic;
+}
+.sec-check-pts {
+  font-family: var(--mono);
+  font-size: .7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.pts-ok   { background: rgba(46,164,79,.15); color: #2ea44f; }
+.pts-fail { background: rgba(248,81,73,.12); color: #f85149; }
+.sec-issues-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.sec-issue-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(248,81,73,.06);
+  border: 1px solid rgba(248,81,73,.2);
+}
+.sec-issue-icon { color: #f85149; font-size: .9rem; flex-shrink: 0; margin-top:2px; }
+.sec-issue-label { font-size: .82rem; font-weight: 600; color: var(--txt1); margin-bottom: 3px; }
+.sec-issue-rec   { font-size: .75rem; color: var(--txt3); }
+.sec-footer {
+  margin-top: 20px;
+  font-size: .68rem;
+  color: var(--txt3);
+  font-family: var(--mono);
+  text-align: right;
 }
 
 /* ── Mono URL display ────────────────────────────────────────────── */
@@ -3759,6 +3900,7 @@ function goPage(name,el){
   if(name==='threat-intel')  loadThreatIntel(true);
   if(name==='playbooks')     loadPlaybooks(true);
   if(name==='forensics')     loadForensics(true);
+  if(name==='security-score') loadSecurityScore();
   if(name==='geomap'){
     loadGeo();
     if(liveInterval)clearInterval(liveInterval);
@@ -3778,6 +3920,13 @@ function _csrfToken(){
   const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
   return m ? decodeURIComponent(m[1]) : '';
 }
+// ── HTML escape helper — prevents XSS when rendering API data in innerHTML ──
+const _escDiv = document.createElement('div');
+function esc(str){
+  _escDiv.textContent = str == null ? '' : String(str);
+  return _escDiv.innerHTML;
+}
+
 const _apiInflight = new Map();
 const _apiRecent = new Map();
 const _API_RECENT_TTL_MS = 1200;
@@ -6748,16 +6897,16 @@ async function loadWebhooks(){
   <div class="panel-card">
     <div class="panel-head">
       <span class="panel-icon">${typeIcon[w.type]||'🌐'}</span>
-      <span class="panel-title">${w.name}</span>
+      <span class="panel-title">${esc(w.name)}</span>
       <span class="status-pill" style="background:${w.enabled?'rgba(63,185,80,.15)':'rgba(139,148,158,.12)'};color:${w.enabled?'var(--grn)':'var(--txt3)'}">${w.enabled?'● Ativo':'○ Pausado'}</span>
-      <span class="meta-text">min: <b class="tone-orange">${w.min_severity}</b></span>
+      <span class="meta-text">min: <b class="tone-orange">${esc(w.min_severity)}</b></span>
       <span class="meta-text">hits: ${w.hit_count||0} · falhas: ${w.fail_count||0}</span>
       <button class="fbtn" onclick="testWebhook(${w.id})" title="Testar">⚡ Teste</button>
       <button class="fbtn" onclick="toggleWebhook(${w.id})">${w.enabled?'Pausar':'Ativar'}</button>
       <button class="fbtn" onclick="showWHLogs(${w.id})" title="Ver logs">📋</button>
       <button class="fbtn danger-text" onclick="deleteWebhook(${w.id})">✕</button>
     </div>
-    <div class="meta-text mono break-all" style="margin-top:6px">${w.url}</div>
+    <div class="meta-text mono break-all" style="margin-top:6px">${esc(w.url_display||w.url||'')}</div>
     <div id="wh-logs-${w.id}"></div>
   </div>`).join('');
 }
@@ -7057,21 +7206,21 @@ async function loadTrials(){
   list.innerHTML = trials.map(t => `
   <div class="panel-card">
     <div class="panel-head">
-      <span class="panel-title">${t.company||t.name||t.email}</span>
-      <span class="meta-text">${t.email}</span>
-      <span class="status-pill" style="background:rgba(0,0,0,.2);color:${statusColor[t.status]||'var(--txt3)'}">${statusLabel[t.status]||t.status}</span>
+      <span class="panel-title">${esc(t.company||t.name||t.email)}</span>
+      <span class="meta-text">${esc(t.email)}</span>
+      <span class="status-pill" style="background:rgba(0,0,0,.2);color:${statusColor[t.status]||'var(--txt3)'}">${statusLabel[t.status]||esc(t.status)}</span>
       ${t.status==='active'?`<span class="meta-text">⏱ ${t.remaining_h}h restantes</span>`:''}
       <span class="meta-text">${t.access_count} acessos</span>
-      <button class="fbtn" onclick="copyTrialLink('${t.trial_url}')" title="Copiar link">🔗 Copiar link</button>
-      ${t.status!=='revoked'?`<button class="fbtn" onclick="extendTrial('${t.token}')" title="Estender +24h">+24h</button>`:''}
-      ${t.status==='active'?`<button class="fbtn danger-text" onclick="revokeTrial('${t.token}')">Revogar</button>`:''}
+      <button class="fbtn" onclick="copyTrialLink(${JSON.stringify(t.trial_url)})" title="Copiar link">🔗 Copiar link</button>
+      ${t.status!=='revoked'?`<button class="fbtn" onclick="extendTrial(${JSON.stringify(t.token)})" title="Estender +24h">+24h</button>`:''}
+      ${t.status==='active'?`<button class="fbtn danger-text" onclick="revokeTrial(${JSON.stringify(t.token)})">Revogar</button>`:''}
     </div>
     <div class="meta-row">
-      <span>Criado: ${t.created_at?.replace('T',' ').replace('Z','')}</span>
-      <span>Expira: ${t.expires_at?.replace('T',' ').replace('Z','')}</span>
-      ${t.first_access?`<span>1º acesso: ${t.first_access?.replace('T',' ').replace('Z','')}</span>`:''}
+      <span>Criado: ${esc(t.created_at?.replace('T',' ').replace('Z',''))}</span>
+      <span>Expira: ${esc(t.expires_at?.replace('T',' ').replace('Z',''))}</span>
+      ${t.first_access?`<span>1º acesso: ${esc(t.first_access?.replace('T',' ').replace('Z',''))}</span>`:''}
     </div>
-    <div class="mono-url">${t.trial_url}</div>
+    <div class="mono-url">${esc(t.trial_url)}</div>
   </div>`).join('');
 }
 
@@ -7182,6 +7331,132 @@ async function showWHLogs(id){
       ${l.error?`<span style="color:var(--red)" title="${l.error}">⚠</span>`:''}
     </div>`).join('')}
   </div>`;
+}
+
+// ══════════════════════════════════════════ SECURITY POSTURE ════════
+
+const _categoryMeta = {
+  identity:     { label: 'Identidade & Acesso',    icon: '🔑' },
+  transport:    { label: 'Transporte & Headers',   icon: '🔒' },
+  availability: { label: 'Disponibilidade',        icon: '⚡' },
+  detection:    { label: 'Detecção & Inteligência',icon: '🔎' },
+  visibility:   { label: 'Visibilidade & Alertas', icon: '👁' },
+  privacy:      { label: 'Privacidade & Compliance',icon:'🛡' },
+};
+
+async function loadSecurityScore(){
+  const pg = document.getElementById('p-security-score');
+  if(!pg) return;
+
+  pg.innerHTML = `
+  <div class="page-shell">
+    <div class="page-header tight">
+      <div>
+        <div class="page-title">🛡 Security Posture Score</div>
+        <div class="page-subtitle">Avaliação contínua dos controles de segurança ativos nesta instância.</div>
+      </div>
+      <button class="fbtn" onclick="loadSecurityScore()" title="Atualizar">↻ Atualizar</button>
+    </div>
+    <div id="sec-score-body"><div class="empty"><span>⏳ Calculando score…</span></div></div>
+  </div>`;
+
+  const r = await api('/security/score');
+  const body = document.getElementById('sec-score-body');
+  if(!body) return;
+
+  if(!r || r.error){
+    body.innerHTML = `<div class="panel-card module-empty tall"><span>⚠ Erro ao calcular score: ${r?.error||'Sem resposta do servidor'}</span></div>`;
+    return;
+  }
+
+  const score  = r.score ?? 0;
+  const grade  = r.grade ?? 'F';
+  const gcolor = r.grade_color ?? '#da3633';
+  const glabel = r.grade_label ?? '';
+  const passed = r.passed_count ?? 0;
+  const failed = r.failed_count ?? 0;
+  const total  = passed + failed;
+  const checks = r.checks ?? [];
+  const issues = r.top_issues ?? [];
+
+  // Score ring via SVG
+  const radius = 52, circ = 2 * Math.PI * radius;
+  const dash   = (score / 100) * circ;
+
+  // Group checks by category
+  const byCategory = {};
+  checks.forEach(c => {
+    const cat = c.category || 'other';
+    if(!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(c);
+  });
+
+  const catOrder = ['identity','transport','availability','detection','visibility','privacy'];
+
+  body.innerHTML = `
+  <!-- Hero row -->
+  <div class="sec-hero">
+    <div class="sec-ring-wrap">
+      <svg width="140" height="140" viewBox="0 0 140 140">
+        <circle cx="70" cy="70" r="${radius}" fill="none" stroke="var(--b2)" stroke-width="12"/>
+        <circle cx="70" cy="70" r="${radius}" fill="none" stroke="${gcolor}" stroke-width="12"
+          stroke-dasharray="${dash.toFixed(1)} ${circ.toFixed(1)}"
+          stroke-dashoffset="${(circ / 4).toFixed(1)}"
+          stroke-linecap="round"
+          style="transition:stroke-dasharray .6s ease"/>
+        <text x="70" y="62" text-anchor="middle" fill="${gcolor}" font-size="28" font-weight="700" font-family="var(--head)">${grade}</text>
+        <text x="70" y="82" text-anchor="middle" fill="var(--txt2)" font-size="11" font-family="var(--mono)">${score}%</text>
+        <text x="70" y="96" text-anchor="middle" fill="var(--txt3)" font-size="10" font-family="var(--mono)">${glabel}</text>
+      </svg>
+    </div>
+    <div class="sec-hero-info">
+      <div class="sec-grade-label" style="color:${gcolor}">${glabel}</div>
+      <div class="sec-score-detail">${r.earned} / ${r.total} pontos</div>
+      <div class="sec-checks-summary">
+        <span style="color:var(--grn)">✔ ${passed} passou${passed!==1?'ram':''}</span>
+        <span style="color:var(--red)">✗ ${failed} falhou${failed!==1?'ram':''}</span>
+        <span style="color:var(--txt3)">de ${total} controles</span>
+      </div>
+      ${score < 100 ? `<div class="sec-tip">💡 Corrija os itens abaixo para atingir score máximo.</div>` : `<div class="sec-tip" style="color:var(--grn)">✅ Todos os controles ativos!</div>`}
+    </div>
+  </div>
+
+  <!-- Top issues -->
+  ${issues.length ? `
+  <div class="sec-section-head">⚠ Problemas Prioritários</div>
+  <div class="sec-issues-list">
+    ${issues.map(i=>`
+    <div class="sec-issue-row">
+      <span class="sec-issue-icon">✗</span>
+      <div class="sec-issue-text">
+        <div class="sec-issue-label">${esc(i.label)}</div>
+        <div class="sec-issue-rec">${esc(i.recommendation)}</div>
+      </div>
+    </div>`).join('')}
+  </div>` : ''}
+
+  <!-- Checks by category -->
+  ${catOrder.filter(cat => byCategory[cat]?.length).map(cat => {
+    const meta = _categoryMeta[cat] || { label: cat, icon: '●' };
+    const catChecks = byCategory[cat];
+    const catPassed = catChecks.filter(c=>c.passed).length;
+    return `
+    <div class="sec-section-head">${meta.icon} ${meta.label} <span class="sec-cat-score">${catPassed}/${catChecks.length}</span></div>
+    <div class="sec-checks-grid">
+      ${catChecks.map(c => `
+      <div class="sec-check-card ${c.passed ? 'ok' : 'fail'}">
+        <div class="sec-check-status">${c.passed ? '✔' : '✗'}</div>
+        <div class="sec-check-body">
+          <div class="sec-check-label">${esc(c.label)}</div>
+          <div class="sec-check-value">${esc(c.value)}</div>
+          ${!c.passed && c.recommendation ? `<div class="sec-check-rec">→ ${esc(c.recommendation)}</div>` : ''}
+        </div>
+        <div class="sec-check-pts ${c.passed?'pts-ok':'pts-fail'}">${c.weight}pt${c.weight!==1?'s':''}</div>
+      </div>`).join('')}
+    </div>`;
+  }).join('')}
+
+  <div class="sec-footer">Gerado em ${r.generated_at?.replace('T',' ').replace('Z','') || '—'} · tenant: ${r.tenant_id || '—'}</div>`;
 }
 
 // ══════════════════════════════════════════════ MITRE ATT&CK ════════

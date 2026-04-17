@@ -286,6 +286,12 @@ class IOCManager:
                 notes: str = "") -> dict:
         """Adiciona um IOC manualmente. Retorna o registro criado."""
         value = value.strip()
+        if len(value) > 512:
+            raise ValueError("IOC value: máximo 512 caracteres")
+        if threat_name and len(threat_name) > 120:
+            raise ValueError("threat_name: máximo 120 caracteres")
+        if notes and len(notes) > 1000:
+            raise ValueError("notes: máximo 1000 caracteres")
         if not ioc_type:
             ioc_type = _detect_ioc_type(value)
         if not ioc_type:

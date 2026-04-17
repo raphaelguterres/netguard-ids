@@ -52,6 +52,16 @@ class TrialEngine:
                      duration_h: int = 72, notes: str = "") -> dict:
         if not email or "@" not in email:
             raise ValueError("E-mail inválido")
+        if len(email) > 254:
+            raise ValueError("E-mail: máximo 254 caracteres")
+        if name and len(name) > 120:
+            raise ValueError("name: máximo 120 caracteres")
+        if company and len(company) > 120:
+            raise ValueError("company: máximo 120 caracteres")
+        if notes and len(notes) > 1000:
+            raise ValueError("notes: máximo 1000 caracteres")
+        if not (1 <= duration_h <= 8760):   # 1h – 1 year
+            raise ValueError("duration_h deve estar entre 1 e 8760 horas")
 
         token      = "ng_trial_" + secrets.token_urlsafe(24)
         now        = datetime.now(timezone.utc)

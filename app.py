@@ -6627,6 +6627,258 @@ def admin_security_stats():
     })
 
 
+# ═══════════════════════════════════════ SECURITY POSTURE ══════════
+
+def _security_score_checks() -> list[dict]:
+    """
+    Avalia 12 controles de segurança e retorna lista de checks com:
+      id, label, category, weight, passed, value, recommendation
+    Pontuação máxima = soma de todos os weights = 100 pts.
+    """
+    checks: list[dict] = []
+
+    def _check(id_: str, label: str, category: str, weight: int,
+                passed: bool, value: str, recommendation: str):
+        checks.append({
+            "id": id_,
+            "label": label,
+            "category": category,
+            "weight": weight,
+            "passed": passed,
+            "value": value,
+            "recommendation": recommendation,
+        })
+
+    # ── 1. Autenticação habilitada (15 pts) ────────────────────────
+    auth_on = AUTH_ENABLED if AUTH_MODULE_OK else False
+    _check(
+        "auth_enabled", "Autenticação Habilitada", "identity", 15,
+        auth_on,
+        "Ativo" if auth_on else "Desativado",
+        "Configure AUTH_ENABLED=true e reinicie o servidor para exigir login."
+        if not auth_on else "",
+    )
+
+    # ── 2. SECRET_KEY não é o padrão inseguro (15 pts) ────────────
+    _dev_keys = {
+        "netguard-insecure-dev-key-change-in-prod",
+        "dev", "secret", "changeme", "insecure",
+    }
+    secret_key = app.config.get("SECRET_KEY", "")
+    secret_ok = bool(secret_key) and secret_key not in _dev_keys and len(secret_key) >= 32
+    _check(
+        "secret_key", "SECRET_KEY Não-Padrão", "identity", 15,
+        secret_ok,
+        f"OK ({len(secret_key)} chars)" if secret_ok else "Usando chave padrão insegura",
+        "Defina SECRET_KEY como string aleatória ≥32 chars em variável de ambiente."
+        if not secret_ok else "",
+    )
+
+    # ── 3. HTTPS enforced (10 pts) ─────────────────────────────────
+    https_on = _HTTPS_ONLY
+    _check(
+        "https_enforced", "HTTPS Obrigatório", "transport", 10,
+        https_on,
+        "Ativo" if https_on else "Desativado",
+        "Configure HTTPS_ONLY=true e forneça certificado TLS para produção."
+        if not https_on else "",
+    )
+
+    # ── 4. CSP via Flask-Talisman (10 pts) ────────────────────────
+    talisman_on = "talisman" in globals() and globals().get("talisman") is not None
+    _check(
+        "csp_headers", "Content Security Policy (CSP)", "transport", 10,
+        talisman_on,
+        "Ativo" if talisman_on else "Desativado",
+        "Instale flask-talisman: pip install flask-talisman"
+        if not talisman_on else "",
+    )
+
+    # ── 5. Rate Limiting (10 pts) ──────────────────────────────────
+    try:
+        from flask_limiter import Limiter as _FL  # noqa: PLC0415
+        rate_on = isinstance(globals().get("limiter"), _FL)
+    except ImportError:
+        rate_on = False
+    _check(
+        "rate_limiting", "Rate Limiting", "availability", 10,
+        rate_on,
+        "Ativo (600/min global)" if rate_on else "Desativado",
+        "Instale flask-limiter: pip install flask-limiter"
+        if not rate_on else "",
+    )
+
+    # ── 6. BruteForce Guard no login (10 pts) ─────────────────────
+    try:
+        _bf_db = str(pathlib.Path(__file__).parent / "netguard_security.db")
+        _bf = get_bf_guard(_bf_db)
+        bf_on = _bf is not None
+    except Exception:
+        bf_on = False
+    _check(
+        "brute_force", "Proteção Brute-Force", "identity", 10,
+        bf_on,
+        "Ativo (lockout escalonado)" if bf_on else "Desativado",
+        "Verifique importação de security.py e get_bf_guard."
+        if not bf_on else "",
+    )
+
+    # ── 7. Audit log configurado (5 pts) ──────────────────────────
+    audit_path = os.environ.get("IDS_AUDIT_LOG", "netguard_audit.log")
+    audit_ok = bool(audit_path) and _audit_logger.handlers
+    _check(
+        "audit_log", "Audit Log Estruturado", "visibility", 5,
+        bool(audit_ok),
+        f"Ativo → {audit_path}" if audit_ok else "Sem handler de arquivo",
+        "Configure IDS_AUDIT_LOG=caminho/para/audit.log"
+        if not audit_ok else "",
+    )
+
+    # ── 8. Webhooks configurados (5 pts) ──────────────────────────
+    webhook_count = 0
+    try:
+        from engine.webhook_engine import get_webhook_engine
+        _db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+        _tid = _resolve_tenant_id()
+        _we = get_webhook_engine(_db, _tid)
+        webhook_count = len(_we.list_webhooks())
+    except Exception:
+        pass
+    _check(
+        "webhooks", "Alertas via Webhook", "visibility", 5,
+        webhook_count > 0,
+        f"{webhook_count} webhook(s) configurado(s)" if webhook_count else "Nenhum configurado",
+        "Configure pelo menos 1 webhook (Slack/Teams/Discord) na aba Webhooks."
+        if webhook_count == 0 else "",
+    )
+
+    # ── 9. ML Anomaly treinado (5 pts) ────────────────────────────
+    ml_trained = False
+    try:
+        _ml_eng = _get_ml_anomaly()
+        status = _ml_eng.status()
+        ml_trained = status.get("trained", False)
+    except Exception:
+        pass
+    _check(
+        "ml_anomaly", "ML Anomaly Detection", "detection", 5,
+        ml_trained,
+        "Modelo treinado" if ml_trained else "Sem modelo treinado",
+        "Vá à aba ML Anomaly e clique em Treinar Modelo."
+        if not ml_trained else "",
+    )
+
+    # ── 10. Custom Rules ativas (5 pts) ───────────────────────────
+    active_rules = 0
+    try:
+        from custom_rules import get_custom_rule_engine  # noqa: PLC0415
+        _db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+        _cre = get_custom_rule_engine(_db, _resolve_tenant_id())
+        rules = _cre.list_rules()
+        active_rules = sum(1 for r in rules if r.get("enabled", False))
+    except Exception:
+        pass
+    _check(
+        "custom_rules", "Regras Customizadas Ativas", "detection", 5,
+        active_rules > 0,
+        f"{active_rules} regra(s) ativa(s)" if active_rules else "Nenhuma ativa",
+        "Crie e ative regras de detecção na aba My Rules."
+        if active_rules == 0 else "",
+    )
+
+    # ── 11. IOC list populada (5 pts) ─────────────────────────────
+    ioc_count = 0
+    try:
+        _ioc_mgr = _get_ioc_manager()
+        ioc_data = _ioc_mgr.list_iocs(page=1, per_page=1)
+        ioc_count = ioc_data.get("total", 0)
+    except Exception:
+        pass
+    _check(
+        "ioc_list", "Lista de IOCs Configurada", "detection", 5,
+        ioc_count > 0,
+        f"{ioc_count} IOC(s) cadastrado(s)" if ioc_count else "Lista vazia",
+        "Importe IOCs (hashes, IPs, domínios) na aba IOCs para detecção proativa."
+        if ioc_count == 0 else "",
+    )
+
+    # ── 12. PII masking ativo (5 pts) ─────────────────────────────
+    try:
+        from security import SensitiveDataFilter as _SDF  # noqa: PLC0415
+        _root_handlers = logging.getLogger().handlers
+        pii_ok = any(
+            any(isinstance(f, _SDF) for f in h.filters)
+            for h in _root_handlers
+        )
+    except Exception:
+        pii_ok = False
+    _check(
+        "pii_masking", "Mascaramento de PII nos Logs", "privacy", 5,
+        pii_ok,
+        "Ativo (tokens, emails, chaves mascarados)" if pii_ok else "Desativado",
+        "Verifique se SensitiveDataFilter está instalado nos handlers de logging."
+        if not pii_ok else "",
+    )
+
+    return checks
+
+
+def _score_from_checks(checks: list[dict]) -> dict:
+    """Calcula score, grade e resumo a partir dos checks."""
+    total_weight = sum(c["weight"] for c in checks)
+    earned       = sum(c["weight"] for c in checks if c["passed"])
+    pct          = round((earned / total_weight * 100) if total_weight else 0, 1)
+
+    if pct >= 90:
+        grade, grade_label, color = "A", "Excelente", "#2ea44f"
+    elif pct >= 75:
+        grade, grade_label, color = "B", "Bom", "#58a6ff"
+    elif pct >= 55:
+        grade, grade_label, color = "C", "Razoável", "#f0883e"
+    elif pct >= 35:
+        grade, grade_label, color = "D", "Fraco", "#f85149"
+    else:
+        grade, grade_label, color = "F", "Crítico", "#da3633"
+
+    failed = [c for c in checks if not c["passed"]]
+    passed = [c for c in checks if c["passed"]]
+
+    return {
+        "score":       pct,
+        "earned":      earned,
+        "total":       total_weight,
+        "grade":       grade,
+        "grade_label": grade_label,
+        "grade_color": color,
+        "passed_count":  len(passed),
+        "failed_count":  len(failed),
+        "checks":     checks,
+        "top_issues": [
+            {"id": c["id"], "label": c["label"], "recommendation": c["recommendation"]}
+            for c in sorted(failed, key=lambda x: x["weight"], reverse=True)[:5]
+        ],
+    }
+
+
+@app.route("/api/security/score", methods=["GET"])
+@auth
+@require_role("analyst", "admin")
+def security_posture_score():
+    """
+    Security Posture Score — avalia 12 controles de segurança e retorna
+    score 0-100, grade A-F, checks individuais e top-5 issues para remediar.
+    """
+    try:
+        checks  = _security_score_checks()
+        payload = _score_from_checks(checks)
+        payload["generated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        payload["tenant_id"]    = _resolve_tenant_id()
+        return jsonify(payload)
+    except Exception as _e:
+        logger.exception("security_posture_score error")
+        return jsonify({"error": "internal_error", "detail": str(_e)}), 500
+
+
 # ═══════════════════════════════════════ MITRE ATT&CK ══════════════
 
 def _get_mitre_engine():
