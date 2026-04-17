@@ -74,6 +74,12 @@ class TestXDRPipeline(unittest.TestCase):
         detection = outcome.detections[0]
         self.assertTrue(detection.related_events)
         self.assertTrue(detection.recommended_action)
+        self.assertEqual(detection.host_id, "host-01")
+        self.assertEqual(detection.process_name, "powershell.exe")
+        self.assertEqual(detection.parent_process, "winword.exe")
+        self.assertTrue(detection.cmdline)
+        self.assertEqual(detection.technique, "T1059.001")
+        self.assertTrue(detection.timestamp.endswith("Z"))
 
     def test_success_after_failures_triggers_credential_abuse_detection(self):
         failure = {
@@ -137,6 +143,125 @@ class TestXDRPipeline(unittest.TestCase):
             last = self.pipeline.process_payload(event)[0]
         self.assertIsNotNone(last)
         self.assertTrue(any(item.rule_id == "NG-EDR-012" for item in last.detections))
+
+    def test_office_to_script_to_network_to_persistence_chain_triggers_correlation(self):
+        process_outcome = self.pipeline.process_payload(
+            {
+                "host_id": "host-chain-01",
+                "event_type": "process_execution",
+                "severity": "medium",
+                "timestamp": "2026-04-13T13:00:00Z",
+                "process_name": "powershell.exe",
+                "parent_process": "winword.exe",
+                "command_line": "powershell.exe -nop -enc ZQBjAGgAbwA=",
+                "pid": 2222,
+                "ppid": 1111,
+                "source": "agent",
+                "platform": "windows",
+                "details": {},
+            }
+        )[0]
+        self.assertTrue(any(item.alert_type == "office_spawned_interpreter" for item in process_outcome.detections))
+
+        self.pipeline.process_payload(
+            {
+                "host_id": "host-chain-01",
+                "event_type": "network_connection",
+                "severity": "medium",
+                "timestamp": "2026-04-13T13:00:20Z",
+                "process_name": "powershell.exe",
+                "parent_process": "winword.exe",
+                "pid": 2222,
+                "ppid": 1111,
+                "network_direction": "outbound",
+                "network_dst_ip": "8.8.8.8",
+                "network_dst_port": 8443,
+                "source": "agent",
+                "details": {},
+            }
+        )
+
+        persistence_outcome = self.pipeline.process_payload(
+            {
+                "host_id": "host-chain-01",
+                "event_type": "persistence_indicator",
+                "severity": "high",
+                "timestamp": "2026-04-13T13:00:40Z",
+                "process_name": "powershell.exe",
+                "parent_process": "winword.exe",
+                "pid": 2222,
+                "ppid": 1111,
+                "persistence_method": "scheduled_task",
+                "persistence_target": r"C:\Users\alice\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup",
+                "source": "agent",
+                "details": {},
+            }
+        )[0]
+
+        correlation_ids = {item.rule_id for item in persistence_outcome.correlations}
+        self.assertIn("NG-XDR-COR-005", correlation_ids)
+        chain = next(item for item in persistence_outcome.correlations if item.rule_id == "NG-XDR-COR-005")
+        self.assertEqual(chain.alert_type, "office_script_external_persistence_chain")
+        self.assertEqual(chain.host_id, "host-chain-01")
+        self.assertIn("T1204.002", chain.technique)
+        self.assertGreaterEqual(persistence_outcome.host_risk_score, 80)
+
+    def test_security_events_include_detection_correlation_and_response_records(self):
+        process_event = {
+            "host_id": "host-events-01",
+            "event_type": "process_execution",
+            "severity": "medium",
+            "timestamp": "2026-04-13T14:00:00Z",
+            "process_name": "powershell.exe",
+            "parent_process": "winword.exe",
+            "command_line": "powershell.exe -nop -enc ZQBjAGgAbwA=",
+            "pid": 4040,
+            "ppid": 3030,
+            "source": "agent",
+            "details": {},
+        }
+        self.pipeline.process_payload(process_event)
+        self.pipeline.process_payload(
+            {
+                "host_id": "host-events-01",
+                "event_type": "network_connection",
+                "severity": "medium",
+                "timestamp": "2026-04-13T14:00:10Z",
+                "process_name": "powershell.exe",
+                "parent_process": "winword.exe",
+                "pid": 4040,
+                "ppid": 3030,
+                "network_direction": "outbound",
+                "network_dst_ip": "8.8.8.8",
+                "network_dst_port": 8443,
+                "source": "agent",
+                "details": {},
+            }
+        )
+        outcome = self.pipeline.process_payload(
+            {
+                "host_id": "host-events-01",
+                "event_type": "persistence_indicator",
+                "severity": "high",
+                "timestamp": "2026-04-13T14:00:20Z",
+                "process_name": "powershell.exe",
+                "parent_process": "winword.exe",
+                "pid": 4040,
+                "ppid": 3030,
+                "persistence_method": "scheduled_task",
+                "persistence_target": r"C:\Windows\Tasks\updater.job",
+                "source": "agent",
+                "details": {},
+            }
+        )[0]
+
+        security_events = outcome.to_security_events()
+        event_types = {item.event_type for item in security_events}
+        self.assertIn("persistence_indicator_detected", event_types)
+        self.assertIn("office_script_external_persistence_chain", event_types)
+        self.assertIn("generate_incident_ticket", event_types)
+        chain_event = next(item for item in security_events if item.event_type == "office_script_external_persistence_chain")
+        self.assertEqual(chain_event.mitre.technique, "T1204.002 -> T1059.001 -> T1071 -> T1547")
 
     def test_invalid_event_type_raises_value_error(self):
         with self.assertRaises(ValueError):

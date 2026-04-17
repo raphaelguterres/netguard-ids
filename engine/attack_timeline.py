@@ -33,15 +33,32 @@ EVENT_PHASE_MAP = {
     # POWERSHELL / EXEC
     "powershell_encoded_command": "Execution",
     "suspicious_process_execution": "Execution",
+    "suspicious_powershell": "Execution",
+    "suspicious_bash": "Execution",
+    "encoded_command_execution": "Defense Evasion",
+    "office_spawned_interpreter": "Execution",
+    "rare_process_execution": "Execution",
+    "unusual_parent_child": "Execution",
 
     # MOVEMENT
     "lateral_movement_detected": "Lateral Movement",
 
     # DATA
     "large_outbound_transfer": "Exfiltration",
+    "unusual_outbound_port": "Command and Control",
+    "rare_outbound_destination": "Command and Control",
+    "beaconing_pattern_detected": "Command and Control",
 
     # MALWARE
     "malware_detected": "Impact",
+    "persistence_indicator_detected": "Persistence",
+    "brute_force_auth_pattern": "Credential Access",
+    "auth_failure_then_success": "Credential Access",
+    "login_outside_baseline": "Initial Access",
+    "execution_persistence_chain": "Persistence",
+    "credential_to_execution_chain": "Execution",
+    "execution_to_external_beaconing": "Command and Control",
+    "office_script_external_persistence_chain": "Persistence",
 
 }
 

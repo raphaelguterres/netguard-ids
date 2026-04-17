@@ -40,6 +40,7 @@ class HostBehaviorProfile:
     network_dest_times: defaultdict[tuple[str, int], deque] = field(
         default_factory=lambda: defaultdict(lambda: deque(maxlen=20))
     )
+    process_index: dict[int, dict[str, Any]] = field(default_factory=dict)
     recent_event_refs: deque = field(default_factory=lambda: deque(maxlen=250))
     recent_process_window: deque = field(default_factory=lambda: deque(maxlen=64))
     recent_network_window: deque = field(default_factory=lambda: deque(maxlen=64))
@@ -64,6 +65,22 @@ class HostBehaviorProfile:
                 self.parent_child_counts[(parent, process)] += 1
             if command:
                 self.command_counts[command] += 1
+            if event.pid:
+                self.process_index[int(event.pid)] = {
+                    "pid": int(event.pid),
+                    "ppid": int(event.ppid or 0),
+                    "process_name": event.process_name,
+                    "parent_process": event.parent_process,
+                    "command_line": event.command_line,
+                    "timestamp": event.timestamp,
+                    "event_id": event.event_id,
+                }
+                if len(self.process_index) > 512:
+                    oldest_pid = min(
+                        self.process_index,
+                        key=lambda pid: parse_event_timestamp(self.process_index[pid].get("timestamp", "")).timestamp(),
+                    )
+                    self.process_index.pop(oldest_pid, None)
 
         if event.event_type == "authentication":
             key = ((event.username or "").lower(), event.auth_source_ip or "")
@@ -134,6 +151,45 @@ class HostBehaviorProfile:
             return []
         points = points[-sample_size:]
         return [round(points[idx] - points[idx - 1], 3) for idx in range(1, len(points))]
+
+    def lineage_for(self, event, *, depth: int = 4) -> list[dict[str, Any]]:
+        lineage: list[dict[str, Any]] = []
+        seen: set[int] = set()
+
+        current = {
+            "process_name": event.process_name,
+            "parent_process": event.parent_process,
+            "command_line": event.command_line,
+            "pid": event.pid,
+            "ppid": event.ppid,
+            "timestamp": event.timestamp,
+            "event_id": event.event_id,
+        }
+        if any(current.values()):
+            lineage.append(current)
+
+        next_pid = int(event.ppid or 0)
+        while next_pid and next_pid not in seen and len(lineage) < max(depth, 1):
+            seen.add(next_pid)
+            parent = self.process_index.get(next_pid)
+            if not parent:
+                break
+            lineage.append(dict(parent))
+            next_pid = int(parent.get("ppid") or 0)
+
+        if not lineage and event.parent_process:
+            lineage.append(
+                {
+                    "process_name": event.process_name,
+                    "parent_process": event.parent_process,
+                    "command_line": event.command_line,
+                    "pid": event.pid,
+                    "ppid": event.ppid,
+                    "timestamp": event.timestamp,
+                    "event_id": event.event_id,
+                }
+            )
+        return lineage
 
     def synthetic_snapshot(self, event) -> dict[str, Any]:
         cpu_value = 0.0

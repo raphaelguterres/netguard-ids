@@ -916,7 +916,7 @@ def _get_xdr_pipeline():
         return _xdr_pipeline_singleton
 
 
-def _get_tenant_event_repo():
+def _current_request_tenant_id():
     tenant_id = None
     try:
         from flask import g
@@ -924,8 +924,22 @@ def _get_tenant_event_repo():
         tenant_id = getattr(g, "tenant_id", None)
     except Exception:
         tenant_id = None
-    if not tenant_id:
-        tenant_id = _resolve_tenant_id()
+    return tenant_id or _resolve_tenant_id() or "default"
+
+
+def _get_playbook_engine():
+    global _playbook_engine_singleton
+    if not PLAYBOOK_AVAILABLE or get_playbook_engine is None:
+        raise RuntimeError("playbook engine unavailable")
+    with _engine_singletons_lock:
+        if _playbook_engine_singleton is None:
+            db_path = getattr(repo, "db_path", None) or str(pathlib.Path(__file__).parent / "netguard_soc.db")
+            _playbook_engine_singleton = get_playbook_engine(db_path)
+        return _playbook_engine_singleton
+
+
+def _get_tenant_event_repo():
+    tenant_id = _current_request_tenant_id()
     return EventRepository(
         db_path=getattr(repo, "db_path", None),
         tenant_id=tenant_id,
@@ -934,6 +948,7 @@ def _get_tenant_event_repo():
 
 def _persist_xdr_outcomes(outcomes):
     tenant_repo = _get_tenant_event_repo()
+    tenant_id = _current_request_tenant_id()
     saved = 0
     for outcome in outcomes:
         security_events = outcome.to_security_events()
@@ -944,6 +959,63 @@ def _persist_xdr_outcomes(outcomes):
                     risk_engine.ingest_event(event.to_dict())
                 except Exception:
                     pass
+        if PLAYBOOK_AVAILABLE:
+            findings = list(outcome.detections) + list(outcome.correlations)
+            incident_opened = False
+            for finding in findings:
+                if str(getattr(finding, "severity", "low")).lower() not in ("high", "critical"):
+                    continue
+                try:
+                    incident = _get_playbook_engine().auto_trigger(
+                        {
+                            "threat_name": getattr(finding, "rule_name", "") or getattr(finding, "alert_type", ""),
+                            "severity": getattr(finding, "severity", "low"),
+                            "mitre_tactic": getattr(finding, "tactic", ""),
+                            "technique": getattr(finding, "technique", ""),
+                            "host_id": outcome.event.host_id,
+                            "process_name": getattr(finding, "process_name", ""),
+                            "parent_process": getattr(finding, "parent_process", ""),
+                            "log_entry": getattr(finding, "summary", "")[:400],
+                            "timestamp": getattr(finding, "timestamp", "") or outcome.event.timestamp,
+                        },
+                        tenant_id=tenant_id,
+                    )
+                    incident_opened = incident_opened or bool(incident)
+                except Exception:
+                    logger.exception(
+                        "XDR incident auto-trigger failed | tenant=%s | host=%s | finding=%s",
+                        tenant_id,
+                        outcome.event.host_id,
+                        getattr(finding, "rule_id", ""),
+                    )
+            if not incident_opened and any(action.action_type == "generate_incident_ticket" for action in outcome.actions):
+                try:
+                    _get_playbook_engine().auto_trigger(
+                        {
+                            "threat_name": outcome.highest_severity + "_xdr_incident",
+                            "severity": "critical",
+                            "mitre_tactic": next(
+                                (getattr(item, "tactic", "") for item in findings if getattr(item, "tactic", "")),
+                                "",
+                            ),
+                            "technique": next(
+                                (getattr(item, "technique", "") for item in findings if getattr(item, "technique", "")),
+                                "",
+                            ),
+                            "host_id": outcome.event.host_id,
+                            "process_name": outcome.event.process_name,
+                            "parent_process": outcome.event.parent_process,
+                            "log_entry": (findings[0].summary if findings else outcome.event.command_line)[:400],
+                            "timestamp": outcome.event.timestamp,
+                        },
+                        tenant_id=tenant_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "XDR incident fallback failed | tenant=%s | host=%s",
+                        tenant_id,
+                        outcome.event.host_id,
+                    )
     return saved
 
 
@@ -1232,6 +1304,447 @@ def _build_soc_preview_context():
     }
 
 
+def _soc_pretty_alert_type(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "telemetry_event"
+    return raw
+
+
+def _soc_labelize(value: str) -> str:
+    text = str(value or "").replace("_", " ").replace("-", " ").strip()
+    return text.title() if text else "Unknown"
+
+
+def _soc_chain_filter_key(chain_summary: str = "", alert_type: str = "") -> str:
+    base = str(chain_summary or alert_type or "").strip().lower()
+    if not base:
+        return "telemetry-event"
+    pieces = []
+    pending_dash = False
+    for char in base:
+        if char.isalnum():
+            if pending_dash and pieces:
+                pieces.append("-")
+            pieces.append(char)
+            pending_dash = False
+        else:
+            pending_dash = True
+    return "".join(pieces).strip("-") or "telemetry-event"
+
+
+def _soc_extract_lineage(details: dict) -> list[dict]:
+    lineage = details.get("process_lineage") or []
+    if not isinstance(lineage, list):
+        return []
+    normalized = []
+    for item in lineage:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "process_name": str(item.get("process_name") or item.get("parent_process") or "unknown"),
+                "parent_process": str(item.get("parent_process") or ""),
+                "command_line": str(item.get("command_line") or ""),
+                "pid": item.get("pid"),
+                "ppid": item.get("ppid"),
+                "timestamp": str(item.get("timestamp") or ""),
+                "event_id": str(item.get("event_id") or ""),
+            }
+        )
+    return normalized
+
+
+def _soc_chain_summary(alert_type: str, details: dict) -> str:
+    technique = str(details.get("technique") or "").strip()
+    summary = str(details.get("summary") or details.get("description") or "").strip()
+    chain = details.get("sequence")
+    if isinstance(chain, list) and chain:
+        return " -> ".join(_soc_labelize(item) for item in chain)
+    if summary:
+        return summary
+    if technique:
+        return technique
+    return _soc_labelize(alert_type)
+
+
+def _soc_related_event_ids(details: dict) -> list[str]:
+    related = details.get("related_events") or []
+    if not isinstance(related, list):
+        return []
+    event_ids = []
+    for item in related:
+        if not isinstance(item, dict):
+            continue
+        event_id = str(item.get("event_id") or "").strip()
+        if event_id:
+            event_ids.append(event_id)
+    return event_ids
+
+
+def _soc_lineage_key(lineage: list[dict]) -> tuple:
+    return tuple(
+        (
+            str(item.get("event_id") or ""),
+            str(item.get("process_name") or ""),
+            str(item.get("pid") or ""),
+        )
+        for item in lineage
+    )
+
+
+def _soc_add_lineage_block(
+    lineage_blocks: list[dict],
+    seen_lineage_keys: set,
+    *,
+    title: str,
+    technique: str,
+    tactic: str,
+    severity: str,
+    timestamp: str,
+    lineage: list[dict],
+) -> None:
+    if not lineage:
+        return
+    lineage_key = _soc_lineage_key(lineage)
+    if lineage_key and lineage_key in seen_lineage_keys:
+        return
+    if lineage_key:
+        seen_lineage_keys.add(lineage_key)
+    lineage_blocks.append(
+        {
+            "title": _soc_labelize(title),
+            "technique": str(technique or ""),
+            "tactic": str(tactic or ""),
+            "severity": str(severity or "low").lower(),
+            "timestamp": str(timestamp or "unknown"),
+            "steps": lineage,
+        }
+    )
+
+
+def _soc_timeline_key(item: dict) -> tuple:
+    return (
+        str(item.get("timestamp") or ""),
+        str(item.get("alert_type") or ""),
+        str(item.get("process_name") or ""),
+        str(item.get("cmdline") or ""),
+        str(item.get("title") or ""),
+    )
+
+
+def _soc_make_timeline_item(
+    *,
+    title: str,
+    alert_type: str,
+    severity: str,
+    timestamp: str,
+    description: str,
+    process_name: str = "",
+    parent_process: str = "",
+    cmdline: str = "",
+    technique: str = "",
+    tactic: str = "",
+    chain_summary: str = "",
+    related_event_ids: list[str] | None = None,
+    recommended_action: str = "investigate",
+    username: str = "",
+) -> dict:
+    filter_key = _soc_chain_filter_key(chain_summary, alert_type)
+    return {
+        "title": str(title or _soc_labelize(alert_type) or "Telemetry event"),
+        "alert_type": _soc_pretty_alert_type(alert_type or "telemetry_event"),
+        "severity": str(severity or "low").lower(),
+        "timestamp": str(timestamp or "unknown"),
+        "description": str(description or "Structured telemetry received from endpoint."),
+        "process_name": str(process_name or ""),
+        "parent_process": str(parent_process or ""),
+        "cmdline": str(cmdline or ""),
+        "technique": str(technique or ""),
+        "tactic": str(tactic or ""),
+        "chain_summary": str(chain_summary or _soc_labelize(alert_type)),
+        "chain_filter": filter_key,
+        "related_event_ids": list(related_event_ids or []),
+        "recommended_action": str(recommended_action or "investigate"),
+        "username": str(username or ""),
+    }
+
+
+def _soc_chain_stages(value: str, alert_type: str = "") -> list[str]:
+    raw = str(value or "").strip()
+    if raw and "->" in raw:
+        return [_soc_labelize(item) for item in raw.split("->") if str(item).strip()]
+    if raw:
+        return [_soc_labelize(raw)]
+    if alert_type:
+        return [_soc_labelize(alert_type)]
+    return []
+
+
+def _soc_build_attack_chains(host_events: list[dict], host_incidents: list[dict]) -> list[dict]:
+    chain_map: dict[tuple[str, str], dict] = {}
+
+    for item in host_events:
+        chain_summary = str(item.get("chain_summary") or "").strip()
+        technique = str(item.get("technique") or "").strip()
+        tactic = str(item.get("tactic") or "").strip()
+        alert_type = str(item.get("alert_type") or "").strip()
+        key = (chain_summary or alert_type or "telemetry_event", technique or tactic or alert_type)
+        chain = chain_map.setdefault(
+            key,
+            {
+                "title": _soc_labelize(chain_summary or alert_type),
+                "chain_summary": chain_summary or _soc_labelize(alert_type),
+                "filter_key": _soc_chain_filter_key(chain_summary, alert_type),
+                "severity": str(item.get("severity") or "low").lower(),
+                "last_seen": str(item.get("timestamp") or ""),
+                "alert_count": 0,
+                "related_event_total": 0,
+                "incident_count": 0,
+                "techniques": [],
+                "tactics": [],
+                "stages": [],
+                "processes": [],
+                "recommended_actions": [],
+                "statuses": [],
+            },
+        )
+        chain["alert_count"] += 1
+        chain["related_event_total"] += len(item.get("related_event_ids") or [])
+        if str(item.get("timestamp") or "") > chain["last_seen"]:
+            chain["last_seen"] = str(item.get("timestamp") or "")
+        if str(item.get("severity") or "low").lower() in ("critical", "high", "medium", "low"):
+            current = str(chain.get("severity") or "low").lower()
+            incoming = str(item.get("severity") or "low").lower()
+            order = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+            if order.get(incoming, 0) > order.get(current, 0):
+                chain["severity"] = incoming
+        if technique and technique not in chain["techniques"]:
+            chain["techniques"].append(technique)
+        if tactic and tactic not in chain["tactics"]:
+            chain["tactics"].append(tactic)
+        for stage in _soc_chain_stages(chain_summary, alert_type):
+            if stage not in chain["stages"]:
+                chain["stages"].append(stage)
+        process_name = str(item.get("process_name") or "").strip()
+        if process_name and process_name not in chain["processes"]:
+            chain["processes"].append(process_name)
+        recommended_action = str(item.get("recommended_action") or "").strip()
+        if recommended_action and recommended_action not in chain["recommended_actions"]:
+            chain["recommended_actions"].append(recommended_action)
+
+    for incident in host_incidents:
+        chain_summary = str(incident.get("chain_summary") or "").strip()
+        technique = str(incident.get("technique") or "").strip()
+        tactic = str(incident.get("tactic") or "").strip()
+        key = (chain_summary or str(incident.get("threat_name") or "incident"), technique or tactic or "incident")
+        chain = chain_map.setdefault(
+            key,
+            {
+                "title": _soc_labelize(chain_summary or incident.get("threat_name") or "incident"),
+                "chain_summary": chain_summary or _soc_labelize(incident.get("threat_name") or "incident"),
+                "filter_key": _soc_chain_filter_key(chain_summary, str(incident.get("threat_name") or "")),
+                "severity": str(incident.get("severity") or "high").lower(),
+                "last_seen": str(incident.get("updated_at") or incident.get("opened_at") or ""),
+                "alert_count": 0,
+                "related_event_total": 0,
+                "incident_count": 0,
+                "techniques": [],
+                "tactics": [],
+                "stages": [],
+                "processes": [],
+                "recommended_actions": [],
+                "statuses": [],
+            },
+        )
+        chain["incident_count"] += 1
+        if technique and technique not in chain["techniques"]:
+            chain["techniques"].append(technique)
+        if tactic and tactic not in chain["tactics"]:
+            chain["tactics"].append(tactic)
+        for stage in _soc_chain_stages(chain_summary, str(incident.get("threat_name") or "")):
+            if stage not in chain["stages"]:
+                chain["stages"].append(stage)
+        status = str(incident.get("status") or "").strip()
+        if status and status not in chain["statuses"]:
+            chain["statuses"].append(status)
+
+    chains = list(chain_map.values())
+    chains.sort(
+        key=lambda item: (
+            {"low": 1, "medium": 2, "high": 3, "critical": 4}.get(str(item.get("severity") or "low").lower(), 0),
+            int(item.get("incident_count") or 0),
+            int(item.get("alert_count") or 0),
+            str(item.get("last_seen") or ""),
+        ),
+        reverse=True,
+    )
+    return chains[:8]
+
+
+def _soc_pipeline_activity_rows(host_id: str) -> tuple[list[dict], list[dict]]:
+    host_events: list[dict] = []
+    lineage_blocks: list[dict] = []
+    seen_lineage_keys: set = set()
+    pipeline = _get_xdr_pipeline()
+    recent_activity = pipeline.recent_host_activity(host_id, limit=25)
+    for outcome in recent_activity:
+        highest_severity = str(outcome.get("highest_severity") or "low").lower()
+
+        for detection in outcome.get("detections") or []:
+            if not isinstance(detection, dict):
+                continue
+            details = detection.get("details") or {}
+            alert_type = str(detection.get("alert_type") or "telemetry_event")
+            lineage = _soc_extract_lineage(details)
+            if lineage:
+                _soc_add_lineage_block(
+                    lineage_blocks,
+                    seen_lineage_keys,
+                    title=alert_type,
+                    technique=str(detection.get("technique") or ""),
+                    tactic=str(detection.get("tactic") or ""),
+                    severity=str(detection.get("severity") or highest_severity),
+                    timestamp=str(detection.get("timestamp") or outcome.get("event", {}).get("timestamp") or ""),
+                    lineage=lineage,
+                )
+            host_events.append(
+                _soc_make_timeline_item(
+                    title=str(detection.get("rule_name") or _soc_labelize(alert_type)),
+                    alert_type=alert_type,
+                    severity=str(detection.get("severity") or highest_severity),
+                    timestamp=str(detection.get("timestamp") or outcome.get("event", {}).get("timestamp") or ""),
+                    description=str(detection.get("summary") or details.get("summary") or details.get("description") or ""),
+                    process_name=str(detection.get("process_name") or ""),
+                    parent_process=str(detection.get("parent_process") or ""),
+                    cmdline=str(detection.get("cmdline") or ""),
+                    technique=str(detection.get("technique") or ""),
+                    tactic=str(detection.get("tactic") or ""),
+                    chain_summary=_soc_chain_summary(alert_type, details),
+                    related_event_ids=_soc_related_event_ids({"related_events": detection.get("related_events") or []}),
+                    recommended_action=str(detection.get("recommended_action") or "investigate"),
+                )
+            )
+
+        for correlation in outcome.get("correlations") or []:
+            if not isinstance(correlation, dict):
+                continue
+            details = correlation.get("details") or {}
+            related_events = correlation.get("related_events") or []
+            process_name = ""
+            parent_process = ""
+            cmdline = ""
+            if related_events and isinstance(related_events, list):
+                first_related = next((item for item in related_events if isinstance(item, dict)), {})
+                process_name = str(first_related.get("process_name") or "")
+                parent_process = str(first_related.get("parent_process") or "")
+                cmdline = str(first_related.get("command_line") or "")
+            alert_type = str(correlation.get("alert_type") or "telemetry_event")
+            host_events.append(
+                _soc_make_timeline_item(
+                    title=str(correlation.get("rule_name") or _soc_labelize(alert_type)),
+                    alert_type=alert_type,
+                    severity=str(correlation.get("severity") or highest_severity),
+                    timestamp=str(correlation.get("timestamp") or outcome.get("event", {}).get("timestamp") or ""),
+                    description=str(correlation.get("summary") or details.get("summary") or details.get("description") or ""),
+                    process_name=process_name,
+                    parent_process=parent_process,
+                    cmdline=cmdline,
+                    technique=str(correlation.get("technique") or ""),
+                    tactic=str(correlation.get("tactic") or ""),
+                    chain_summary=_soc_chain_summary(alert_type, details),
+                    related_event_ids=_soc_related_event_ids({"related_events": related_events}),
+                    recommended_action="investigate",
+                )
+            )
+
+        for action in outcome.get("actions") or []:
+            if not isinstance(action, dict):
+                continue
+            action_type = str(action.get("action_type") or "response_action")
+            host_events.append(
+                _soc_make_timeline_item(
+                    title=_soc_labelize(action_type),
+                    alert_type=action_type,
+                    severity=highest_severity,
+                    timestamp=str(outcome.get("event", {}).get("timestamp") or ""),
+                    description=str(action.get("reason") or "Planned XDR response action."),
+                    technique="",
+                    tactic="response",
+                    chain_summary=_soc_labelize(action_type),
+                    related_event_ids=[],
+                    recommended_action=action_type,
+                )
+            )
+
+    return host_events, lineage_blocks
+
+
+def _soc_host_incidents(host_id: str, tenant_name: str) -> list[dict]:
+    if not PLAYBOOK_AVAILABLE:
+        return []
+    try:
+        import json as _json
+
+        host_incidents = []
+        seen_incidents = set()
+        tenant_candidates = []
+        if tenant_name == "Admin Workspace":
+            tenant_candidates.append("admin")
+        tenant_candidates.extend(
+            [
+                _current_request_tenant_id(),
+                _resolve_tenant_id(),
+                "admin",
+                "default",
+            ]
+        )
+        tenant_candidates = [item for item in dict.fromkeys(str(item or "").strip() for item in tenant_candidates) if item]
+
+        for tenant_id in tenant_candidates:
+            incidents = _get_playbook_engine().list_incidents(tenant_id=tenant_id, limit=50)
+            for incident in incidents:
+                incident_id = str(incident.get("incident_id") or "").strip()
+                if not incident_id or incident_id in seen_incidents:
+                    continue
+
+                trigger_raw = incident.get("trigger_event") or "{}"
+                if isinstance(trigger_raw, str):
+                    try:
+                        trigger_event = _json.loads(trigger_raw)
+                    except Exception:
+                        trigger_event = {}
+                elif isinstance(trigger_raw, dict):
+                    trigger_event = dict(trigger_raw)
+                else:
+                    trigger_event = {}
+
+                if str(trigger_event.get("host_id") or "").strip() != str(host_id):
+                    continue
+
+                seen_incidents.add(incident_id)
+                host_incidents.append(
+                    {
+                        "incident_id": incident_id,
+                        "playbook": incident.get("playbook"),
+                        "playbook_label": ((incident.get("playbook_meta") or {}).get("label") or _soc_labelize(incident.get("playbook"))),
+                        "severity": str(incident.get("severity") or "high").lower(),
+                        "status": str(incident.get("status") or "open").lower(),
+                        "opened_at": str(incident.get("opened_at") or ""),
+                        "updated_at": str(incident.get("updated_at") or ""),
+                        "chain_summary": _soc_chain_summary(trigger_event.get("alert_type") or trigger_event.get("threat_name"), trigger_event),
+                        "technique": str(trigger_event.get("technique") or ""),
+                        "tactic": str(trigger_event.get("mitre_tactic") or ""),
+                        "threat_name": str(trigger_event.get("threat_name") or ""),
+                        "tenant_name": tenant_name,
+                    }
+                )
+        return host_incidents
+    except Exception:
+        logger.exception("SOC host incident lookup failed | host=%s", host_id)
+        return []
+
+
 def _build_soc_host_detail_context(host_id: str, context: dict | None = None):
     context = context or _build_soc_preview_context()
     selected_host = next(
@@ -1244,7 +1757,12 @@ def _build_soc_host_detail_context(host_id: str, context: dict | None = None):
     host_alerts = [item for item in context["alerts"] if str(item.get("host")) == str(host_id)][:10]
     tenant_repo = _get_tenant_event_repo()
     host_recent = tenant_repo.query(limit=120, host_id=host_id)
+    if not host_recent:
+        host_recent = [item for item in tenant_repo.query(limit=250) if str(item.get("host_id") or "") == str(host_id)]
     host_events = []
+    seen_event_keys = set()
+    lineage_blocks = []
+    seen_lineage_keys = set()
     for event_dict in host_recent:
         if not (
             str(event_dict.get("source", "")).startswith("xdr")
@@ -1252,37 +1770,100 @@ def _build_soc_host_detail_context(host_id: str, context: dict | None = None):
         ):
             continue
         details = event_dict.get("details") or {}
-        host_events.append({
-            "title": str(event_dict.get("rule_name") or event_dict.get("event_type") or "Telemetry event"),
-            "severity": str(event_dict.get("severity") or selected_host.get("highest_severity") or "low").lower(),
-            "timestamp": str(event_dict.get("timestamp") or "unknown"),
-            "description": str(
+        alert_type = _soc_pretty_alert_type(details.get("alert_type") or event_dict.get("event_type") or "telemetry_event")
+        lineage = _soc_extract_lineage(details)
+        if lineage:
+            _soc_add_lineage_block(
+                lineage_blocks,
+                seen_lineage_keys,
+                title=alert_type,
+                technique=str(details.get("technique") or ""),
+                tactic=str(details.get("tactic") or ""),
+                severity=str(event_dict.get("severity") or selected_host.get("highest_severity") or "low").lower(),
+                timestamp=str(event_dict.get("timestamp") or "unknown"),
+                lineage=lineage,
+            )
+        item = _soc_make_timeline_item(
+            title=str(event_dict.get("rule_name") or _soc_labelize(alert_type) or "Telemetry event"),
+            alert_type=alert_type,
+            severity=str(event_dict.get("severity") or selected_host.get("highest_severity") or "low").lower(),
+            timestamp=str(event_dict.get("timestamp") or "unknown"),
+            description=str(
                 details.get("summary")
                 or details.get("description")
                 or details.get("message")
                 or "Structured telemetry received from endpoint."
             ),
-            "process_name": str(details.get("process_name") or details.get("parent_process") or details.get("command_line") or ""),
-            "recommended_action": str(details.get("recommended_action") or "investigate"),
-            "username": str(details.get("username") or ""),
-        })
+            process_name=str(details.get("process_name") or details.get("parent_process") or details.get("command_line") or ""),
+            parent_process=str(details.get("parent_process") or ""),
+            cmdline=str(details.get("cmdline") or details.get("command_line") or ""),
+            technique=str(details.get("technique") or ""),
+            tactic=str(details.get("tactic") or ""),
+            chain_summary=_soc_chain_summary(alert_type, details),
+            related_event_ids=_soc_related_event_ids(details),
+            recommended_action=str(details.get("recommended_action") or "investigate"),
+            username=str(details.get("username") or ""),
+        )
+        seen_event_keys.add(_soc_timeline_key(item))
+        host_events.append(item)
+
+    pipeline_events, pipeline_lineage = _soc_pipeline_activity_rows(host_id)
+    for item in pipeline_events:
+        item_key = _soc_timeline_key(item)
+        if item_key in seen_event_keys:
+            continue
+        seen_event_keys.add(item_key)
+        host_events.append(item)
+    for lineage in pipeline_lineage:
+        lineage_key = _soc_lineage_key(lineage.get("steps") or [])
+        if lineage_key and lineage_key in seen_lineage_keys:
+            continue
+        if lineage_key:
+            seen_lineage_keys.add(lineage_key)
+        lineage_blocks.append(lineage)
+
+    host_events.sort(key=lambda item: str(item.get("timestamp") or ""))
+
+    incident_rows = _soc_host_incidents(host_id, context["tenant_name"])
+    attack_chains = _soc_build_attack_chains(host_events, incident_rows)
+    selected_chain_filter = str(request.args.get("chain") or "").strip()
+    selected_chain = next((item for item in attack_chains if item.get("filter_key") == selected_chain_filter), None)
+    filtered_host_events = [
+        item for item in host_events
+        if not selected_chain_filter or item.get("chain_filter") == selected_chain_filter
+    ]
+    _, tenant_role = _resolve_tenant_with_role()
+    can_update_incidents = (not AUTH_ENABLED) or tenant_role in {"analyst", "admin"}
 
     host_metadata = [
         ("Tenant", context["tenant_name"]),
         ("Operating System", selected_host.get("operating_system", "Unknown")),
         ("Status", str(selected_host.get("status", "offline")).title()),
         ("Sensor", "NetGuard Agent / XDR Pipeline"),
+        ("Risk Score", f"{selected_host.get('risk_score', 0)}/100"),
     ]
 
     latest_user = next((item["username"] for item in host_events if item.get("username")), "")
     if latest_user:
         host_metadata.append(("Last Active User", latest_user))
 
+    if incident_rows:
+        host_metadata.append(("Open XDR Incidents", str(sum(1 for item in incident_rows if item["status"] in {"open", "in_progress"}))))
+
     return {
         **context,
         "selected_host": selected_host,
         "host_alerts": host_alerts,
-        "host_events": host_events[:20],
+        "host_events": filtered_host_events[:20],
+        "host_incidents": incident_rows[:10],
+        "host_lineage": lineage_blocks[:8],
+        "host_attack_chains": attack_chains,
+        "selected_chain_filter": selected_chain_filter,
+        "selected_chain": selected_chain,
+        "can_update_incidents": can_update_incidents,
+        "incident_status_options": ["open", "in_progress", "contained", "resolved", "false_positive"],
+        "host_timeline_total": len(host_events),
+        "host_timeline_filtered": len(filtered_host_events),
         "host_metadata": host_metadata,
     }
 
@@ -3124,6 +3705,8 @@ def xdr_events_ingest():
     flattened_actions = []
     detections = 0
     correlations = 0
+    detection_records = []
+    correlation_records = []
     for outcome in outcomes:
         detections += len(outcome.detections)
         correlations += len(outcome.correlations)
@@ -3134,19 +3717,24 @@ def xdr_events_ingest():
             "highest_severity": outcome.highest_severity,
         }
         flattened_actions.extend(action.to_dict() for action in outcome.actions)
+        detection_records.extend(item.to_dict() for item in outcome.detections)
+        correlation_records.extend(item.to_dict() for item in outcome.correlations)
 
+    tenant_id = _current_request_tenant_id()
     logger.info(
         "XDR ingest | tenant=%s | events=%d | detections=%d | correlations=%d | saved=%d",
-        _resolve_tenant_id(), len(outcomes), detections, correlations, saved,
+        tenant_id, len(outcomes), detections, correlations, saved,
     )
     return jsonify({
         "ok": True,
-        "tenant_id": _resolve_tenant_id(),
+        "tenant_id": tenant_id,
         "processed": len(outcomes),
         "saved_events": saved,
         "detections": detections,
         "correlations": correlations,
         "actions": flattened_actions[:50],
+        "detection_records": detection_records[:50],
+        "correlation_records": correlation_records[:25],
         "hosts": list(host_states.values()),
     })
 
@@ -6180,6 +6768,34 @@ def soc_preview_alerts():
     return render_template("soc/alerts.html", **_build_soc_preview_context())
 
 
+@app.route("/soc/incidents/<incident_id>/status", methods=["POST"])
+@app.route("/soc-preview/incidents/<incident_id>/status", methods=["POST"])
+@require_session
+@require_role("analyst", "admin")
+@csrf_protect
+def soc_incident_status_update(incident_id):
+    if not PLAYBOOK_AVAILABLE:
+        return jsonify({"ok": False, "error": "playbook_engine_unavailable"}), 503
+
+    payload = request.get_json(silent=True) if request.is_json else (request.form or {})
+    status = str((payload or {}).get("status") or "").strip().lower()
+    note = str((payload or {}).get("notes") or "").strip()
+    if status not in {"open", "in_progress", "contained", "resolved", "false_positive"}:
+        return jsonify({"ok": False, "error": "invalid_status"}), 400
+
+    engine = _get_playbook_engine()
+    if not engine.get_incident(incident_id):
+        return jsonify({"ok": False, "error": "incident_not_found"}), 404
+
+    ok = engine.update_incident_status(incident_id, status, notes=note)
+    if not ok:
+        return jsonify({"ok": False, "error": "incident_not_found"}), 404
+
+    incident = engine.get_incident(incident_id)
+    logger.info("SOC incident status updated | incident=%s | status=%s | tenant=%s", incident_id, status, _current_request_tenant_id())
+    return jsonify({"ok": True, "incident": incident})
+
+
 @app.route("/soc/hosts/<host_id>")
 @app.route("/soc-preview/hosts/<host_id>")
 @require_session
@@ -6203,6 +6819,8 @@ def soc_preview_host_detail(host_id):
             },
             "host_alerts": [],
             "host_events": [],
+            "host_incidents": [],
+            "host_lineage": [],
             "host_metadata": [
                 ("Tenant", base_context["tenant_name"]),
                 ("Operating System", "Unknown"),

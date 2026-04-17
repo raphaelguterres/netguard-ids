@@ -157,6 +157,150 @@ class TestSocPreviewRoutes(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("nonexistent-host", resp.get_data(as_text=True))
 
+    def test_host_detail_context_includes_timeline_lineage_and_incidents(self):
+        import app as _app
+        from auth import get_or_create_token
+
+        token = get_or_create_token()
+        headers = {"X-API-Token": token}
+        if getattr(_app, "PLAYBOOK_AVAILABLE", False):
+            pb = _app._get_playbook_engine()
+            with pb._db() as conn:
+                conn.execute("DELETE FROM pb_steps")
+                conn.execute("DELETE FROM pb_incidents WHERE tenant_id = ?", ("admin",))
+                conn.commit()
+
+        self.client.post(
+            "/api/xdr/events",
+            json={
+                "events": [
+                    {
+                        "host_id": "host-soc-detail-01",
+                        "event_type": "process_execution",
+                        "severity": "medium",
+                        "timestamp": "2026-04-13T16:00:00Z",
+                        "process_name": "powershell.exe",
+                        "command_line": "powershell.exe -nop -enc ZQBjAGgAbwA=",
+                        "parent_process": "winword.exe",
+                        "pid": 9191,
+                        "source": "agent",
+                        "platform": "windows",
+                        "details": {},
+                    }
+                ]
+            },
+            headers=headers,
+        )
+
+        with _app.app.test_request_context("/soc/hosts/host-soc-detail-01", headers=headers):
+            context = _app._build_soc_host_detail_context("host-soc-detail-01", context=_app._build_soc_preview_context())
+
+        self.assertIsNotNone(context)
+        self.assertTrue(context["host_events"])
+        self.assertTrue(any(item["alert_type"] == "suspicious_powershell" for item in context["host_events"]))
+        self.assertTrue(context["host_lineage"])
+        self.assertTrue(context["host_incidents"])
+        self.assertTrue(context["host_attack_chains"])
+        self.assertTrue(any(item["techniques"] for item in context["host_attack_chains"]))
+
+    def test_host_detail_context_can_filter_timeline_by_attack_chain(self):
+        import app as _app
+        from auth import get_or_create_token
+
+        token = get_or_create_token()
+        headers = {"X-API-Token": token}
+
+        self.client.post(
+            "/api/xdr/events",
+            json={
+                "events": [
+                    {
+                        "host_id": "host-soc-chain-filter-01",
+                        "event_type": "process_execution",
+                        "severity": "medium",
+                        "timestamp": "2026-04-13T16:00:00Z",
+                        "process_name": "powershell.exe",
+                        "command_line": "powershell.exe -nop -enc ZQBjAGgAbwA=",
+                        "parent_process": "winword.exe",
+                        "pid": 7272,
+                        "source": "agent",
+                        "platform": "windows",
+                        "details": {},
+                    }
+                ]
+            },
+            headers=headers,
+        )
+
+        with _app.app.test_request_context("/soc/hosts/host-soc-chain-filter-01", headers=headers):
+            base_context = _app._build_soc_host_detail_context(
+                "host-soc-chain-filter-01",
+                context=_app._build_soc_preview_context(),
+            )
+        self.assertTrue(base_context["host_attack_chains"])
+        selected_filter = base_context["host_attack_chains"][0]["filter_key"]
+
+        with _app.app.test_request_context(f"/soc/hosts/host-soc-chain-filter-01?chain={selected_filter}", headers=headers):
+            context = _app._build_soc_host_detail_context(
+                "host-soc-chain-filter-01",
+                context=_app._build_soc_preview_context(),
+            )
+
+        self.assertIsNotNone(context)
+        self.assertEqual(context["selected_chain_filter"], selected_filter)
+        self.assertTrue(context["selected_chain"])
+        self.assertTrue(context["host_events"])
+        self.assertTrue(all(item["chain_filter"] == selected_filter for item in context["host_events"]))
+
+    def test_soc_incident_status_update_endpoint(self):
+        import app as _app
+        from auth import get_or_create_token
+
+        if not getattr(_app, "PLAYBOOK_AVAILABLE", False):
+            self.skipTest("playbook engine unavailable")
+
+        token = get_or_create_token()
+        headers = {"X-API-Token": token}
+        pb = _app._get_playbook_engine()
+        with pb._db() as conn:
+            conn.execute("DELETE FROM pb_steps")
+            conn.execute("DELETE FROM pb_incidents WHERE tenant_id = ?", ("admin",))
+            conn.commit()
+
+        self.client.post(
+            "/api/xdr/events",
+            json={
+                "events": [
+                    {
+                        "host_id": "host-soc-incident-status-01",
+                        "event_type": "process_execution",
+                        "severity": "medium",
+                        "timestamp": "2026-04-13T16:00:00Z",
+                        "process_name": "powershell.exe",
+                        "command_line": "powershell.exe -nop -enc ZQBjAGgAbwA=",
+                        "parent_process": "winword.exe",
+                        "pid": 8181,
+                        "source": "agent",
+                        "platform": "windows",
+                        "details": {},
+                    }
+                ]
+            },
+            headers=headers,
+        )
+
+        incident = pb.list_incidents(tenant_id="admin", limit=1)[0]
+        resp = self.client.post(
+            f"/soc/incidents/{incident['incident_id']}/status",
+            json={"status": "resolved"},
+            headers=headers,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["incident"]["status"], "resolved")
+
 
 class TestHealthEndpoint(unittest.TestCase):
     @classmethod
@@ -665,6 +809,14 @@ class TestXDREndpoints(unittest.TestCase):
         self.assertGreaterEqual(data["detections"], 1)
         self.assertGreaterEqual(data["saved_events"], 1)
         self.assertEqual(data["hosts"][0]["host_id"], "host-01")
+        self.assertTrue(data["detection_records"])
+        first_detection = data["detection_records"][0]
+        self.assertEqual(first_detection["host_id"], "host-01")
+        self.assertEqual(first_detection["process_name"], "powershell.exe")
+        self.assertEqual(first_detection["parent_process"], "winword.exe")
+        self.assertTrue(first_detection["cmdline"])
+        self.assertTrue(first_detection["technique"])
+        self.assertTrue(first_detection["timestamp"])
 
     def test_xdr_events_rejects_invalid_type(self):
         resp = self.client.post(
@@ -740,6 +892,44 @@ class TestXDREndpoints(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
         self.assertTrue(data["ok"])
+
+    def test_xdr_ingest_feeds_incident_engine_for_high_signal(self):
+        import app as _app
+
+        if not getattr(_app, "PLAYBOOK_AVAILABLE", False):
+            self.skipTest("playbook engine unavailable")
+
+        pb = _app._get_playbook_engine()
+        with pb._db() as conn:
+            conn.execute("DELETE FROM pb_steps")
+            conn.execute("DELETE FROM pb_incidents WHERE tenant_id = ?", ("admin",))
+            conn.commit()
+
+        resp = self.client.post(
+            "/api/xdr/events",
+            json={
+                "events": [
+                    {
+                        "host_id": "host-incident-01",
+                        "event_type": "process_execution",
+                        "severity": "medium",
+                        "timestamp": "2026-04-13T15:00:00Z",
+                        "process_name": "powershell.exe",
+                        "command_line": "powershell.exe -nop -enc ZQBjAGgAbwA=",
+                        "parent_process": "winword.exe",
+                        "pid": 7878,
+                        "source": "agent",
+                        "platform": "windows",
+                        "details": {},
+                    }
+                ]
+            },
+            headers=self.auth_headers,
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        incidents = pb.list_incidents(tenant_id="admin", limit=10)
+        self.assertTrue(incidents)
 
 
 if __name__ == "__main__":

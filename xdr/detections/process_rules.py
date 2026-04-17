@@ -39,9 +39,12 @@ SCRIPT_CHILDREN = {"powershell.exe", "pwsh.exe", "cmd.exe", "wscript.exe", "cscr
 class SuspiciousPowerShellRule(DetectionRule):
     rule_id = "NG-EDR-001"
     rule_name = "Suspicious PowerShell execution"
+    alert_type = "suspicious_powershell"
     supported_event_types = ("process_execution", "script_execution")
     recommended_action = "investigate_and_review_command"
     base_tags = ("process", "script_abuse", "powershell")
+    mitre_tactic = "execution"
+    mitre_technique = "T1059.001"
 
     def evaluate(self, context: DetectionContext):
         process = (context.event.process_name or "").lower()
@@ -67,9 +70,12 @@ class SuspiciousPowerShellRule(DetectionRule):
 class SuspiciousBashRule(DetectionRule):
     rule_id = "NG-EDR-002"
     rule_name = "Suspicious Bash execution"
+    alert_type = "suspicious_bash"
     supported_event_types = ("process_execution", "script_execution")
     recommended_action = "investigate_download_execute_chain"
     base_tags = ("process", "script_abuse", "bash")
+    mitre_tactic = "execution"
+    mitre_technique = "T1059.004"
 
     def evaluate(self, context: DetectionContext):
         process = (context.event.process_name or "").lower()
@@ -95,9 +101,12 @@ class SuspiciousBashRule(DetectionRule):
 class EncodedCommandRule(DetectionRule):
     rule_id = "NG-EDR-008"
     rule_name = "Encoded command execution"
+    alert_type = "encoded_command_execution"
     supported_event_types = ("process_execution", "script_execution")
     recommended_action = "review_decoded_payload"
     base_tags = ("process", "script_abuse", "encoded_command")
+    mitre_tactic = "defense_evasion"
+    mitre_technique = "T1027"
 
     def evaluate(self, context: DetectionContext):
         command = canonical_command(context.event.command_line)
@@ -121,9 +130,12 @@ class EncodedCommandRule(DetectionRule):
 class SuspiciousProcessTreeRule(DetectionRule):
     rule_id = "NG-EDR-005"
     rule_name = "Suspicious process tree"
+    alert_type = "office_spawned_interpreter"
     supported_event_types = ("process_execution", "script_execution")
     recommended_action = "investigate_parent_child_chain"
     base_tags = ("process", "process_tree", "execution_chain")
+    mitre_tactic = "execution"
+    mitre_technique = "T1204.002"
 
     def evaluate(self, context: DetectionContext):
         parent = (context.event.parent_process or "").lower()
@@ -136,8 +148,12 @@ class SuspiciousProcessTreeRule(DetectionRule):
                 confidence=0.91,
                 description="Office or document reader spawned a scripting interpreter.",
                 context=context,
-                tags=["dangerous_parent_child"],
-                details={"parent_process": context.event.parent_process, "process_name": context.event.process_name},
+                tags=["dangerous_parent_child", "office_spawned_interpreter"],
+                details={
+                    "parent_process": context.event.parent_process,
+                    "process_name": context.event.process_name,
+                    "lineage_hint": f"{context.event.parent_process} -> {context.event.process_name}",
+                },
             )
         ]
 
@@ -145,9 +161,12 @@ class SuspiciousProcessTreeRule(DetectionRule):
 class RareProcessRule(DetectionRule):
     rule_id = "NG-EDR-007"
     rule_name = "Rare process on host baseline"
+    alert_type = "rare_process_execution"
     supported_event_types = ("process_execution", "script_execution")
     recommended_action = "investigate_new_process"
     base_tags = ("process", "baseline", "process_anomaly")
+    mitre_tactic = "execution"
+    mitre_technique = "T1204"
 
     def evaluate(self, context: DetectionContext):
         process = (context.event.process_name or "").lower()
@@ -172,9 +191,12 @@ class RareProcessRule(DetectionRule):
 class UnusualParentChildRule(DetectionRule):
     rule_id = "NG-EDR-014"
     rule_name = "Unusual parent-child relationship"
+    alert_type = "unusual_parent_child"
     supported_event_types = ("process_execution", "script_execution")
     recommended_action = "review_process_lineage"
     base_tags = ("process", "baseline", "process_tree")
+    mitre_tactic = "execution"
+    mitre_technique = "T1204.002"
 
     def evaluate(self, context: DetectionContext):
         parent = (context.event.parent_process or "").lower()

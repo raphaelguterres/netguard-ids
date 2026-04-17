@@ -20,9 +20,12 @@ def _is_private(ip: str) -> bool:
 class UnusualOutboundPortRule(DetectionRule):
     rule_id = "NG-EDR-006"
     rule_name = "Unusual outbound connection"
+    alert_type = "unusual_outbound_port"
     supported_event_types = ("network_connection",)
     recommended_action = "review_egress_destination"
     base_tags = ("network", "egress", "network_anomaly")
+    mitre_tactic = "command_and_control"
+    mitre_technique = "T1571"
 
     def evaluate(self, context: DetectionContext):
         if (context.event.network_direction or "").lower() != "outbound":
@@ -44,7 +47,7 @@ class UnusualOutboundPortRule(DetectionRule):
                 confidence=confidence,
                 description="Connection metadata matches an uncommon outbound port pattern.",
                 context=context,
-                tags=["unusual_port"],
+                tags=["unusual_port", "external_connection"],
                 details={"dst_ip": context.event.network_dst_ip, "dst_port": port},
             )
         ]
@@ -53,9 +56,12 @@ class UnusualOutboundPortRule(DetectionRule):
 class RareOutboundDestinationRule(DetectionRule):
     rule_id = "NG-EDR-011"
     rule_name = "Rare outbound destination"
+    alert_type = "rare_outbound_destination"
     supported_event_types = ("network_connection",)
     recommended_action = "investigate_new_destination"
     base_tags = ("network", "baseline", "destination_anomaly")
+    mitre_tactic = "command_and_control"
+    mitre_technique = "T1071"
 
     def evaluate(self, context: DetectionContext):
         if (context.event.network_direction or "").lower() != "outbound":
@@ -72,7 +78,7 @@ class RareOutboundDestinationRule(DetectionRule):
                 confidence=0.7,
                 description="Endpoint connected to a destination that is rare for this host baseline.",
                 context=context,
-                tags=["rare_destination"],
+                tags=["rare_destination", "external_connection"],
                 details={
                     "dst_ip": dest_ip,
                     "dst_port": port,
@@ -85,9 +91,12 @@ class RareOutboundDestinationRule(DetectionRule):
 class BeaconingRule(DetectionRule):
     rule_id = "NG-EDR-012"
     rule_name = "Repeated outbound beaconing pattern"
+    alert_type = "beaconing_pattern_detected"
     supported_event_types = ("network_connection",)
     recommended_action = "investigate_possible_c2"
     base_tags = ("network", "beaconing", "c2_suspected")
+    mitre_tactic = "command_and_control"
+    mitre_technique = "T1071"
 
     def evaluate(self, context: DetectionContext):
         if (context.event.network_direction or "").lower() != "outbound":
@@ -103,7 +112,7 @@ class BeaconingRule(DetectionRule):
                 confidence=0.78,
                 description="Outbound connections show a low-variance recurring interval consistent with beaconing.",
                 context=context,
-                tags=["repeated_outbound"],
+                tags=["repeated_outbound", "external_connection"],
                 details={"dst_ip": dest_ip, "dst_port": port, "intervals": intervals},
             )
         ]

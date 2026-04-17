@@ -54,9 +54,12 @@ class EndpointEvent:
     process_name: str = ""
     command_line: str = ""
     parent_process: str = ""
+    grandparent_process: str = ""
     username: str = ""
     pid: int | None = None
     ppid: int | None = None
+    process_guid: str = ""
+    parent_guid: str = ""
     auth_result: str = ""
     auth_source_ip: str = ""
     persistence_target: str = ""
@@ -100,12 +103,18 @@ class EndpointEvent:
             event_id=_clean_text(payload.get("event_id"), max_len=80) or f"xdr_evt_{uuid.uuid4().hex}",
             platform=_clean_text(payload.get("platform"), max_len=32).lower(),
             tenant_id=_clean_text(payload.get("tenant_id"), max_len=64),
-            process_name=_clean_text(payload.get("process_name"), max_len=128),
-            command_line=_clean_text(payload.get("command_line"), max_len=2048),
-            parent_process=_clean_text(payload.get("parent_process"), max_len=128),
+            process_name=_clean_text(payload.get("process_name") or details.get("process_name"), max_len=128),
+            command_line=_clean_text(payload.get("command_line") or details.get("command_line"), max_len=2048),
+            parent_process=_clean_text(payload.get("parent_process") or details.get("parent_process"), max_len=128),
+            grandparent_process=_clean_text(
+                payload.get("grandparent_process") or details.get("grandparent_process"),
+                max_len=128,
+            ),
             username=_clean_text(payload.get("username"), max_len=128),
-            pid=_clean_int(payload.get("pid")),
-            ppid=_clean_int(payload.get("ppid")),
+            pid=_clean_int(payload.get("pid") if payload.get("pid") is not None else details.get("pid")),
+            ppid=_clean_int(payload.get("ppid") if payload.get("ppid") is not None else details.get("ppid")),
+            process_guid=_clean_text(payload.get("process_guid") or details.get("process_guid"), max_len=128),
+            parent_guid=_clean_text(payload.get("parent_guid") or details.get("parent_guid"), max_len=128),
             auth_result=_clean_text(payload.get("auth_result"), max_len=32).lower(),
             auth_source_ip=_clean_text(payload.get("auth_source_ip"), max_len=128),
             persistence_target=_clean_text(payload.get("persistence_target"), max_len=256),
@@ -126,6 +135,9 @@ class EndpointEvent:
         severity: str | None = None,
         rule_id: str = "",
         rule_name: str = "",
+        event_type_override: str | None = None,
+        mitre_tactic: str = "",
+        mitre_technique: str = "",
         tags: list[str] | None = None,
         details: dict[str, Any] | None = None,
     ) -> Any:
@@ -136,9 +148,12 @@ class EndpointEvent:
                 "process_name": self.process_name,
                 "command_line": self.command_line,
                 "parent_process": self.parent_process,
+                "grandparent_process": self.grandparent_process,
                 "username": self.username,
                 "pid": self.pid,
                 "ppid": self.ppid,
+                "process_guid": self.process_guid,
+                "parent_guid": self.parent_guid,
                 "auth_result": self.auth_result,
                 "auth_source_ip": self.auth_source_ip,
                 "persistence_target": self.persistence_target,
@@ -154,12 +169,14 @@ class EndpointEvent:
             event_details.update(details)
         clean_tags = list(dict.fromkeys((self.tags or []) + (tags or [])))
         security_event = make_event(
-            event_type=self.event_type,
+            event_type=event_type_override or self.event_type,
             severity=(severity or self.severity).upper(),
             source=f"xdr.{self.source}",
             details={k: v for k, v in event_details.items() if v not in (None, "", [], {})},
             rule_id=rule_id,
             rule_name=rule_name,
+            mitre_tactic=mitre_tactic,
+            mitre_technique=mitre_technique,
             tags=clean_tags,
             raw=self.command_line or "",
         )
@@ -172,9 +189,17 @@ class EndpointEvent:
 class DetectionRecord:
     rule_id: str
     rule_name: str
+    alert_type: str
+    host_id: str
+    process_name: str
+    parent_process: str
+    cmdline: str
+    technique: str
+    tactic: str
     severity: str
     summary: str
     confidence: float
+    timestamp: str
     tags: list[str] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
     related_events: list[dict[str, Any]] = field(default_factory=list)
@@ -188,12 +213,18 @@ class DetectionRecord:
 class CorrelationRecord:
     rule_id: str
     rule_name: str
+    alert_type: str
+    host_id: str
+    technique: str
+    tactic: str
     severity: str
     summary: str
     confidence: float
     signal_count: int
+    timestamp: str
     tags: list[str] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
+    related_events: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -258,10 +289,21 @@ class PipelineOutcome:
                     severity=detection.severity,
                     rule_id=detection.rule_id,
                     rule_name=detection.rule_name,
+                    event_type_override=detection.alert_type,
+                    mitre_tactic=detection.tactic,
+                    mitre_technique=detection.technique,
                     tags=["xdr", "detection"] + detection.tags,
                     details={
+                        "alert_type": detection.alert_type,
                         "summary": detection.summary,
                         "confidence": detection.confidence,
+                        "host_id": detection.host_id,
+                        "process_name": detection.process_name,
+                        "parent_process": detection.parent_process,
+                        "cmdline": detection.cmdline,
+                        "technique": detection.technique,
+                        "tactic": detection.tactic,
+                        "timestamp": detection.timestamp,
                         "recommended_action": detection.recommended_action,
                         "related_events": detection.related_events,
                         **detection.details,
@@ -274,12 +316,39 @@ class PipelineOutcome:
                     severity=correlation.severity,
                     rule_id=correlation.rule_id,
                     rule_name=correlation.rule_name,
+                    event_type_override=correlation.alert_type,
+                    mitre_tactic=correlation.tactic,
+                    mitre_technique=correlation.technique,
                     tags=["xdr", "correlation"] + correlation.tags,
                     details={
+                        "alert_type": correlation.alert_type,
                         "summary": correlation.summary,
                         "confidence": correlation.confidence,
+                        "host_id": correlation.host_id,
+                        "technique": correlation.technique,
+                        "tactic": correlation.tactic,
+                        "timestamp": correlation.timestamp,
                         "signal_count": correlation.signal_count,
+                        "related_events": correlation.related_events,
                         **correlation.details,
+                    },
+                )
+            )
+        for action in self.actions:
+            events.append(
+                self.event.to_security_event(
+                    severity=self.highest_severity,
+                    rule_id=f"XDR-RESP-{action.action_type.upper()}",
+                    rule_name=action.action_type.replace("_", " ").title(),
+                    event_type_override=action.action_type,
+                    tags=["xdr", "response", action.action_type],
+                    details={
+                        "action_type": action.action_type,
+                        "target": action.target,
+                        "automatic": action.automatic,
+                        "requires_agent": action.requires_agent,
+                        "reason": action.reason,
+                        "parameters": action.parameters,
                     },
                 )
             )

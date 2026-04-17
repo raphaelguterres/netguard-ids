@@ -8,9 +8,12 @@ from .base import DetectionContext, DetectionRule
 class BruteForceAuthRule(DetectionRule):
     rule_id = "NG-EDR-003"
     rule_name = "Brute force authentication pattern"
+    alert_type = "brute_force_auth_pattern"
     supported_event_types = ("authentication",)
     recommended_action = "investigate_source_and_user"
     base_tags = ("authentication", "auth_abuse", "bruteforce")
+    mitre_tactic = "credential_access"
+    mitre_technique = "T1110"
 
     def evaluate(self, context: DetectionContext):
         if (context.event.auth_result or "").lower() != "failure":
@@ -43,9 +46,12 @@ class BruteForceAuthRule(DetectionRule):
 class FailureThenSuccessRule(DetectionRule):
     rule_id = "NG-EDR-009"
     rule_name = "Repeated failures followed by success"
+    alert_type = "auth_failure_then_success"
     supported_event_types = ("authentication",)
     recommended_action = "validate_account_compromise"
     base_tags = ("authentication", "auth_abuse", "credential_abuse")
+    mitre_tactic = "credential_access"
+    mitre_technique = "T1110"
 
     def evaluate(self, context: DetectionContext):
         if (context.event.auth_result or "").lower() != "success":
@@ -84,9 +90,12 @@ class FailureThenSuccessRule(DetectionRule):
 class LoginOutsideBaselineRule(DetectionRule):
     rule_id = "NG-EDR-010"
     rule_name = "Login outside normal time window"
+    alert_type = "login_outside_baseline"
     supported_event_types = ("authentication",)
     recommended_action = "review_user_session"
     base_tags = ("authentication", "baseline", "user_anomaly")
+    mitre_tactic = "initial_access"
+    mitre_technique = "T1078"
 
     def evaluate(self, context: DetectionContext):
         if (context.event.auth_result or "").lower() != "success":
