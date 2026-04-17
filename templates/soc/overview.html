@@ -41,9 +41,9 @@
     <div class="soc-stat-foot">Ingestion, detection, correlation, response.</div>
   </article>
   <article class="soc-card soc-stat-card">
-    <div class="soc-stat-label">Tenant Status</div>
-    <div class="soc-stat-value">Stable</div>
-    <div class="soc-stat-foot">Ready for multi-tenant posture surfaces.</div>
+    <div class="soc-stat-label">Open Incidents</div>
+    <div class="soc-stat-value">{{ data.open_incidents|default(0) }}</div>
+    <div class="soc-stat-foot">{{ data.in_progress_incidents|default(0) }} currently in progress for analyst handling.</div>
   </article>
 </section>
 

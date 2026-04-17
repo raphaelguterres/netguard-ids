@@ -157,6 +157,61 @@ class TestSocPreviewRoutes(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("nonexistent-host", resp.get_data(as_text=True))
 
+    def test_soc_incidents_route_and_context_support_filters(self):
+        import app as _app
+        from auth import get_or_create_token
+
+        if not getattr(_app, "PLAYBOOK_AVAILABLE", False):
+            self.skipTest("playbook engine unavailable")
+
+        token = get_or_create_token()
+        headers = {"X-API-Token": token}
+        pb = _app._get_playbook_engine()
+        with pb._db() as conn:
+            conn.execute("DELETE FROM pb_steps")
+            conn.execute("DELETE FROM pb_incidents WHERE tenant_id = ?", ("admin",))
+            conn.commit()
+
+        self.client.post(
+            "/api/xdr/events",
+            json={
+                "events": [
+                    {
+                        "host_id": "host-soc-incidents-01",
+                        "event_type": "process_execution",
+                        "severity": "medium",
+                        "timestamp": "2026-04-13T16:00:00Z",
+                        "process_name": "powershell.exe",
+                        "command_line": "powershell.exe -nop -enc ZQBjAGgAbwA=",
+                        "parent_process": "winword.exe",
+                        "pid": 4141,
+                        "source": "agent",
+                        "platform": "windows",
+                        "details": {},
+                    }
+                ]
+            },
+            headers=headers,
+        )
+
+        resp = self.client.get("/soc/incidents", headers=headers)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Incidents Queue", resp.get_data(as_text=True))
+
+        with _app.app.test_request_context(
+            "/soc/incidents?status=open&host=host-soc-incidents-01&technique=T1059.001",
+            headers=headers,
+        ):
+            context = _app._build_soc_incidents_context(context=_app._build_soc_preview_context())
+
+        self.assertTrue(context["incident_rows"])
+        self.assertEqual(context["incident_filters"]["status"], "open")
+        self.assertEqual(context["incident_filters"]["host"], "host-soc-incidents-01")
+        self.assertEqual(context["incident_filters"]["technique"], "T1059.001")
+        self.assertTrue(all(item["host_id"] == "host-soc-incidents-01" for item in context["incident_rows"]))
+        self.assertTrue(all(item["technique"] == "T1059.001" for item in context["incident_rows"]))
+        self.assertTrue(all(item["chain_filter"] for item in context["incident_rows"]))
+
     def test_host_detail_context_includes_timeline_lineage_and_incidents(self):
         import app as _app
         from auth import get_or_create_token
@@ -238,7 +293,19 @@ class TestSocPreviewRoutes(unittest.TestCase):
                 context=_app._build_soc_preview_context(),
             )
         self.assertTrue(base_context["host_attack_chains"])
-        selected_filter = base_context["host_attack_chains"][0]["filter_key"]
+        event_filters = {
+            item["chain_filter"]
+            for item in base_context["host_events"]
+            if item.get("chain_filter")
+        }
+        selected_filter = next(
+            (
+                chain["filter_key"]
+                for chain in base_context["host_attack_chains"]
+                if chain.get("filter_key") in event_filters
+            ),
+            base_context["host_attack_chains"][0]["filter_key"],
+        )
 
         with _app.app.test_request_context(f"/soc/hosts/host-soc-chain-filter-01?chain={selected_filter}", headers=headers):
             context = _app._build_soc_host_detail_context(
@@ -249,6 +316,9 @@ class TestSocPreviewRoutes(unittest.TestCase):
         self.assertIsNotNone(context)
         self.assertEqual(context["selected_chain_filter"], selected_filter)
         self.assertTrue(context["selected_chain"])
+        self.assertTrue(context["selected_chain_focus"])
+        self.assertEqual(context["selected_chain_focus"]["title"], context["selected_chain"]["title"])
+        self.assertTrue(context["selected_chain_focus"]["metrics"])
         self.assertTrue(context["host_events"])
         self.assertTrue(all(item["chain_filter"] == selected_filter for item in context["host_events"]))
 

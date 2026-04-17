@@ -1279,11 +1279,18 @@ def _build_soc_preview_context():
         "medium": sum(1 for item in alert_rows if item["severity"] == "medium"),
         "low": sum(1 for item in alert_rows if item["severity"] == "low"),
     }
+    incident_rows = _soc_collect_incidents("Admin Workspace" if tenant_id == "admin" else tenant_id, limit=80)
+    incident_counts = {
+        "open": sum(1 for item in incident_rows if item.get("status") == "open"),
+        "in_progress": sum(1 for item in incident_rows if item.get("status") == "in_progress"),
+    }
 
     overview = {
         "monitored_hosts": len(host_list),
         "active_alerts": len(alert_rows),
         "critical_alerts": severity_counts["critical"],
+        "open_incidents": incident_counts["open"],
+        "in_progress_incidents": incident_counts["in_progress"],
         "average_risk": int(sum(item["risk_score"] for item in host_list) / len(host_list)) if host_list else 0,
         "severity_critical": severity_counts["critical"],
         "severity_high": severity_counts["high"],
@@ -1300,6 +1307,7 @@ def _build_soc_preview_context():
         "overview": overview,
         "hosts": host_list,
         "alerts": alert_rows[:50],
+        "incidents": incident_rows[:50],
         "xdr_summary": summary,
     }
 
@@ -1680,13 +1688,13 @@ def _soc_pipeline_activity_rows(host_id: str) -> tuple[list[dict], list[dict]]:
     return host_events, lineage_blocks
 
 
-def _soc_host_incidents(host_id: str, tenant_name: str) -> list[dict]:
+def _soc_collect_incidents(tenant_name: str, host_id: str | None = None, limit: int = 100) -> list[dict]:
     if not PLAYBOOK_AVAILABLE:
         return []
     try:
         import json as _json
 
-        host_incidents = []
+        incident_rows = []
         seen_incidents = set()
         tenant_candidates = []
         if tenant_name == "Admin Workspace":
@@ -1702,7 +1710,7 @@ def _soc_host_incidents(host_id: str, tenant_name: str) -> list[dict]:
         tenant_candidates = [item for item in dict.fromkeys(str(item or "").strip() for item in tenant_candidates) if item]
 
         for tenant_id in tenant_candidates:
-            incidents = _get_playbook_engine().list_incidents(tenant_id=tenant_id, limit=50)
+            incidents = _get_playbook_engine().list_incidents(tenant_id=tenant_id, limit=max(limit, 50))
             for incident in incidents:
                 incident_id = str(incident.get("incident_id") or "").strip()
                 if not incident_id or incident_id in seen_incidents:
@@ -1719,11 +1727,14 @@ def _soc_host_incidents(host_id: str, tenant_name: str) -> list[dict]:
                 else:
                     trigger_event = {}
 
-                if str(trigger_event.get("host_id") or "").strip() != str(host_id):
+                incident_host_id = str(trigger_event.get("host_id") or "").strip()
+                if host_id and incident_host_id != str(host_id):
                     continue
 
                 seen_incidents.add(incident_id)
-                host_incidents.append(
+                chain_summary = _soc_chain_summary(trigger_event.get("alert_type") or trigger_event.get("threat_name"), trigger_event)
+                threat_name = str(trigger_event.get("threat_name") or "").strip()
+                incident_rows.append(
                     {
                         "incident_id": incident_id,
                         "playbook": incident.get("playbook"),
@@ -1732,17 +1743,103 @@ def _soc_host_incidents(host_id: str, tenant_name: str) -> list[dict]:
                         "status": str(incident.get("status") or "open").lower(),
                         "opened_at": str(incident.get("opened_at") or ""),
                         "updated_at": str(incident.get("updated_at") or ""),
-                        "chain_summary": _soc_chain_summary(trigger_event.get("alert_type") or trigger_event.get("threat_name"), trigger_event),
+                        "chain_summary": chain_summary,
+                        "chain_filter": _soc_chain_filter_key(chain_summary, threat_name),
                         "technique": str(trigger_event.get("technique") or ""),
-                        "tactic": str(trigger_event.get("mitre_tactic") or ""),
-                        "threat_name": str(trigger_event.get("threat_name") or ""),
+                        "tactic": str(trigger_event.get("tactic") or trigger_event.get("mitre_tactic") or ""),
+                        "threat_name": threat_name,
+                        "host_id": incident_host_id or "unknown-host",
+                        "description": str(
+                            trigger_event.get("summary")
+                            or trigger_event.get("description")
+                            or trigger_event.get("message")
+                            or chain_summary
+                            or "Incident generated from host-centric XDR activity."
+                        ),
+                        "recommended_action": str(trigger_event.get("recommended_action") or "investigate"),
                         "tenant_name": tenant_name,
                     }
                 )
-        return host_incidents
+        incident_rows.sort(
+            key=lambda item: (
+                str(item.get("updated_at") or item.get("opened_at") or ""),
+                {"open": 4, "in_progress": 3, "contained": 2, "resolved": 1, "false_positive": 0}.get(
+                    str(item.get("status") or "open").lower(),
+                    0,
+                ),
+            ),
+            reverse=True,
+        )
+        return incident_rows[:limit]
     except Exception:
-        logger.exception("SOC host incident lookup failed | host=%s", host_id)
+        logger.exception("SOC incident lookup failed | host=%s", host_id or "all")
         return []
+
+
+def _soc_host_incidents(host_id: str, tenant_name: str) -> list[dict]:
+    return _soc_collect_incidents(tenant_name, host_id=host_id, limit=50)
+
+
+def _build_soc_incidents_context(context: dict | None = None):
+    context = context or _build_soc_preview_context()
+    host_lookup = {
+        str(item.get("host_name") or ""): dict(item)
+        for item in context.get("hosts", [])
+        if str(item.get("host_name") or "").strip()
+    }
+    all_incidents = _soc_collect_incidents(context["tenant_name"], limit=150)
+    for incident in all_incidents:
+        host_meta = host_lookup.get(str(incident.get("host_id") or "").strip(), {})
+        incident["risk_score"] = int(host_meta.get("risk_score") or _XDR_RISK_FALLBACK_BY_SEVERITY.get(incident["severity"], 20))
+        incident["risk_level"] = str(host_meta.get("risk_level") or _xdr_risk_level(incident["risk_score"]))
+
+    severity_filter = str(request.args.get("severity") or "").strip().lower()
+    status_filter = str(request.args.get("status") or "").strip().lower()
+    host_filter = str(request.args.get("host") or "").strip()
+    technique_filter = str(request.args.get("technique") or "").strip()
+
+    incident_rows = [
+        item
+        for item in all_incidents
+        if (not severity_filter or item.get("severity") == severity_filter)
+        and (not status_filter or item.get("status") == status_filter)
+        and (not host_filter or item.get("host_id") == host_filter)
+        and (not technique_filter or item.get("technique") == technique_filter)
+    ]
+
+    incident_summary = {
+        "total": len(all_incidents),
+        "visible": len(incident_rows),
+        "open": sum(1 for item in all_incidents if item.get("status") == "open"),
+        "in_progress": sum(1 for item in all_incidents if item.get("status") == "in_progress"),
+        "contained": sum(1 for item in all_incidents if item.get("status") == "contained"),
+        "resolved": sum(1 for item in all_incidents if item.get("status") == "resolved"),
+        "critical": sum(1 for item in all_incidents if item.get("severity") == "critical"),
+        "high": sum(1 for item in all_incidents if item.get("severity") == "high"),
+    }
+
+    _, tenant_role = _resolve_tenant_with_role()
+    can_update_incidents = (not AUTH_ENABLED) or tenant_role in {"analyst", "admin"}
+
+    return {
+        **context,
+        "incident_rows": incident_rows[:100],
+        "incident_summary": incident_summary,
+        "incident_filters": {
+            "severity": severity_filter,
+            "status": status_filter,
+            "host": host_filter,
+            "technique": technique_filter,
+        },
+        "incident_filter_options": {
+            "hosts": sorted({str(item.get("host_id") or "") for item in all_incidents if str(item.get("host_id") or "").strip()}),
+            "techniques": sorted({str(item.get("technique") or "") for item in all_incidents if str(item.get("technique") or "").strip()}),
+            "statuses": ["open", "in_progress", "contained", "resolved", "false_positive"],
+            "severities": ["critical", "high", "medium", "low"],
+        },
+        "can_update_incidents": can_update_incidents,
+        "incident_status_options": ["open", "in_progress", "contained", "resolved", "false_positive"],
+    }
 
 
 def _build_soc_host_detail_context(host_id: str, context: dict | None = None):
@@ -1832,6 +1929,46 @@ def _build_soc_host_detail_context(host_id: str, context: dict | None = None):
         item for item in host_events
         if not selected_chain_filter or item.get("chain_filter") == selected_chain_filter
     ]
+    selected_chain_focus = None
+    if selected_chain:
+        selected_chain_incidents = [
+            item
+            for item in incident_rows
+            if _soc_chain_filter_key(item.get("chain_summary"), item.get("threat_name")) == selected_chain_filter
+        ]
+        selected_chain_focus = {
+            "title": selected_chain.get("title") or "Selected Chain",
+            "severity": str(selected_chain.get("severity") or "low").lower(),
+            "last_seen": str(selected_chain.get("last_seen") or ""),
+            "stages": list(selected_chain.get("stages") or []),
+            "techniques": list(selected_chain.get("techniques") or []),
+            "tactics": list(selected_chain.get("tactics") or []),
+            "statuses": list(selected_chain.get("statuses") or []),
+            "processes": list(selected_chain.get("processes") or []),
+            "recommended_actions": list(selected_chain.get("recommended_actions") or []),
+            "metrics": [
+                {
+                    "label": "Chain Alerts",
+                    "value": int(selected_chain.get("alert_count") or 0),
+                    "tone": "critical" if int(selected_chain.get("alert_count") or 0) >= 3 else "medium",
+                },
+                {
+                    "label": "Linked Incidents",
+                    "value": len(selected_chain_incidents),
+                    "tone": "high" if selected_chain_incidents else "low",
+                },
+                {
+                    "label": "Timeline Hits",
+                    "value": len(filtered_host_events),
+                    "tone": "medium" if filtered_host_events else "low",
+                },
+                {
+                    "label": "MITRE Coverage",
+                    "value": len(selected_chain.get("techniques") or []),
+                    "tone": "medium" if selected_chain.get("techniques") else "low",
+                },
+            ],
+        }
     _, tenant_role = _resolve_tenant_with_role()
     can_update_incidents = (not AUTH_ENABLED) or tenant_role in {"analyst", "admin"}
 
@@ -1850,6 +1987,22 @@ def _build_soc_host_detail_context(host_id: str, context: dict | None = None):
     if incident_rows:
         host_metadata.append(("Open XDR Incidents", str(sum(1 for item in incident_rows if item["status"] in {"open", "in_progress"}))))
 
+    open_incidents = sum(1 for item in incident_rows if item["status"] in {"open", "in_progress"})
+    tracked_techniques = sorted(
+        {
+            str(technique).strip()
+            for chain in attack_chains
+            for technique in (chain.get("techniques") or [])
+            if str(technique).strip()
+        }
+    )
+    host_summary_metrics = [
+        {"label": "Attack Chains", "value": len(attack_chains), "tone": "critical" if attack_chains else "low"},
+        {"label": "Open Incidents", "value": open_incidents, "tone": "high" if open_incidents else "low"},
+        {"label": "Timeline Events", "value": len(filtered_host_events), "tone": "medium" if filtered_host_events else "low"},
+        {"label": "MITRE Techniques", "value": len(tracked_techniques), "tone": "medium" if tracked_techniques else "low"},
+    ]
+
     return {
         **context,
         "selected_host": selected_host,
@@ -1860,10 +2013,12 @@ def _build_soc_host_detail_context(host_id: str, context: dict | None = None):
         "host_attack_chains": attack_chains,
         "selected_chain_filter": selected_chain_filter,
         "selected_chain": selected_chain,
+        "selected_chain_focus": selected_chain_focus,
         "can_update_incidents": can_update_incidents,
         "incident_status_options": ["open", "in_progress", "contained", "resolved", "false_positive"],
         "host_timeline_total": len(host_events),
         "host_timeline_filtered": len(filtered_host_events),
+        "host_summary_metrics": host_summary_metrics,
         "host_metadata": host_metadata,
     }
 
@@ -6766,6 +6921,15 @@ def soc_preview_alerts():
     from flask import render_template
 
     return render_template("soc/alerts.html", **_build_soc_preview_context())
+
+
+@app.route("/soc/incidents")
+@app.route("/soc-preview/incidents")
+@require_session
+def soc_preview_incidents():
+    from flask import render_template
+
+    return render_template("soc/incidents.html", **_build_soc_incidents_context())
 
 
 @app.route("/soc/incidents/<incident_id>/status", methods=["POST"])

@@ -14,6 +14,7 @@
     <div class="soc-pill">Open {{ alert_rows|length }}</div>
     <div class="soc-pill">Critical {{ alert_rows|selectattr('severity', 'equalto', 'critical')|list|length }}</div>
     <div class="soc-pill">High {{ alert_rows|selectattr('severity', 'equalto', 'high')|list|length }}</div>
+    <a class="soc-topbar-link soc-topbar-link-primary" href="/soc/incidents">View incidents</a>
   </div>
 </header>
 

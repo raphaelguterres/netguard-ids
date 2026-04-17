@@ -24,13 +24,13 @@
       <svg class="soc-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10.3 3.5 2.7 16.5a1 1 0 0 0 .86 1.5h16.88a1 1 0 0 0 .86-1.5L13.7 3.5a1 1 0 0 0-1.72 0Z"></path><path d="M12 9v4M12 17h.01"></path></svg>
       <span>Alerts</span>
     </a>
-    <span class="soc-nav-link is-disabled" aria-disabled="true" title="Host timeline will ship in the next SOC iteration.">
+    <a class="soc-nav-link {% if active_page == 'incidents' %}is-active{% endif %}" href="/soc/incidents" {% if active_page == 'incidents' %}aria-current="page"{% endif %}>
+      <svg class="soc-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 4h12a2 2 0 0 1 2 2v12l-4-2-4 2-4-2-4 2V6a2 2 0 0 1 2-2Z"></path><path d="M8 9h8M8 13h6"></path></svg>
+      <span>Incidents</span>
+    </a>
+    <span class="soc-nav-link is-disabled" aria-disabled="true" title="Host timeline is available inside each host detail view.">
       <svg class="soc-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l3 2"></path></svg>
       <span>Timeline (per host)</span>
-    </span>
-    <span class="soc-nav-link is-disabled" aria-disabled="true" title="Investigation workflows are not enabled in this preview yet.">
-      <svg class="soc-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10 4H4v6M20 14v6h-6"></path><path d="M20 10V4h-6M4 14v6h6"></path><path d="M8 8l8 8"></path></svg>
-      <span>Investigations</span>
     </span>
   </nav>
 </aside>

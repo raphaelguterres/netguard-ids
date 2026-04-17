@@ -6,7 +6,9 @@
 {% set host_incidents = host_incidents if host_incidents is defined else [] %}
 {% set host_lineage = host_lineage if host_lineage is defined else [] %}
 {% set host_attack_chains = host_attack_chains if host_attack_chains is defined else [] %}
+{% set host_summary_metrics = host_summary_metrics if host_summary_metrics is defined else [] %}
 {% set host_metadata = host_metadata if host_metadata is defined else [] %}
+{% set selected_chain_focus = selected_chain_focus if selected_chain_focus is defined else none %}
 
 {% block title %}NetGuard SOC | Host Detail{% endblock %}
 
@@ -44,6 +46,18 @@
   </div>
 </section>
 
+{% if host_summary_metrics %}
+<section class="soc-investigation-strip">
+  {% for metric in host_summary_metrics %}
+  <article class="soc-investigation-card">
+    <div class="soc-stat-label">{{ metric.label }}</div>
+    <div class="soc-investigation-value">{{ metric.value }}</div>
+    <span class="soc-severity-chip {{ metric.tone }}">{{ metric.tone|capitalize }}</span>
+  </article>
+  {% endfor %}
+</section>
+{% endif %}
+
 <section class="soc-host-layout">
   <div class="soc-list soc-host-main">
     <div class="soc-panel">
@@ -57,6 +71,74 @@
         <div class="soc-filter-banner-title">{{ selected_chain.title }}</div>
       </div>
       <a class="soc-inline-link" href="/soc/hosts/{{ host.host_name|default('') }}">Clear filter</a>
+    </div>
+    {% endif %}
+    {% if selected_chain_focus %}
+    <div class="soc-chain-focus">
+      <div class="soc-panel-header">
+        <div>
+          <div class="soc-stat-label">Investigation Focus</div>
+          <div class="soc-chain-focus-title">{{ selected_chain_focus.title }}</div>
+        </div>
+        <div class="soc-meta-inline">
+          <span class="soc-severity-chip {{ selected_chain_focus.severity }}">{{ selected_chain_focus.severity|capitalize }}</span>
+          {% if selected_chain_focus.last_seen %}<span>Last seen {{ selected_chain_focus.last_seen }}</span>{% endif %}
+        </div>
+      </div>
+      <div class="soc-chain-focus-metrics">
+        {% for metric in selected_chain_focus.metrics %}
+        <article class="soc-chain-focus-stat">
+          <div class="soc-stat-label">{{ metric.label }}</div>
+          <div class="soc-investigation-value">{{ metric.value }}</div>
+          <span class="soc-severity-chip {{ metric.tone }}">{{ metric.tone|capitalize }}</span>
+        </article>
+        {% endfor %}
+      </div>
+      <div class="soc-chain-focus-grid">
+        <div class="soc-chain-focus-block">
+          <div class="soc-stat-label">Chain Stages</div>
+          <div class="soc-chain-flow">
+            {% for stage in selected_chain_focus.stages %}
+            <span class="soc-chain-stage">{{ stage }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="soc-chain-focus-block">
+          <div class="soc-stat-label">Processes Involved</div>
+          {% if selected_chain_focus.processes %}
+          <div class="soc-token-grid">
+            {% for process_name in selected_chain_focus.processes %}
+            <span class="soc-token">{{ process_name }}</span>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="soc-list-copy">No process lineage summarized yet for this chain.</div>
+          {% endif %}
+        </div>
+        <div class="soc-chain-focus-block">
+          <div class="soc-stat-label">MITRE Mapping</div>
+          <div class="soc-host-detail-meta">
+            {% for technique in selected_chain_focus.techniques %}
+            <span class="soc-mitre-badge">Technique {{ technique }}</span>
+            {% endfor %}
+            {% for tactic in selected_chain_focus.tactics %}
+            <span class="soc-mitre-badge soc-mitre-badge-muted">{{ tactic|replace("_", " ")|title }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="soc-chain-focus-block">
+          <div class="soc-stat-label">Recommended Actions</div>
+          {% if selected_chain_focus.recommended_actions %}
+          <div class="soc-token-grid">
+            {% for action in selected_chain_focus.recommended_actions %}
+            <span class="soc-token soc-token-accent">{{ action|replace("_", " ")|title }}</span>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="soc-list-copy">Investigate the related timeline and incidents before containment.</div>
+          {% endif %}
+        </div>
+      </div>
     </div>
     {% endif %}
     <div class="soc-chain-grid">

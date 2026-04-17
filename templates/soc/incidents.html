@@ -1,0 +1,195 @@
+{% extends "soc/base.html" %}
+{% set active_page = "incidents" %}
+{% set incident_rows = incident_rows if incident_rows is defined else [] %}
+{% set incident_summary = incident_summary if incident_summary is defined else {} %}
+{% set incident_filters = incident_filters if incident_filters is defined else {} %}
+{% set incident_filter_options = incident_filter_options if incident_filter_options is defined else {} %}
+
+{% block title %}NetGuard SOC | Incidents{% endblock %}
+
+{% block page %}
+<header class="soc-page-header">
+  <div>
+    <h1 class="soc-page-title">Incidents Queue</h1>
+    <p class="soc-page-copy">Operational queue for host-centric XDR incidents, with fast filtering, direct drill-down, and analyst status transitions.</p>
+  </div>
+  <div class="soc-filter-bar">
+    <div class="soc-pill">Visible {{ incident_summary.visible|default(0) }}</div>
+    <div class="soc-pill">Open {{ incident_summary.open|default(0) }}</div>
+    <div class="soc-pill">In Progress {{ incident_summary.in_progress|default(0) }}</div>
+    <div class="soc-pill">Critical {{ incident_summary.critical|default(0) }}</div>
+  </div>
+</header>
+
+<article class="soc-panel">
+  <div class="soc-panel-header">
+    <h2 class="soc-panel-title">Filters</h2>
+    <a class="soc-inline-link" href="/soc/incidents">Clear filters</a>
+  </div>
+  <form class="soc-filter-form" method="get" action="/soc/incidents">
+    <label class="soc-filter-field">
+      <span class="soc-stat-label">Severity</span>
+      <select class="soc-select" name="severity">
+        <option value="">All severities</option>
+        {% for severity in incident_filter_options.severities|default([]) %}
+        <option value="{{ severity }}" {% if incident_filters.severity == severity %}selected{% endif %}>{{ severity|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="soc-filter-field">
+      <span class="soc-stat-label">Status</span>
+      <select class="soc-select" name="status">
+        <option value="">All statuses</option>
+        {% for status in incident_filter_options.statuses|default([]) %}
+        <option value="{{ status }}" {% if incident_filters.status == status %}selected{% endif %}>{{ status|replace("_", " ")|title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="soc-filter-field">
+      <span class="soc-stat-label">Host</span>
+      <select class="soc-select" name="host">
+        <option value="">All hosts</option>
+        {% for host_name in incident_filter_options.hosts|default([]) %}
+        <option value="{{ host_name }}" {% if incident_filters.host == host_name %}selected{% endif %}>{{ host_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="soc-filter-field">
+      <span class="soc-stat-label">Technique</span>
+      <select class="soc-select" name="technique">
+        <option value="">All techniques</option>
+        {% for technique in incident_filter_options.techniques|default([]) %}
+        <option value="{{ technique }}" {% if incident_filters.technique == technique %}selected{% endif %}>{{ technique }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="soc-filter-actions">
+      <button class="soc-action-button soc-action-button-primary" type="submit">Apply</button>
+    </div>
+  </form>
+</article>
+
+<section class="soc-summary-strip">
+  <article class="soc-summary-card">
+    <div class="soc-stat-label">Total Incidents</div>
+    <div class="soc-investigation-value">{{ incident_summary.total|default(0) }}</div>
+    <div class="soc-stat-foot">Host-linked incidents available for analyst triage.</div>
+  </article>
+  <article class="soc-summary-card">
+    <div class="soc-stat-label">Contained</div>
+    <div class="soc-investigation-value">{{ incident_summary.contained|default(0) }}</div>
+    <div class="soc-stat-foot">Incidents already isolated or partially contained.</div>
+  </article>
+  <article class="soc-summary-card">
+    <div class="soc-stat-label">Resolved</div>
+    <div class="soc-investigation-value">{{ incident_summary.resolved|default(0) }}</div>
+    <div class="soc-stat-foot">Items moved out of active analyst queue.</div>
+  </article>
+</section>
+
+<section class="soc-list">
+  {% if incident_rows %}
+    {% for incident in incident_rows %}
+    <article class="soc-panel soc-incident-card">
+      <div class="soc-panel-header">
+        <div>
+          <div class="soc-list-top">
+            <span class="soc-list-title">{{ incident.playbook_label }}</span>
+            <span class="soc-severity-chip {{ incident.severity }}">{{ incident.severity|capitalize }}</span>
+            <span class="soc-status-chip status-{{ incident.status }}">{{ incident.status|replace("_", " ")|title }}</span>
+          </div>
+          <div class="soc-meta-inline">
+            <span>ID {{ incident.incident_id }}</span>
+            <span>Host <a class="soc-inline-link" href="/soc/hosts/{{ incident.host_id }}">{{ incident.host_id }}</a></span>
+            {% if incident.technique %}<span class="soc-mitre-badge">Technique {{ incident.technique }}</span>{% endif %}
+            {% if incident.tactic %}<span class="soc-mitre-badge soc-mitre-badge-muted">{{ incident.tactic|replace("_", " ")|title }}</span>{% endif %}
+          </div>
+        </div>
+        <div class="soc-incident-side">
+          <span class="soc-severity-chip {{ incident.risk_level }}">{{ incident.risk_score }}/100</span>
+          <span class="soc-stat-foot">Updated {{ incident.updated_at or incident.opened_at }}</span>
+        </div>
+      </div>
+      <div class="soc-list-copy">{{ incident.description }}</div>
+      <div class="soc-link-row">
+        <a class="soc-inline-link" href="/soc/hosts/{{ incident.host_id }}">Open host</a>
+        <a class="soc-inline-link" href="/soc/hosts/{{ incident.host_id }}?chain={{ incident.chain_filter }}">Open host chain</a>
+        {% if incident.chain_summary %}<span class="soc-chain-caption">{{ incident.chain_summary }}</span>{% endif %}
+      </div>
+      <div class="soc-action-row">
+        <span class="soc-token">{{ incident.recommended_action|replace("_", " ")|title }}</span>
+        {% if can_update_incidents %}
+          {% for status in incident_status_options|default([]) %}
+            {% if status != incident.status and status != 'false_positive' %}
+            <button
+              class="soc-action-button"
+              type="button"
+              data-incident-id="{{ incident.incident_id }}"
+              data-next-status="{{ status }}"
+            >
+              Mark {{ status|replace("_", " ")|title }}
+            </button>
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  {% else %}
+    <article class="soc-panel">
+      <div class="soc-empty-state">Nenhum incidente corresponde aos filtros atuais.</div>
+    </article>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    function getCsrfToken() {
+      const match = document.cookie
+        .split(';')
+        .map((item) => item.trim())
+        .find((item) => item.startsWith('csrf_token='));
+      return match ? decodeURIComponent(match.split('=')[1] || '') : '';
+    }
+
+    async function updateIncidentStatus(button) {
+      const incidentId = button.getAttribute('data-incident-id');
+      const nextStatus = button.getAttribute('data-next-status');
+      if (!incidentId || !nextStatus) {
+        return;
+      }
+      const headers = { 'Content-Type': 'application/json' };
+      const csrfToken = getCsrfToken();
+      if (csrfToken) {
+        headers['X-CSRFToken'] = csrfToken;
+      }
+      button.disabled = true;
+      try {
+        const resp = await fetch(`/soc/incidents/${incidentId}/status`, {
+          method: 'POST',
+          headers,
+          credentials: 'same-origin',
+          body: JSON.stringify({ status: nextStatus })
+        });
+        if (!resp.ok) {
+          throw new Error(`status ${resp.status}`);
+        }
+        window.location.reload();
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = 'Retry update';
+      }
+    }
+
+    document.addEventListener('click', function (event) {
+      const button = event.target.closest('[data-incident-id][data-next-status]');
+      if (!button) {
+        return;
+      }
+      updateIncidentStatus(button);
+    });
+  })();
+</script>
+{% endblock %}
