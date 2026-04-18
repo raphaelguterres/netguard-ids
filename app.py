@@ -2556,6 +2556,19 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = "", ten
             except Exception:
                 pass
 
+        # Auto-remediation — age automaticamente se configurado
+        if REMEDIATION_AVAILABLE:
+            try:
+                _get_remediation().auto_respond({
+                    "severity":   e.severity,
+                    "threat":     e.threat_name,
+                    "event_type": "detection",
+                    "source_ip":  ip or "",
+                    "details":    {"pid": getattr(e, "pid", None)},
+                })
+            except Exception:
+                pass
+
         # Webhook dispatch — envia alerta em background
         if WEBHOOK_AVAILABLE:
             try:
@@ -6223,6 +6236,104 @@ def custom_rules_operators():
         ],
         "logic_options": ["AND", "OR"],
     })
+
+
+# ══════════════════════════════════════ REMOTE REMEDIATION ═════════
+
+try:
+    from engine.remediation_engine import get_remediation_engine
+    REMEDIATION_AVAILABLE = True
+    logger.info("Remediation Engine carregado")
+except Exception as _re:
+    REMEDIATION_AVAILABLE = False
+    logger.warning("Remediation Engine indisponível: %s", _re)
+
+def _get_remediation():
+    db  = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+    tid = _resolve_tenant_id()
+    return get_remediation_engine(db, tid, whitelist_ips=WHITELIST)
+
+@app.route("/api/remediation/config", methods=["GET"])
+@auth
+def remediation_config_get():
+    if not REMEDIATION_AVAILABLE:
+        return jsonify({"error": "Remediation Engine indisponível"}), 503
+    return jsonify(_get_remediation().get_config())
+
+@app.route("/api/remediation/config", methods=["PUT"])
+@auth
+@csrf_protect
+def remediation_config_put():
+    if not REMEDIATION_AVAILABLE:
+        return jsonify({"error": "Remediation Engine indisponível"}), 503
+    cfg = _get_remediation().update_config(request.get_json(force=True) or {})
+    return jsonify({"ok": True, "config": cfg})
+
+@app.route("/api/remediation/kill", methods=["POST"])
+@auth
+@csrf_protect
+def remediation_kill():
+    if not REMEDIATION_AVAILABLE:
+        return jsonify({"error": "Remediation Engine indisponível"}), 503
+    data   = request.get_json(force=True) or {}
+    pid    = data.get("pid")
+    reason = data.get("reason", "manual kill via dashboard")
+    if not pid:
+        return jsonify({"error": "pid obrigatório"}), 400
+    result = _get_remediation().kill_process(
+        int(pid), reason=reason,
+        operator=request.remote_addr or "dashboard"
+    )
+    audit("REMEDIATION_KILL", ip=request.remote_addr or "-",
+          detail=f"pid={pid} result={result.get('result')}")
+    return jsonify(result)
+
+@app.route("/api/remediation/isolate", methods=["POST"])
+@auth
+@csrf_protect
+def remediation_isolate():
+    if not REMEDIATION_AVAILABLE:
+        return jsonify({"error": "Remediation Engine indisponível"}), 503
+    data     = request.get_json(force=True) or {}
+    ip       = data.get("ip", "").strip()
+    reason   = data.get("reason", "manual isolate via dashboard")
+    duration = int(data.get("duration_minutes", 60))
+    if not ip:
+        return jsonify({"error": "ip obrigatório"}), 400
+    result = _get_remediation().isolate_host(
+        ip, reason=reason, duration_minutes=duration,
+        operator=request.remote_addr or "dashboard"
+    )
+    audit("REMEDIATION_ISOLATE", ip=request.remote_addr or "-",
+          detail=f"target={ip} result={result.get('result')}")
+    return jsonify(result)
+
+@app.route("/api/remediation/isolate/<ip>", methods=["DELETE"])
+@auth
+@csrf_protect
+def remediation_unisolate(ip):
+    if not REMEDIATION_AVAILABLE:
+        return jsonify({"error": "Remediation Engine indisponível"}), 503
+    result = _get_remediation().unisolate_host(
+        ip, operator=request.remote_addr or "dashboard"
+    )
+    audit("REMEDIATION_UNISOLATE", ip=request.remote_addr or "-", detail=f"target={ip}")
+    return jsonify(result)
+
+@app.route("/api/remediation/isolated", methods=["GET"])
+@auth
+def remediation_isolated():
+    if not REMEDIATION_AVAILABLE:
+        return jsonify({"error": "Remediation Engine indisponível"}), 503
+    return jsonify({"hosts": _get_remediation().isolated_hosts()})
+
+@app.route("/api/remediation/history", methods=["GET"])
+@auth
+def remediation_history():
+    if not REMEDIATION_AVAILABLE:
+        return jsonify({"error": "Remediation Engine indisponível"}), 503
+    limit = min(int(request.args.get("limit", 50)), 200)
+    return jsonify({"history": _get_remediation().history(limit)})
 
 
 # ═══════════════════════════════════════════ TRIAL SYSTEM ══════════

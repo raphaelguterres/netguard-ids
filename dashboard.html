@@ -2019,6 +2019,7 @@ th.sortable:hover{color:var(--cyn)}
     <div class="tab" onclick="goPage('custom-rules',this)" title="Regras Customizadas">⚙ My Rules</div>
     <div class="tab" onclick="goPage('webhooks',this)" title="Webhook Alerts">🔔 Webhooks</div>
     <div class="tab" id="tab-trials-btn" style="display:none" onclick="goPage('trials',this)" title="Trials de Clientes">🔗 Trials</div>
+    <div class="tab" onclick="goPage('remediation',this)" title="Remote Remediation">🔧 Remediation</div>
     <div class="tab" onclick="goPage('xdr',this)" title="XDR/EDR Pipeline">🛡 XDR</div>
     <div class="tab" onclick="goPage('mitre',this)" title="MITRE ATT&CK">🗺 ATT&CK</div>
     <div class="tab" onclick="goPage('threat-intel',this)" title="Threat Intelligence Feeds">🌐 Threat Intel</div>
@@ -3050,6 +3051,7 @@ th.sortable:hover{color:var(--cyn)}
 <div class="page" id="p-custom-rules"></div>
 <div class="page" id="p-webhooks"></div>
 <div class="page" id="p-trials"></div>
+<div class="page" id="p-remediation"></div>
 <div class="page" id="p-xdr"></div>
 <div class="page" id="p-mitre"></div>
 <div class="page" id="p-threat-intel"></div>
@@ -3894,6 +3896,7 @@ function goPage(name,el){
   if(name==='compliance')  loadCompliance();
   if(name==='custom-rules') loadCustomRules();
   if(name==='webhooks')      loadWebhooks();
+  if(name==='remediation')   loadRemediation();
   if(name==='trials')        loadTrials();
   if(name==='xdr')           loadXdr();
   if(name==='mitre')         loadMitre();
@@ -8318,6 +8321,236 @@ async function forensicsDeleteSnap(snapId, btn){
   toast('Snapshot excluído', 'ok');
   document.querySelector('div[style*="rgba(0,0,0,.7)"]')?.remove();
   loadForensics();
+}
+
+// ══════════════════════════════════════ REMEDIATION ═══════════════
+
+async function loadRemediation(){
+  const pg = document.getElementById('p-remediation');
+  if(!pg) return;
+  pg.innerHTML = `<div style="padding:20px;width:100%;max-width:1000px;margin:0 auto;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-size:1.1rem;font-weight:700">🔧 Remote Remediation</div>
+        <div style="font-size:.78rem;color:var(--txt3)">Kill de processos e isolamento de hosts em tempo real. Age sozinho ou sob demanda.</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="fbtn" onclick="loadRemediation()">↻ Atualizar</button>
+        <button class="fbtn" onclick="showRemConfig()" style="background:var(--s2)">⚙ Config Auto</button>
+      </div>
+    </div>
+    <div id="rem-config-area"></div>
+    <div id="rem-content"><div class="empty"><span>Carregando…</span></div></div>
+  </div>`;
+
+  const [cfgR, isoR, histR, procR, connR] = await Promise.all([
+    api('/remediation/config'),
+    api('/remediation/isolated'),
+    api('/remediation/history'),
+    api('/processes'),
+    api('/connections'),
+  ]);
+
+  const el = document.getElementById('rem-content');
+  if(!el) return;
+
+  const cfg      = cfgR || {};
+  const isolated = isoR?.hosts || [];
+  const history  = histR?.history || [];
+  const procs    = procR?.processes || [];
+  const conns    = connR?.connections || [];
+
+  // Auto-status badge
+  const autoBadge = (cfg.auto_kill || cfg.auto_isolate)
+    ? `<span style="background:rgba(248,81,73,.15);color:var(--red);border-radius:4px;padding:2px 8px;font-size:.7rem;font-weight:700">⚡ AUTO ATIVO — min sev: ${cfg.auto_min_sev?.toUpperCase()}</span>`
+    : `<span style="background:rgba(139,148,158,.1);color:var(--txt3);border-radius:4px;padding:2px 8px;font-size:.7rem">Manual apenas</span>`;
+
+  el.innerHTML = `
+  <!-- Stats row -->
+  <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+    ${autoBadge}
+    <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:8px 16px;text-align:center">
+      <span style="font-size:1.3rem;font-weight:700;color:var(--red)">${isolated.length}</span>
+      <span style="font-size:.72rem;color:var(--txt3);margin-left:6px">hosts isolados</span>
+    </div>
+    <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:8px 16px;text-align:center">
+      <span style="font-size:1.3rem;font-weight:700;color:var(--ora)">${history.filter(h=>h.auto).length}</span>
+      <span style="font-size:.72rem;color:var(--txt3);margin-left:6px">ações automáticas</span>
+    </div>
+    <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:8px 16px;text-align:center">
+      <span style="font-size:1.3rem;font-weight:700">${history.length}</span>
+      <span style="font-size:.72rem;color:var(--txt3);margin-left:6px">total ações</span>
+    </div>
+  </div>
+
+  <!-- Isolate manual -->
+  <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:14px 16px;margin-bottom:12px">
+    <div style="font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px">
+      🚫 Isolar Host Manual
+      <span style="font-size:.72rem;color:var(--txt3);font-weight:400">Bloqueia via Windows Firewall / iptables</span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input id="rem-iso-ip" class="finput" placeholder="IP ex: 185.220.101.47" style="flex:1;min-width:180px">
+      <input id="rem-iso-reason" class="finput" placeholder="Motivo" style="flex:2;min-width:200px">
+      <select id="rem-iso-dur" class="fsel">
+        <option value="30">30 min</option>
+        <option value="60" selected>1 hora</option>
+        <option value="240">4 horas</option>
+        <option value="1440">24 horas</option>
+        <option value="0">Permanente</option>
+      </select>
+      <button class="fbtn" style="background:var(--red);color:#fff" onclick="manualIsolate()">🚫 Isolar</button>
+    </div>
+  </div>
+
+  <!-- Hosts isolados -->
+  <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:14px 16px;margin-bottom:12px">
+    <div style="font-weight:600;margin-bottom:10px">🔒 Hosts Atualmente Isolados (${isolated.length})</div>
+    ${isolated.length ? isolated.map(h=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--b1);flex-wrap:wrap">
+      <span style="font-family:var(--mono);color:var(--red);font-size:.85rem">${h.ip}</span>
+      <span style="font-size:.72rem;color:var(--txt3);flex:1">${h.reason||'—'}</span>
+      <span style="font-size:.7rem;color:var(--txt3)">${h.isolated_at?.replace('T',' ').replace('Z','')}</span>
+      ${h.expires_at?`<span style="font-size:.7rem;color:var(--ora)">expira ${h.expires_at?.replace('T',' ').replace('Z','')}</span>`:'<span style="font-size:.7rem;color:var(--red)">permanente</span>'}
+      <button class="fbtn" style="color:var(--grn)" onclick="unisolateHost('${h.ip}')">↑ Liberar</button>
+    </div>`).join('') : '<div style="color:var(--txt3);font-size:.82rem;padding:8px 0">Nenhum host isolado no momento.</div>'}
+  </div>
+
+  <!-- Processos suspeitos -->
+  <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:14px 16px;margin-bottom:12px">
+    <div style="font-weight:600;margin-bottom:10px">💀 Processos Ativos — Kill Manual</div>
+    <div style="max-height:220px;overflow-y:auto">
+    ${procs.filter(p=>p.cpu>5||p.connections>3).slice(0,30).map(p=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--b1);flex-wrap:wrap">
+      <span style="font-family:var(--mono);font-size:.78rem;flex:1;min-width:120px">${p.name||'?'}</span>
+      <span style="font-size:.72rem;color:var(--muted)">PID ${p.pid||'—'}</span>
+      <span style="font-size:.72rem;color:${p.cpu>50?'var(--red)':p.cpu>20?'var(--ora)':'var(--txt3)'}">CPU ${p.cpu?.toFixed?.(1)||0}%</span>
+      <span style="font-size:.72rem;color:var(--txt3)">🔗 ${p.connections||0}</span>
+      ${p.pid?`<button class="fbtn" style="color:var(--red);font-size:.72rem" onclick="killProc(${p.pid},'${(p.name||'').replace(/'/g,'')}')" title="Encerrar processo">✕ Kill</button>`:''}
+    </div>`).join('') || '<div style="color:var(--txt3);font-size:.82rem">Nenhum processo suspeito detectado.</div>'}
+    </div>
+  </div>
+
+  <!-- Conexões externas -->
+  <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:14px 16px;margin-bottom:12px">
+    <div style="font-weight:600;margin-bottom:10px">🌐 Conexões Externas — Isolar por IP</div>
+    <div style="max-height:200px;overflow-y:auto">
+    ${conns.filter(c=>c.remote_ip&&!c.remote_ip.startsWith('127.')&&!c.remote_ip.startsWith('192.168')&&!c.remote_ip.startsWith('10.')).slice(0,20).map(c=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--b1);flex-wrap:wrap">
+      <span style="font-family:var(--mono);font-size:.78rem;color:var(--blu)">${c.remote_ip}</span>
+      <span style="font-size:.72rem;color:var(--txt3)">:${c.remote_port||'?'}</span>
+      <span style="font-size:.72rem;color:var(--txt3);flex:1">${c.process||'?'}</span>
+      <span style="font-size:.72rem;color:var(--txt3)">${c.status||'—'}</span>
+      <button class="fbtn" style="color:var(--red);font-size:.72rem" onclick="isolateFromConn('${c.remote_ip}','${(c.process||'').replace(/'/g,'')}')">🚫 Isolar</button>
+    </div>`).join('') || '<div style="color:var(--txt3);font-size:.82rem">Nenhuma conexão externa ativa.</div>'}
+    </div>
+  </div>
+
+  <!-- Histórico -->
+  <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:14px 16px">
+    <div style="font-weight:600;margin-bottom:10px">📋 Histórico de Ações (${history.length})</div>
+    <div style="max-height:260px;overflow-y:auto">
+    ${history.length ? history.map(h=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--b1);font-size:.72rem;flex-wrap:wrap">
+      <span style="color:${h.result==='ok'?'var(--grn)':'var(--red)'}">●</span>
+      <span style="background:var(--s1);border-radius:3px;padding:1px 6px;font-family:var(--mono)">${h.action}</span>
+      <span style="font-family:var(--mono);color:var(--blu)">${h.target}</span>
+      <span style="flex:1;color:var(--txt3)">${h.reason||'—'}</span>
+      ${h.auto?'<span style="color:var(--ora);font-size:.68rem">⚡ AUTO</span>':''}
+      <span style="color:var(--txt3)">${h.created_at?.replace('T',' ').replace('Z','')}</span>
+    </div>`).join('') : '<div style="color:var(--txt3)">Nenhuma ação registrada ainda.</div>'}
+    </div>
+  </div>`;
+}
+
+async function showRemConfig(){
+  const area = document.getElementById('rem-config-area');
+  if(!area) return;
+  if(area.innerHTML){ area.innerHTML=''; return; }
+  const cfg = await api('/remediation/config') || {};
+  area.innerHTML = `
+  <div style="background:var(--s2);border:1px solid var(--blu);border-radius:8px;padding:14px 16px;margin-bottom:12px">
+    <div style="font-weight:600;margin-bottom:12px">⚙ Auto-Remediation</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;cursor:pointer">
+        <input type="checkbox" id="rem-auto-kill" ${cfg.auto_kill?'checked':''}> Auto Kill de processos
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;cursor:pointer">
+        <input type="checkbox" id="rem-auto-iso" ${cfg.auto_isolate?'checked':''}> Auto Isolamento de hosts
+      </label>
+      <div>
+        <div style="font-size:.72rem;color:var(--txt3);margin-bottom:4px">Severidade mínima para auto-ação</div>
+        <select id="rem-auto-sev" class="fsel" style="width:100%">
+          <option value="critical" ${cfg.auto_min_sev==='critical'?'selected':''}>CRITICAL apenas</option>
+          <option value="high" ${cfg.auto_min_sev==='high'?'selected':''}>HIGH e acima</option>
+          <option value="medium" ${cfg.auto_min_sev==='medium'?'selected':''}>MEDIUM e acima</option>
+        </select>
+      </div>
+      <div>
+        <div style="font-size:.72rem;color:var(--txt3);margin-bottom:4px">Whitelist IPs (um por linha)</div>
+        <textarea id="rem-wl-ips" class="finput" rows="2" style="width:100%;resize:vertical">${(cfg.whitelist_ips||[]).join('\n')}</textarea>
+      </div>
+    </div>
+    <div style="background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.2);border-radius:6px;padding:8px 12px;font-size:.75rem;color:var(--ora);margin-bottom:10px">
+      ⚠ Auto-Kill e Auto-Isolate são ações irreversíveis em tempo real. Ative apenas em ambientes controlados.
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="fbtn" style="background:var(--blu);color:#fff" onclick="saveRemConfig()">Salvar</button>
+      <button class="fbtn" onclick="document.getElementById('rem-config-area').innerHTML=''">Cancelar</button>
+    </div>
+  </div>`;
+}
+
+async function saveRemConfig(){
+  const auto_kill    = document.getElementById('rem-auto-kill')?.checked;
+  const auto_isolate = document.getElementById('rem-auto-iso')?.checked;
+  const auto_min_sev = document.getElementById('rem-auto-sev')?.value;
+  const wlRaw        = document.getElementById('rem-wl-ips')?.value||'';
+  const whitelist_ips = wlRaw.split('\n').map(s=>s.trim()).filter(Boolean);
+  const r = await api('/remediation/config',{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({auto_kill,auto_isolate,auto_min_sev,whitelist_ips})});
+  if(r?.ok){ toast('Config salva','ok'); document.getElementById('rem-config-area').innerHTML=''; loadRemediation(); }
+  else toast('Erro ao salvar','err');
+}
+
+async function killProc(pid, name){
+  if(!confirm(`Encerrar processo "${name}" (PID ${pid})?\nEsta ação é irreversível.`)) return;
+  const reason = `Kill manual via dashboard — ${name}`;
+  const r = await api('/remediation/kill',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pid,reason})});
+  if(r?.ok) toast(`Processo ${name} encerrado`,'ok');
+  else toast(`Bloqueado: ${r?.detail||'erro'}`,'err');
+  loadRemediation();
+}
+
+async function manualIsolate(){
+  const ip     = document.getElementById('rem-iso-ip')?.value.trim();
+  const reason = document.getElementById('rem-iso-reason')?.value.trim()||'isolamento manual';
+  const dur    = parseInt(document.getElementById('rem-iso-dur')?.value||'60');
+  if(!ip){ toast('IP obrigatório','err'); return; }
+  if(!confirm(`Isolar host ${ip}?\nTodo tráfego será bloqueado via firewall.`)) return;
+  const r = await api('/remediation/isolate',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ip,reason,duration_minutes:dur})});
+  if(r?.ok) toast(`Host ${ip} isolado`,'ok');
+  else toast(`Bloqueado: ${r?.detail||'erro'}`,'err');
+  loadRemediation();
+}
+
+async function isolateFromConn(ip, proc){
+  if(!confirm(`Isolar ${ip} (processo: ${proc})?\nTodo tráfego será bloqueado via firewall.`)) return;
+  const r = await api('/remediation/isolate',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ip,reason:`Conexão suspeita via ${proc}`,duration_minutes:60})});
+  if(r?.ok) toast(`${ip} isolado`,'ok');
+  else toast(`Bloqueado: ${r?.detail||'erro'}`,'err');
+  loadRemediation();
+}
+
+async function unisolateHost(ip){
+  if(!confirm(`Liberar ${ip}?\nAs regras de firewall serão removidas.`)) return;
+  const r = await api(`/remediation/isolate/${ip}`,{method:'DELETE'});
+  if(r?.ok) toast(`${ip} liberado`,'ok');
+  else toast('Erro ao liberar','err');
+  loadRemediation();
 }
 </script>
 
