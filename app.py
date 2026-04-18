@@ -7245,3 +7245,37 @@ def soc_preview_host_detail(host_id):
             ],
         }
     return render_template("soc/host_detail.html", **context)
+
+
+# ── Inicialização ──────────────────────────────────────────────────
+def iniciar_monitoramento():
+    threading.Thread(target=loop_monitor, kwargs={"intervalo": 30},
+                     daemon=True, name="ids-monitor").start()
+    try:
+        from packet_capture import PacketCapture, detectar_interface_ativa
+        interface = detectar_interface_ativa()
+        capture   = PacketCapture(callback=analisar, interface=interface)
+        capture.iniciar()
+        monitor_status["captura"] = f"ativa | interface={interface}"
+        logger.info("Captura de pacotes iniciada | interface=%s", interface)
+    except Exception as e:
+        monitor_status["captura"] = f"indisponivel: {e}"
+        logger.warning("Captura de pacotes indisponivel: %s", e)
+
+iniciar_monitoramento()
+
+if __name__ == "__main__":
+    host    = os.environ.get("IDS_HOST", "127.0.0.1")
+    port    = int(os.environ.get("IDS_PORT", 5000))
+    debug   = os.environ.get("IDS_DEBUG", "false").lower() == "true"
+    ssl_ctx = get_ssl_context()
+
+    print_startup_info()
+
+    app.run(
+        host=host,
+        port=port,
+        debug=debug,
+        ssl_context=ssl_ctx,
+        use_reloader=False,
+    )
