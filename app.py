@@ -7247,6 +7247,17 @@ def soc_preview_host_detail(host_id):
     return render_template("soc/host_detail.html", **context)
 
 
+# ── Dashboard principal ────────────────────────────────────────────
+@app.route("/")
+@app.route("/dashboard")
+@require_session
+def dashboard():
+    p = pathlib.Path(__file__).parent / "dashboard.html"
+    if not p.exists():
+        return "dashboard.html não encontrado", 404
+    return p.read_text(encoding="utf-8"), 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
 # ── Inicialização ──────────────────────────────────────────────────
 def iniciar_monitoramento():
     threading.Thread(target=loop_monitor, kwargs={"intervalo": 30},
