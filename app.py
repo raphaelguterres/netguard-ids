@@ -514,7 +514,8 @@ def _get_demo_cookie_token(*, reason: str) -> str:
 def _resolve_tenant_id(fallback: str = None) -> str:
     """
     Resolve o tenant_id da requisição atual.
-    Prioridade: fallback param → trial cookie → token/header/cookie → 'default'
+    Prioridade: fallback param → trial cookie → impersonação admin →
+                token/header/cookie → 'default'
     """
     if fallback:
         return fallback
@@ -526,6 +527,11 @@ def _resolve_tenant_id(fallback: str = None) -> str:
         token = _extract_token()
         if token and AUTH_MODULE_OK:
             result = verify_any_token(token, repo)
+            # Prioridade 2: impersonação — só admin pode impersonar
+            if result.get("type") == "admin":
+                imp = request.cookies.get("netguard_impersonate", "").strip()
+                if imp:
+                    return imp
             tenant = result.get("tenant")
             if tenant:
                 t = dict(tenant) if not isinstance(tenant, dict) else tenant
@@ -549,6 +555,10 @@ def _resolve_tenant_with_role() -> tuple[str, str]:
     """
     # Modo local (AUTH_ENABLED=False): usuário único, acesso total — SEMPRE admin
     if not AUTH_ENABLED:
+        # Em dev local, impersonação também funciona
+        imp = request.cookies.get("netguard_impersonate", "").strip() if request else ""
+        if imp:
+            return imp, "admin"
         return "admin", "admin"
     try:
         token = _extract_token()
@@ -556,6 +566,10 @@ def _resolve_tenant_with_role() -> tuple[str, str]:
             result = verify_any_token(token, repo)
             if result.get("valid"):
                 if result.get("type") == "admin":
+                    # Impersonação: admin visualizando tenant, mas mantém role=admin
+                    imp = request.cookies.get("netguard_impersonate", "").strip()
+                    if imp:
+                        return imp, "admin"
                     return "admin", "admin"
                 tenant = result.get("tenant")
                 if tenant:
@@ -6756,8 +6770,39 @@ def host_timeline(host_id):
 
 # ═══════════════════════════════════════════ ADMIN GOD VIEW ════════
 
+def _is_admin_request() -> bool:
+    """
+    True somente se o token da requisição é o do admin (.netguard_token).
+    Quando AUTH_ENABLED=False (dev local single-user), trata como admin também.
+    """
+    if not AUTH_ENABLED:
+        return True
+    try:
+        token = _extract_token()
+        if not token:
+            return False
+        result = verify_any_token(token, repo)
+        return result.get("valid") and result.get("type") == "admin"
+    except Exception:
+        return False
+
+
+def _admin_only(f):
+    """Decorator: 403 se o requester não for admin. Usar DEPOIS de @auth."""
+    @functools.wraps(f)
+    def wrapped(*a, **kw):
+        if not _is_admin_request():
+            logger.warning("Admin-only negado | ip=%s | path=%s",
+                           request.remote_addr, request.path)
+            return jsonify({"error": "Forbidden",
+                            "message": "Endpoint restrito ao administrador."}), 403
+        return f(*a, **kw)
+    return wrapped
+
+
 @app.route("/api/admin/overview")
 @auth
+@_admin_only
 def admin_overview():
     """
     Retorna stats de TODOS os tenants para o painel God View.
@@ -6812,6 +6857,7 @@ def admin_overview():
 
 @app.route("/api/admin/tenant/<tenant_id>/feed")
 @auth
+@_admin_only
 def admin_tenant_feed(tenant_id):
     """Feed de eventos recentes de um tenant específico."""
     limit  = min(int(request.args.get("limit", 50)), 200)
@@ -6829,20 +6875,19 @@ def admin_tenant_feed(tenant_id):
 
 @app.route("/api/admin/tenant/<tenant_id>/view")
 @auth
+@_admin_only
 def admin_tenant_view(tenant_id):
     """
-    Gera um token de impersonação temporário para abrir o dashboard de um cliente.
-    Retorna a URL com o token que autentica no tenant correto.
+    Devolve a URL que abre o dashboard impersonando o tenant.
+    NÃO vaza/serve o token do tenant — a impersonação usa um cookie
+    separado (netguard_impersonate) que só é honrado quando o
+    netguard_token da sessão pertence ao admin.
     """
     try:
         t = repo.get_tenant_by_id(tenant_id)
         if not t:
             return jsonify({"error": "Tenant não encontrado"}), 404
-        token = t.get("token") or t.get("api_token", "")
-        if not token:
-            return jsonify({"error": "Tenant sem token"}), 400
         base = request.host_url.rstrip("/")
-        # Reutiliza o mecanismo de trial para servir o dashboard com cookie do tenant
         return jsonify({
             "ok": True,
             "tenant_id": tenant_id,
@@ -6855,15 +6900,22 @@ def admin_tenant_view(tenant_id):
 
 @app.route("/admin/view/<tenant_id>")
 @auth
+@_admin_only
 def admin_view_tenant(tenant_id):
-    """Abre o dashboard autenticado como um tenant específico (impersonação read-only)."""
+    """
+    Abre o dashboard impersonando um tenant (read-only lógico).
+
+    Design:
+      - O cookie netguard_token DA SESSÃO (admin) fica intocado.
+      - Setamos netguard_impersonate=<tenant_id> (curto TTL).
+      - _resolve_tenant_id() só honra esse cookie quando o token
+        outer é admin, garantindo que nenhum tenant possa forjar
+        impersonação de outro cliente.
+    """
     try:
         t = repo.get_tenant_by_id(tenant_id)
         if not t:
             return "Tenant não encontrado", 404
-        token = t.get("token") or t.get("api_token", "")
-        if not token:
-            return "Tenant sem token configurado", 400
     except Exception as e:
         return str(e), 500
 
@@ -6871,22 +6923,35 @@ def admin_view_tenant(tenant_id):
     if not p.exists():
         return "dashboard.html não encontrado", 404
 
-    # Injeta metadados de impersonação no dashboard
+    # Injeta metadados de impersonação no dashboard (banner/indicator)
     html = p.read_text(encoding="utf-8")
+    safe_name = (t.get("name","") or tenant_id).replace('"','').replace("<","")
     inject = f"""<script>
 window.__IMPERSONATE__ = {{
-  tenant_id: "{tenant_id}",
-  name: "{(t.get('name','') or tenant_id).replace('"','')}",
-  plan: "{t.get('plan','free')}",
+  tenant_id: {json.dumps(tenant_id)},
+  name: {json.dumps(safe_name)},
+  plan: {json.dumps(t.get('plan','free'))}
 }};
 </script>"""
     html = html.replace("<body>", f"<body>{inject}", 1)
 
     resp = make_response(html, 200)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
-    resp.set_cookie("netguard_token", token,
+    # Cookie de impersonação — só é honrado quando a sessão é admin
+    resp.set_cookie("netguard_impersonate", tenant_id,
                     httponly=True, samesite="Lax",
                     max_age=3600, secure=_HTTPS_ONLY)
+    return resp
+
+
+@app.route("/admin/view/exit")
+@auth
+@_admin_only
+def admin_view_exit():
+    """Limpa a impersonação e volta ao dashboard do admin."""
+    from flask import redirect as _redir
+    resp = make_response(_redir("/"))
+    resp.delete_cookie("netguard_impersonate")
     return resp
 
 

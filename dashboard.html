@@ -9410,17 +9410,34 @@ async function openTenantView(tenantId){
   else toast('Erro ao abrir dashboard do cliente','err');
 }
 
-// Detecta se é admin e exibe aba God View
+// Detecta se é admin e exibe abas God View / Trials
 (async function detectAdminMode(){
   try {
-    const r = await fetch('/api/admin/overview');
-    if(r.ok){
+    const r = await fetch('/api/me', {headers:{Accept:'application/json'}});
+    if(!r.ok) return;
+    const me = await r.json();
+    if(me.is_admin){
       const btn = document.getElementById('tab-godview');
       if(btn) btn.style.display = '';
       const trialBtn = document.getElementById('tab-trials-btn');
       if(trialBtn) trialBtn.style.display = '';
     }
   } catch{}
+})();
+
+// Banner de impersonação — quando admin abre dashboard de um cliente
+(function renderImpersonationBanner(){
+  const imp = window.__IMPERSONATE__;
+  if(!imp || !imp.tenant_id) return;
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:sticky;top:0;z-index:9999;background:#f0883e;color:#111;'
+    + 'padding:6px 14px;font-size:.8rem;font-weight:600;display:flex;'
+    + 'justify-content:space-between;align-items:center;box-shadow:0 2px 6px rgba(0,0,0,.35)';
+  bar.innerHTML = '👁 Impersonando: <span style="font-weight:800">'
+    + (imp.name||imp.tenant_id).replace(/[<>]/g,'') + '</span> — read-only'
+    + '<a href="/admin/view/exit" style="background:#111;color:#f0883e;padding:3px 10px;'
+    + 'border-radius:4px;text-decoration:none;font-size:.72rem">↩ Sair da impersonação</a>';
+  document.body.insertBefore(bar, document.body.firstChild);
 })();
 </script>
 
