@@ -6609,6 +6609,151 @@ def incidents_assign(iid):
     return jsonify({"ok": True, "incident": inc})
 
 
+# ══════════════════════════════════════════ HOST-CENTRIC VIEW ═══════
+
+@app.route("/api/hosts")
+@auth
+def hosts_overview():
+    """
+    Retorna todos os hosts conhecidos com dados agregados:
+    risk score, MITRE techniques, eventos recentes, conexões externas.
+    """
+    tid = _resolve_tenant_id()
+
+    # 1. Risk scores
+    risk_data = {}
+    if RISK_AVAILABLE:
+        try:
+            for h in risk_engine.get_all_hosts():
+                risk_data[h.get("host_id", h.get("hostname",""))] = h
+        except Exception:
+            pass
+
+    # 2. Eventos recentes por host (últimas 24h, máx 500)
+    events_by_host: dict = {}
+    mitre_by_host:  dict = {}
+    try:
+        recent = repo.list(tenant_id=tid, limit=500)
+        for ev in recent:
+            hid = ev.get("host_id") or ev.get("hostname") or "unknown"
+            events_by_host.setdefault(hid, []).append(ev)
+            # Coleta técnicas MITRE do campo details
+            import json as _json
+            try:
+                det = ev.get("details") or {}
+                if isinstance(det, str):
+                    det = _json.loads(det)
+                tech = det.get("mitre_technique") or det.get("technique")
+                tact = det.get("mitre_tactic")   or det.get("tactic")
+                if tech:
+                    mitre_by_host.setdefault(hid, set()).add(
+                        f"{tact or '?'}/{tech}" if tact else tech
+                    )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 3. Dispositivos na rede (IP, OS, last seen)
+    devices_map: dict = {}
+    try:
+        devs = platform_get_devices() if callable(globals().get("platform_get_devices")) else []
+        for d in devs:
+            k = d.get("hostname") or d.get("ip","")
+            if k:
+                devices_map[k] = d
+    except Exception:
+        pass
+
+    # 4. Kill chain incidents por host
+    incidents_by_host: dict = {}
+    try:
+        if kc_correlator:
+            for inc in kc_correlator.get_incidents():
+                hid = inc.get("host_id") or "unknown"
+                incidents_by_host.setdefault(hid, []).append(inc)
+    except Exception:
+        pass
+
+    # 5. Monta lista de hosts unificada
+    all_host_ids = set(risk_data) | set(events_by_host) | set(devices_map)
+    if not all_host_ids:
+        # fallback: hostname local
+        import socket as _sock
+        all_host_ids = {_sock.gethostname()}
+
+    hosts = []
+    for hid in sorted(all_host_ids):
+        risk  = risk_data.get(hid, {})
+        devic = devices_map.get(hid, {})
+        evts  = events_by_host.get(hid, [])
+        incid = incidents_by_host.get(hid, [])
+
+        # Severidade mais alta nos últimos eventos
+        sev_order = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+        max_sev   = max((sev_order.get(e.get("severity","info").lower(), 0) for e in evts), default=0)
+        sev_map   = {4:"critical", 3:"high", 2:"medium", 1:"low", 0:"info"}
+
+        # Processos suspeitos recentes (event_type contém process)
+        procs = [e for e in evts if "process" in (e.get("event_type",""))][:5]
+
+        # Conexões externas recentes
+        conns = [e for e in evts if "network" in (e.get("event_type","")) or
+                 "connection" in (e.get("event_type",""))][:5]
+
+        hosts.append({
+            "host_id":          hid,
+            "hostname":         devic.get("hostname") or hid,
+            "ip":               devic.get("ip") or risk.get("ip","—"),
+            "os":               devic.get("os","—"),
+            "last_seen":        devic.get("last_seen") or (evts[0].get("timestamp") if evts else None),
+            "risk_score":       risk.get("score", 0),
+            "risk_level":       risk.get("level","unknown"),
+            "event_count_24h":  len(evts),
+            "max_severity":     sev_map.get(max_sev, "info"),
+            "mitre_techniques": sorted(mitre_by_host.get(hid, set())),
+            "incident_count":   len(incid),
+            "recent_processes": procs,
+            "recent_conns":     conns,
+            "open_incidents":   [i for i in incid if not i.get("resolved")][:3],
+        })
+
+    # Ordena por risk_score desc
+    hosts.sort(key=lambda h: h["risk_score"], reverse=True)
+    return jsonify({"hosts": hosts, "total": len(hosts)})
+
+
+@app.route("/api/hosts/<path:host_id>/timeline")
+@auth
+def host_timeline(host_id):
+    """Linha do tempo de eventos de um host específico."""
+    tid   = _resolve_tenant_id()
+    limit = min(int(request.args.get("limit", 200)), 500)
+    try:
+        events = repo.list(tenant_id=tid, limit=limit)
+        # Filtra pelo host
+        host_events = [
+            e for e in events
+            if (e.get("host_id") or e.get("hostname") or "") == host_id
+        ]
+        # Enriquece com campos úteis
+        import json as _json
+        for e in host_events:
+            try:
+                det = e.get("details") or {}
+                if isinstance(det, str):
+                    det = _json.loads(det)
+                e["_mitre_technique"] = det.get("mitre_technique","")
+                e["_mitre_tactic"]    = det.get("mitre_tactic","")
+                e["_process"]         = det.get("process","")
+                e["_parent_process"]  = det.get("parent_process","")
+            except Exception:
+                pass
+        return jsonify({"host_id": host_id, "events": host_events, "total": len(host_events)})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 # ═══════════════════════════════════════════ TRIAL SYSTEM ══════════
 
 try:

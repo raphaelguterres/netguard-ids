@@ -2017,6 +2017,7 @@ th.sortable:hover{color:var(--cyn)}
     <div class="tab" onclick="goPage('ml-anomaly',this)" title="ML Anomalias">🤖 ML Anomaly</div>
     <div class="tab" onclick="goPage('compliance',this)" title="Conformidade">📋 Compliance</div>
     <div class="tab" onclick="goPage('custom-rules',this)" title="Regras Customizadas">⚙ My Rules</div>
+    <div class="tab" onclick="goPage('hosts',this)" title="Hosts">🖥 Hosts</div>
     <div class="tab" onclick="goPage('webhooks',this)" title="Webhook Alerts">🔔 Webhooks</div>
     <div class="tab" id="tab-trials-btn" style="display:none" onclick="goPage('trials',this)" title="Trials de Clientes">🔗 Trials</div>
     <div class="tab" onclick="goPage('edr',this)" title="EDR — Processos">🛡 EDR</div>
@@ -3051,6 +3052,7 @@ th.sortable:hover{color:var(--cyn)}
 
 <!-- ── CUSTOM RULES ──────────────────────────────────────────────── -->
 <div class="page" id="p-custom-rules"></div>
+<div class="page" id="p-hosts"></div>
 <div class="page" id="p-webhooks"></div>
 <div class="page" id="p-trials"></div>
 <div class="page" id="p-edr"></div>
@@ -3899,6 +3901,7 @@ function goPage(name,el){
   if(name==='ml-anomaly')  loadMLAnomaly(true);
   if(name==='compliance')  loadCompliance();
   if(name==='custom-rules') loadCustomRules();
+  if(name==='hosts')         loadHosts();
   if(name==='webhooks')      loadWebhooks();
   if(name==='remediation')   loadRemediation();
   if(name==='trials')        loadTrials();
@@ -7157,6 +7160,168 @@ async function deleteWebhook(id){
 
 let trialFormOpen = false;
 
+// ══════════════════════════════════════════════ HOSTS ════════════
+
+const RISK_COLOR = {critical:'var(--red)',high:'var(--ora)',medium:'var(--yel)',low:'var(--grn)',unknown:'var(--txt3)'};
+const RISK_BG    = {critical:'rgba(248,81,73,.12)',high:'rgba(240,136,62,.12)',medium:'rgba(210,153,34,.12)',low:'rgba(63,185,80,.12)',unknown:'rgba(139,148,158,.08)'};
+const SEV_ICON   = {critical:'🔴',high:'🟠',medium:'🟡',low:'🟢',info:'⚪',unknown:'⚫'};
+
+let hostsData = [];
+let hostTimelines = {};
+
+async function loadHosts(){
+  const pg = document.getElementById('p-hosts');
+  if(!pg) return;
+  pg.innerHTML = `<div style="padding:20px;width:100%;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;max-width:1100px;margin-left:auto;margin-right:auto">
+      <div>
+        <div style="font-size:1.1rem;font-weight:700">🖥 Hosts</div>
+        <div style="font-size:.8rem;color:var(--txt3);margin-top:2px">Visão host-centric — risco, MITRE, processos e linha do tempo por endpoint.</div>
+      </div>
+      <button class="fbtn" onclick="loadHosts()">↻ Atualizar</button>
+    </div>
+    <div id="hosts-grid" style="max-width:1100px;margin:0 auto"><div class="empty"><span>Carregando hosts…</span></div></div>
+  </div>`;
+
+  const r = await api('/hosts');
+  hostsData = r?.hosts || [];
+  renderHosts();
+}
+
+function renderHosts(){
+  const grid = document.getElementById('hosts-grid');
+  if(!grid) return;
+  if(!hostsData.length){
+    grid.innerHTML = '<div class="empty" style="height:140px"><span>Nenhum host detectado ainda. Aguardando telemetria…</span></div>';
+    return;
+  }
+  grid.innerHTML = hostsData.map((h,i) => {
+    const rl    = (h.risk_level||'unknown').toLowerCase();
+    const score = h.risk_score || 0;
+    const mitre = (h.mitre_techniques||[]).slice(0,4);
+    const sev   = (h.max_severity||'info').toLowerCase();
+    return `
+    <div id="host-card-${i}" style="background:var(--s2);border:1px solid ${RISK_COLOR[rl]||'var(--b2)'};border-radius:10px;margin-bottom:12px;overflow:hidden;transition:border-color .2s">
+      <!-- Host header row -->
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer" onclick="toggleHostDetail(${i})">
+        <!-- Risk gauge -->
+        <div style="width:48px;height:48px;flex-shrink:0;position:relative;display:flex;align-items:center;justify-content:center">
+          <svg width="48" height="48" viewBox="0 0 48 48">
+            <circle cx="24" cy="24" r="20" fill="none" stroke="var(--b2)" stroke-width="4"/>
+            <circle cx="24" cy="24" r="20" fill="none" stroke="${RISK_COLOR[rl]||'#8b949e'}" stroke-width="4"
+              stroke-dasharray="${Math.round(score*1.257)} 126" stroke-dashoffset="31.4" stroke-linecap="round"/>
+          </svg>
+          <span style="position:absolute;font-size:.68rem;font-weight:800;color:${RISK_COLOR[rl]||'var(--txt3)'}">${score}</span>
+        </div>
+        <!-- Host info -->
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-weight:700;font-size:.95rem">${h.hostname||h.host_id}</span>
+            <span style="font-size:.7rem;background:${RISK_BG[rl]||'rgba(139,148,158,.1)'};color:${RISK_COLOR[rl]||'var(--txt3)'};padding:1px 7px;border-radius:10px;font-weight:600">${(h.risk_level||'unknown').toUpperCase()}</span>
+            ${h.incident_count>0?`<span style="font-size:.7rem;background:rgba(248,81,73,.15);color:var(--red);padding:1px 7px;border-radius:10px">⚠ ${h.incident_count} incidente${h.incident_count>1?'s':''}</span>`:''}
+          </div>
+          <div style="font-size:.75rem;color:var(--txt3);margin-top:3px;display:flex;gap:12px;flex-wrap:wrap">
+            <span>🌐 ${h.ip||'—'}</span>
+            <span>💻 ${h.os||'—'}</span>
+            <span>📊 ${h.event_count_24h||0} eventos/24h</span>
+            ${h.last_seen?`<span>🕐 ${h.last_seen.replace('T',' ').replace('Z','').slice(0,16)}</span>`:''}
+          </div>
+          <!-- MITRE chips -->
+          ${mitre.length?`<div style="display:flex;gap:4px;margin-top:5px;flex-wrap:wrap">${mitre.map(t=>`<span style="font-size:.65rem;background:rgba(88,166,255,.1);color:var(--blu);border:1px solid rgba(88,166,255,.2);border-radius:3px;padding:1px 5px;font-family:var(--mono)">${t}</span>`).join('')}${h.mitre_techniques?.length>4?`<span style="font-size:.65rem;color:var(--txt3)">+${h.mitre_techniques.length-4}</span>`:''}</div>`:''}
+        </div>
+        <!-- Severity badge + expand -->
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:1.2rem">${SEV_ICON[sev]||'⚫'}</div>
+          <div style="font-size:.65rem;color:var(--txt3);margin-top:2px">${sev.toUpperCase()}</div>
+          <div style="font-size:.75rem;color:var(--txt3);margin-top:6px" id="host-expand-icon-${i}">▼</div>
+        </div>
+      </div>
+      <!-- Detail / timeline (hidden by default) -->
+      <div id="host-detail-${i}" style="display:none;border-top:1px solid var(--b2)"></div>
+    </div>`;
+  }).join('');
+}
+
+async function toggleHostDetail(i){
+  const detail = document.getElementById(`host-detail-${i}`);
+  const icon   = document.getElementById(`host-expand-icon-${i}`);
+  if(!detail) return;
+  if(detail.style.display !== 'none'){
+    detail.style.display = 'none';
+    if(icon) icon.textContent = '▼';
+    return;
+  }
+  if(icon) icon.textContent = '▲';
+  detail.style.display = 'block';
+  detail.innerHTML = `<div style="padding:12px 16px;color:var(--txt3);font-size:.8rem">Carregando timeline…</div>`;
+
+  const h   = hostsData[i];
+  const hid = h.host_id;
+
+  // Busca timeline se ainda não carregada
+  if(!hostTimelines[hid]){
+    const r = await api(`/hosts/${encodeURIComponent(hid)}/timeline?limit=60`);
+    hostTimelines[hid] = r?.events || [];
+  }
+  const events = hostTimelines[hid];
+  renderHostDetail(i, h, events, detail);
+}
+
+function renderHostDetail(i, host, events, el){
+  const sevC = {critical:'var(--red)',high:'var(--ora)',medium:'var(--yel)',low:'var(--grn)',info:'var(--txt3)'};
+  const incHtml = (host.open_incidents||[]).map(inc=>`
+    <div style="background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.2);border-radius:6px;padding:8px 12px;margin-bottom:6px;font-size:.78rem">
+      <span style="color:var(--red);font-weight:600">⚠ Incidente</span>
+      <span style="margin-left:8px;color:var(--txt2)">${inc.title||inc.pattern||'—'}</span>
+      <span style="float:right;color:var(--txt3)">${inc.started_at?.slice(0,16)||''}</span>
+    </div>`).join('');
+
+  const timelineHtml = events.length ? `
+    <div style="font-size:.75rem;font-weight:600;color:var(--txt3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Linha do tempo (${events.length} eventos)</div>
+    <div style="position:relative;padding-left:18px;border-left:2px solid var(--b2)">
+      ${events.slice(0,40).map(e=>{
+        const sev = (e.severity||'info').toLowerCase();
+        const typ = e.event_type||e.rule_name||'evento';
+        const ts  = (e.timestamp||'').replace('T',' ').replace('Z','').slice(0,16);
+        const proc = e._process||'';
+        const mitre = e._mitre_technique ? `<span style="font-size:.62rem;background:rgba(88,166,255,.1);color:var(--blu);border-radius:3px;padding:0 4px;margin-left:4px">${e._mitre_technique}</span>` : '';
+        return `<div style="position:relative;margin-bottom:8px;padding:6px 8px;background:var(--s1);border-radius:5px">
+          <div style="position:absolute;left:-23px;top:10px;width:8px;height:8px;border-radius:50%;background:${sevC[sev]||'var(--txt3)'}"></div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span style="font-size:.65rem;color:var(--txt3);font-family:var(--mono)">${ts}</span>
+            <span style="font-size:.72rem;font-weight:600;color:${sevC[sev]||'var(--txt2)'}">${sev.toUpperCase()}</span>
+            <span style="font-size:.75rem;color:var(--txt2);flex:1">${typ}</span>
+            ${mitre}
+          </div>
+          ${proc?`<div style="font-size:.68rem;color:var(--txt3);margin-top:2px;font-family:var(--mono)">⚙ ${proc}</div>`:''}
+        </div>`;
+      }).join('')}
+      ${events.length>40?`<div style="font-size:.72rem;color:var(--txt3);padding:4px 8px">… e mais ${events.length-40} eventos</div>`:''}
+    </div>` : `<div style="color:var(--txt3);font-size:.8rem;padding:8px 0">Nenhum evento recente registrado para este host.</div>`;
+
+  el.innerHTML = `<div style="padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <!-- Col 1: incidentes + processos suspeitos -->
+    <div>
+      ${incHtml || '<div style="font-size:.78rem;color:var(--grn)">✔ Sem incidentes abertos</div>'}
+      ${(host.recent_processes||[]).length?`
+      <div style="margin-top:12px">
+        <div style="font-size:.75rem;font-weight:600;color:var(--txt3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Processos suspeitos recentes</div>
+        ${host.recent_processes.map(p=>{
+          const sev=(p.severity||'info').toLowerCase();
+          const nm =p.rule_name||p.event_type||'';
+          return `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--b1);font-size:.75rem">
+            <span style="color:${sevC[sev]||'var(--txt3)'}">●</span>
+            <span style="color:var(--txt2);flex:1">${nm}</span>
+            <span style="color:var(--txt3)">${(p.timestamp||'').slice(11,16)}</span>
+          </div>`;
+        }).join('')}
+      </div>`:''}
+    </div>
+    <!-- Col 2: timeline -->
+    <div>${timelineHtml}</div>
+  </div>`;
+}
+
 async function loadTrials(){
   const pg = document.getElementById('p-trials');
   if(!pg) return;
@@ -8887,7 +9052,7 @@ async function addIncNote(id){
 <!-- ── Módulos: sistema de design ─────────────────────────────── -->
 <style>
 /* ── Página container ────────────────────────────────────────── */
-#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules,#p-webhooks,#p-trials,#p-xdr,#p-mitre,
+#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules,#p-webhooks,#p-trials,#p-hosts,#p-xdr,#p-mitre,
 #p-threat-intel,#p-playbooks,#p-forensics{
   flex-direction:column;overflow:hidden;
 }
