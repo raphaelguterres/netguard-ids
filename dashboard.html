@@ -7267,59 +7267,267 @@ async function toggleHostDetail(i){
   renderHostDetail(i, h, events, detail);
 }
 
+// ── Host Detail Tabs ─────────────────────────────────────────────
 function renderHostDetail(i, host, events, el){
-  const sevC = {critical:'var(--red)',high:'var(--ora)',medium:'var(--yel)',low:'var(--grn)',info:'var(--txt3)'};
-  const incHtml = (host.open_incidents||[]).map(inc=>`
-    <div style="background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.2);border-radius:6px;padding:8px 12px;margin-bottom:6px;font-size:.78rem">
-      <span style="color:var(--red);font-weight:600">⚠ Incidente</span>
-      <span style="margin-left:8px;color:var(--txt2)">${inc.title||inc.pattern||'—'}</span>
-      <span style="float:right;color:var(--txt3)">${inc.started_at?.slice(0,16)||''}</span>
-    </div>`).join('');
-
-  const timelineHtml = events.length ? `
-    <div style="font-size:.75rem;font-weight:600;color:var(--txt3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Linha do tempo (${events.length} eventos)</div>
-    <div style="position:relative;padding-left:18px;border-left:2px solid var(--b2)">
-      ${events.slice(0,40).map(e=>{
-        const sev = (e.severity||'info').toLowerCase();
-        const typ = e.event_type||e.rule_name||'evento';
-        const ts  = (e.timestamp||'').replace('T',' ').replace('Z','').slice(0,16);
-        const proc = e._process||'';
-        const mitre = e._mitre_technique ? `<span style="font-size:.62rem;background:rgba(88,166,255,.1);color:var(--blu);border-radius:3px;padding:0 4px;margin-left:4px">${e._mitre_technique}</span>` : '';
-        return `<div style="position:relative;margin-bottom:8px;padding:6px 8px;background:var(--s1);border-radius:5px">
-          <div style="position:absolute;left:-23px;top:10px;width:8px;height:8px;border-radius:50%;background:${sevC[sev]||'var(--txt3)'}"></div>
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            <span style="font-size:.65rem;color:var(--txt3);font-family:var(--mono)">${ts}</span>
-            <span style="font-size:.72rem;font-weight:600;color:${sevC[sev]||'var(--txt2)'}">${sev.toUpperCase()}</span>
-            <span style="font-size:.75rem;color:var(--txt2);flex:1">${typ}</span>
-            ${mitre}
-          </div>
-          ${proc?`<div style="font-size:.68rem;color:var(--txt3);margin-top:2px;font-family:var(--mono)">⚙ ${proc}</div>`:''}
-        </div>`;
-      }).join('')}
-      ${events.length>40?`<div style="font-size:.72rem;color:var(--txt3);padding:4px 8px">… e mais ${events.length-40} eventos</div>`:''}
-    </div>` : `<div style="color:var(--txt3);font-size:.8rem;padding:8px 0">Nenhum evento recente registrado para este host.</div>`;
-
-  el.innerHTML = `<div style="padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
-    <!-- Col 1: incidentes + processos suspeitos -->
-    <div>
-      ${incHtml || '<div style="font-size:.78rem;color:var(--grn)">✔ Sem incidentes abertos</div>'}
-      ${(host.recent_processes||[]).length?`
-      <div style="margin-top:12px">
-        <div style="font-size:.75rem;font-weight:600;color:var(--txt3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Processos suspeitos recentes</div>
-        ${host.recent_processes.map(p=>{
-          const sev=(p.severity||'info').toLowerCase();
-          const nm =p.rule_name||p.event_type||'';
-          return `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--b1);font-size:.75rem">
-            <span style="color:${sevC[sev]||'var(--txt3)'}">●</span>
-            <span style="color:var(--txt2);flex:1">${nm}</span>
-            <span style="color:var(--txt3)">${(p.timestamp||'').slice(11,16)}</span>
-          </div>`;
-        }).join('')}
-      </div>`:''}
+  el.innerHTML = `
+  <div style="padding:0">
+    <!-- Tab Bar -->
+    <div id="hd-tabs-${i}" style="display:flex;gap:0;border-bottom:1px solid var(--b2);background:var(--s1)">
+      ${[['🌳','Processos','procs'],['📡','Conexões','conns'],['🎯','MITRE','mitre'],['📋','Eventos','evts'],['⚠','Incidentes','inc']].map(([ic,lb,id])=>`
+      <button id="hd-tab-${i}-${id}" onclick="showHostTab(${i},'${id}')"
+        style="padding:9px 14px;font-size:.75rem;background:none;border:none;border-bottom:2px solid transparent;color:var(--txt3);cursor:pointer;transition:all .15s;white-space:nowrap">
+        ${ic} ${lb}
+      </button>`).join('')}
     </div>
-    <!-- Col 2: timeline -->
-    <div>${timelineHtml}</div>
+    <!-- Panes -->
+    <div id="hd-pane-${i}-procs"  style="display:none;padding:14px 16px"></div>
+    <div id="hd-pane-${i}-conns"  style="display:none;padding:14px 16px"></div>
+    <div id="hd-pane-${i}-mitre"  style="display:none;padding:14px 16px"></div>
+    <div id="hd-pane-${i}-evts"   style="display:none;padding:14px 16px"></div>
+    <div id="hd-pane-${i}-inc"    style="display:none;padding:14px 16px"></div>
   </div>`;
+  // Render all panes eagerly
+  _renderPaneProcs(i, events);
+  _renderPaneConns(i, events, host);
+  _renderPaneMitre(i, events, host);
+  _renderPaneEvts(i, events);
+  _renderPaneInc(i, host);
+  showHostTab(i, 'procs');
+}
+
+function showHostTab(i, tab){
+  ['procs','conns','mitre','evts','inc'].forEach(t=>{
+    const p = document.getElementById(`hd-pane-${i}-${t}`);
+    const b = document.getElementById(`hd-tab-${i}-${t}`);
+    if(!p||!b) return;
+    const active = t===tab;
+    p.style.display = active ? 'block' : 'none';
+    b.style.borderBottomColor = active ? 'var(--blu)' : 'transparent';
+    b.style.color = active ? 'var(--txt)' : 'var(--txt3)';
+    b.style.fontWeight = active ? '600' : '400';
+  });
+}
+
+// ── Pane: Process Tree ────────────────────────────────────────────
+function _renderPaneProcs(i, events){
+  const el = document.getElementById(`hd-pane-${i}-procs`);
+  if(!el) return;
+  // Build tree from events that have process info
+  const nodes = {};  // key = process_name
+  events.forEach(e=>{
+    const proc   = (e._process||e.process_name||'').trim();
+    const parent = (e._parent_process||'').trim();
+    const sev    = (e.severity||'info').toLowerCase();
+    if(!proc) return;
+    if(!nodes[proc]) nodes[proc] = {name:proc, parent:'', children:[], events:[], sev:'info'};
+    nodes[proc].events.push(e);
+    if(parent && !nodes[proc].parent) nodes[proc].parent = parent;
+    // Escalate severity
+    const order={critical:4,high:3,medium:2,low:1,info:0};
+    if((order[sev]||0) > (order[nodes[proc].sev]||0)) nodes[proc].sev = sev;
+    // Ensure parent node exists
+    if(parent && !nodes[parent]) nodes[parent] = {name:parent, parent:'', children:[], events:[], sev:'info'};
+  });
+  // Build children arrays
+  Object.values(nodes).forEach(n=>{
+    if(n.parent && nodes[n.parent]) nodes[n.parent].children.push(n.name);
+  });
+  // Find roots (no parent, or parent not in nodes)
+  const roots = Object.values(nodes).filter(n=>!n.parent || !nodes[n.parent]);
+  const sevC  = {critical:'var(--red)',high:'var(--ora)',medium:'var(--yel)',low:'var(--grn)',info:'var(--txt3)'};
+  const sevBg = {critical:'rgba(248,81,73,.08)',high:'rgba(240,136,62,.08)',medium:'rgba(210,153,34,.06)',low:'rgba(63,185,80,.06)',info:'transparent'};
+
+  function renderNode(name, depth){
+    const n = nodes[name];
+    if(!n) return '';
+    const indent = depth * 20;
+    const hasChildren = n.children.length > 0;
+    const evtCount = n.events.length;
+    const mitres = [...new Set(n.events.map(e=>e._mitre_technique).filter(Boolean))];
+    return `
+    <div style="margin-left:${indent}px;position:relative">
+      ${depth>0?`<div style="position:absolute;left:-12px;top:12px;width:10px;height:1px;background:var(--b2)"></div>
+      <div style="position:absolute;left:-12px;top:0;width:1px;height:50%;background:var(--b2)"></div>`:''}
+      <div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;background:${sevBg[n.sev]};border:1px solid ${n.sev!=='info'?sevC[n.sev]+'33':'var(--b1)'};margin-bottom:4px">
+        <span style="font-size:.75rem">${hasChildren?'📂':'📄'}</span>
+        <span style="font-family:var(--mono);font-size:.78rem;color:${sevC[n.sev]};font-weight:${evtCount>0?'600':'400'}">${name||'—'}</span>
+        ${evtCount?`<span style="font-size:.65rem;background:rgba(88,166,255,.12);color:var(--blu);border-radius:10px;padding:0 6px">${evtCount} alerta${evtCount>1?'s':''}</span>`:''}
+        ${mitres.slice(0,2).map(m=>`<span style="font-size:.6rem;background:rgba(88,166,255,.08);color:var(--blu);border-radius:3px;padding:0 4px;border:1px solid rgba(88,166,255,.2)">${m}</span>`).join('')}
+        ${mitres.length>2?`<span style="font-size:.6rem;color:var(--txt3)">+${mitres.length-2}</span>`:''}
+        <span style="margin-left:auto;font-size:.65rem;color:var(--txt3)">${(n.sev!=='info'?n.sev.toUpperCase():'')}</span>
+      </div>
+      ${n.children.map(c=>renderNode(c, depth+1)).join('')}
+    </div>`;
+  }
+
+  if(roots.length===0){
+    el.innerHTML = `<div style="color:var(--txt3);font-size:.8rem">Nenhum dado de processo nos eventos deste host.</div>`;
+    return;
+  }
+  el.innerHTML = `
+  <div style="font-size:.75rem;font-weight:600;color:var(--txt3);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Árvore de Processos (${Object.keys(nodes).length} processos)</div>
+  <div style="font-size:.72rem;color:var(--txt3);margin-bottom:12px">Relações pai → filho derivadas dos eventos de detecção</div>
+  <div style="border-left:2px solid var(--b2);padding-left:12px">
+    ${roots.map(r=>renderNode(r.name,0)).join('')}
+  </div>`;
+}
+
+// ── Pane: Network Connections ─────────────────────────────────────
+function _renderPaneConns(i, events, host){
+  const el = document.getElementById(`hd-pane-${i}-conns`);
+  if(!el) return;
+  const connEvts = events.filter(e=>{
+    const t=(e.event_type||e.rule_name||'').toLowerCase();
+    return t.includes('network')||t.includes('conn')||t.includes('scan')||t.includes('external')||t.includes('port');
+  });
+  const recentConns = host.recent_conns || [];
+  const sevC = {critical:'var(--red)',high:'var(--ora)',medium:'var(--yel)',low:'var(--grn)',info:'var(--txt3)'};
+  if(!connEvts.length && !recentConns.length){
+    el.innerHTML=`<div style="color:var(--txt3);font-size:.8rem">Nenhuma conexão de rede detectada.</div>`;return;
+  }
+  const rows = connEvts.slice(0,30).map(e=>{
+    const sev=(e.severity||'info').toLowerCase();
+    const ts=(e.timestamp||'').replace('T',' ').replace('Z','').slice(0,16);
+    const typ=e.event_type||e.rule_name||'—';
+    const proc=e._process||'';
+    return `<tr style="border-bottom:1px solid var(--b1)">
+      <td style="padding:5px 8px;font-size:.68rem;font-family:var(--mono);color:var(--txt3)">${ts}</td>
+      <td style="padding:5px 8px"><span style="font-size:.68rem;color:${sevC[sev]};font-weight:600">${sev.toUpperCase()}</span></td>
+      <td style="padding:5px 8px;font-size:.75rem;color:var(--txt2)">${typ}</td>
+      <td style="padding:5px 8px;font-size:.7rem;font-family:var(--mono);color:var(--txt3)">${proc}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML=`
+  <div style="font-size:.75rem;font-weight:600;color:var(--txt3);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Eventos de Rede (${connEvts.length})</div>
+  <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:.78rem">
+      <thead>
+        <tr style="border-bottom:1px solid var(--b2)">
+          <th style="padding:4px 8px;text-align:left;color:var(--txt3);font-weight:500;font-size:.68rem">Timestamp</th>
+          <th style="padding:4px 8px;text-align:left;color:var(--txt3);font-weight:500;font-size:.68rem">Sev.</th>
+          <th style="padding:4px 8px;text-align:left;color:var(--txt3);font-weight:500;font-size:.68rem">Tipo</th>
+          <th style="padding:4px 8px;text-align:left;color:var(--txt3);font-weight:500;font-size:.68rem">Processo</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+// ── Pane: MITRE Heatmap ───────────────────────────────────────────
+function _renderPaneMitre(i, events, host){
+  const el = document.getElementById(`hd-pane-${i}-mitre`);
+  if(!el) return;
+  const TACTICS_ORDER = ['Reconnaissance','Resource Development','Initial Access','Execution',
+    'Persistence','Privilege Escalation','Defense Evasion','Credential Access',
+    'Discovery','Lateral Movement','Collection','Command and Control','Exfiltration','Impact'];
+  // Build tactic → {technique: count}
+  const matrix = {};
+  events.forEach(e=>{
+    const tac = e._mitre_tactic||'Unknown';
+    const tec = e._mitre_technique||'';
+    if(!tec) return;
+    if(!matrix[tac]) matrix[tac]={};
+    matrix[tac][tec]=(matrix[tac][tec]||0)+1;
+  });
+  // Also pull from host.mitre_techniques
+  (host.mitre_techniques||[]).forEach(t=>{
+    if(!matrix['Unknown']) matrix['Unknown']={};
+    if(!matrix['Unknown'][t]) matrix['Unknown'][t]=0;
+  });
+  const tactics = Object.keys(matrix);
+  if(!tactics.length){
+    el.innerHTML=`<div style="color:var(--txt3);font-size:.8rem">Nenhuma técnica MITRE ATT&CK registrada para este host.</div>`;return;
+  }
+  const sortedTactics = TACTICS_ORDER.filter(t=>matrix[t]).concat(tactics.filter(t=>!TACTICS_ORDER.includes(t)));
+  el.innerHTML=`
+  <div style="font-size:.75rem;font-weight:600;color:var(--txt3);margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em">MITRE ATT&CK — Técnicas Acionadas</div>
+  <div style="display:flex;flex-wrap:wrap;gap:12px">
+    ${sortedTactics.map(tac=>{
+      const techs = Object.entries(matrix[tac]).sort((a,b)=>b[1]-a[1]);
+      const total = techs.reduce((s,[,c])=>s+c,0);
+      return `<div style="background:var(--s1);border:1px solid var(--b2);border-radius:8px;padding:10px 12px;min-width:180px;flex:1">
+        <div style="font-size:.72rem;font-weight:700;color:var(--ora);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">${tac}</div>
+        <div style="font-size:.65rem;color:var(--txt3);margin-bottom:6px">${total} hit${total>1?'s':''}</div>
+        ${techs.map(([t,c])=>`
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+            <span style="font-family:var(--mono);font-size:.7rem;color:var(--blu);min-width:60px">${t}</span>
+            <div style="flex:1;height:4px;background:var(--b2);border-radius:2px;overflow:hidden">
+              <div style="height:100%;width:${Math.min(100,c*20)}%;background:var(--blu);border-radius:2px"></div>
+            </div>
+            <span style="font-size:.65rem;color:var(--txt3);min-width:16px;text-align:right">${c}</span>
+          </div>`).join('')}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+// ── Pane: Events Timeline ─────────────────────────────────────────
+function _renderPaneEvts(i, events){
+  const el = document.getElementById(`hd-pane-${i}-evts`);
+  if(!el) return;
+  const sevC={critical:'var(--red)',high:'var(--ora)',medium:'var(--yel)',low:'var(--grn)',info:'var(--txt3)'};
+  if(!events.length){
+    el.innerHTML=`<div style="color:var(--txt3);font-size:.8rem">Nenhum evento registrado.</div>`;return;
+  }
+  el.innerHTML=`
+  <div style="font-size:.75rem;font-weight:600;color:var(--txt3);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Linha do Tempo (${events.length} eventos)</div>
+  <div style="position:relative;padding-left:18px;border-left:2px solid var(--b2)">
+    ${events.slice(0,60).map(e=>{
+      const sev=(e.severity||'info').toLowerCase();
+      const typ=e.event_type||e.rule_name||'evento';
+      const ts=(e.timestamp||'').replace('T',' ').replace('Z','').slice(0,16);
+      const proc=e._process||'';
+      const parent=e._parent_process||'';
+      const mitre=e._mitre_technique?`<span style="font-size:.6rem;background:rgba(88,166,255,.1);color:var(--blu);border-radius:3px;padding:0 4px;margin-left:4px">${e._mitre_technique}</span>`:'';
+      return `<div style="position:relative;margin-bottom:7px;padding:6px 8px;background:var(--s1);border-radius:5px;border-left:2px solid ${sevC[sev]||'var(--b2)'}">
+        <div style="position:absolute;left:-23px;top:9px;width:8px;height:8px;border-radius:50%;background:${sevC[sev]||'var(--txt3)'}"></div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span style="font-size:.65rem;color:var(--txt3);font-family:var(--mono)">${ts}</span>
+          <span style="font-size:.68rem;font-weight:700;color:${sevC[sev]}">${sev.toUpperCase()}</span>
+          <span style="font-size:.75rem;color:var(--txt2);flex:1">${typ}</span>
+          ${mitre}
+        </div>
+        ${proc?`<div style="font-size:.67rem;color:var(--txt3);margin-top:3px;font-family:var(--mono)">⚙ ${proc}${parent?` ← ${parent}`:''}</div>`:''}
+      </div>`;
+    }).join('')}
+    ${events.length>60?`<div style="font-size:.72rem;color:var(--txt3);padding:4px 8px">… e mais ${events.length-60} eventos</div>`:''}
+  </div>`;
+}
+
+// ── Pane: Incidents ───────────────────────────────────────────────
+function _renderPaneInc(i, host){
+  const el = document.getElementById(`hd-pane-${i}-inc`);
+  if(!el) return;
+  const incs = host.open_incidents||[];
+  const procs= host.recent_processes||[];
+  const sevC ={critical:'var(--red)',high:'var(--ora)',medium:'var(--yel)',low:'var(--grn)',info:'var(--txt3)'};
+  if(!incs.length && !procs.length){
+    el.innerHTML=`<div style="color:var(--grn);font-size:.82rem">✔ Nenhum incidente aberto para este host.</div>`;return;
+  }
+  el.innerHTML=`
+  ${incs.length?`
+  <div style="font-size:.75rem;font-weight:600;color:var(--txt3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Incidentes Abertos</div>
+  ${incs.map(inc=>`
+    <div style="background:rgba(248,81,73,.07);border:1px solid rgba(248,81,73,.18);border-radius:7px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:.9rem">⚠</span>
+        <span style="font-size:.82rem;font-weight:600;color:var(--red)">${inc.title||inc.pattern||'Incidente'}</span>
+        <span style="margin-left:auto;font-size:.65rem;color:var(--txt3)">${(inc.started_at||'').slice(0,16)}</span>
+      </div>
+      ${inc.description?`<div style="font-size:.72rem;color:var(--txt3);margin-top:4px">${inc.description}</div>`:''}
+    </div>`).join('')}`:''}
+  ${procs.length?`
+  <div style="font-size:.75rem;font-weight:600;color:var(--txt3);margin-top:${incs.length?'14px':'0'};margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Processos Suspeitos</div>
+  ${procs.map(p=>{
+    const sev=(p.severity||'info').toLowerCase();
+    const nm=p.rule_name||p.event_type||'—';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--b1);font-size:.75rem">
+      <span style="color:${sevC[sev]||'var(--txt3)'}">●</span>
+      <span style="color:var(--txt2);flex:1">${nm}</span>
+      <span style="color:var(--txt3);font-size:.68rem">${(p.timestamp||'').slice(11,16)}</span>
+    </div>`;
+  }).join('')}`:''}`;
 }
 
 async function loadTrials(){
