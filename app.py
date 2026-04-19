@@ -6388,43 +6388,81 @@ def _get_incidents():
     return get_incident_engine(db, tid)
 
 # ── EDR endpoints ─────────────────────────────────────────────────
+# ── Helpers de validação para EDR/Incidents ───────────────────────
+def _safe_limit(val, default: int = 50, max_val: int = 200) -> int:
+    """Converte query param 'limit' para int seguro com teto."""
+    try:
+        return max(1, min(int(val), max_val))
+    except (TypeError, ValueError):
+        return default
+
+def _safe_int_param(val, default: int = 0, min_val: int = 0, max_val: int = 100) -> int:
+    """Converte query param numérico com range seguro."""
+    try:
+        return max(min_val, min(int(val), max_val))
+    except (TypeError, ValueError):
+        return default
+
+def _sanitize_text(val: str, max_len: int = 2000) -> str:
+    """Remove caracteres de controle e limita tamanho."""
+    import re as _re
+    if not isinstance(val, str):
+        return ""
+    val = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', val)
+    return val.strip()[:max_len]
+
+_VALID_INCIDENT_STATUS = {"open","investigating","contained","resolved","false_positive"}
+_VALID_SEVERITY        = {"critical","high","medium","low","info"}
+
+# ── EDR endpoints ─────────────────────────────────────────────────
 @app.route("/api/edr/status")
 @auth
+@require_session
+@require_role("analyst", "admin")
 def edr_status():
     if not EDR_AVAILABLE:
         return jsonify({"available": False}), 503
     s = _get_edr()
     return jsonify({
-        "available": True,
-        "running":   s.running,
+        "available":     True,
+        "running":       s.running,
         "scan_interval": s.scan_interval,
-        "stats":     s.get_stats(),
+        "stats":         s.get_stats(),
     })
 
 @app.route("/api/edr/processes")
 @auth
+@require_session
+@require_role("analyst", "admin")
 def edr_processes():
     if not EDR_AVAILABLE:
         return jsonify({"error": "EDR indisponível"}), 503
-    limit     = int(request.args.get("limit", 50))
-    min_score = int(request.args.get("min_score", 0))
+    limit     = _safe_limit(request.args.get("limit", 50))
+    min_score = _safe_int_param(request.args.get("min_score", 0), min_val=0, max_val=100)
     procs     = _get_edr().get_suspicious_processes(min_score=min_score, limit=limit)
     return jsonify({"processes": procs})
 
 @app.route("/api/edr/alerts")
 @auth
+@require_session
+@require_role("analyst", "admin")
 def edr_alerts():
     if not EDR_AVAILABLE:
         return jsonify({"error": "EDR indisponível"}), 503
-    limit  = int(request.args.get("limit", 50))
+    limit  = _safe_limit(request.args.get("limit", 50))
     alerts = _get_edr().get_alerts(limit=limit)
     return jsonify({"alerts": alerts})
 
 @app.route("/api/edr/process/<int:pid>")
 @auth
+@require_session
+@require_role("analyst", "admin")
 def edr_process_detail(pid):
     if not EDR_AVAILABLE:
         return jsonify({"error": "EDR indisponível"}), 503
+    # PID 0 = Idle (Windows), PID 4 = System — nunca válidos como alvo de query
+    if pid < 1 or pid > 4_194_304:   # Linux PID_MAX = 4194304
+        return jsonify({"error": "PID inválido"}), 400
     proc = _get_edr().get_process_detail(pid)
     if not proc:
         return jsonify({"error": "Processo não encontrado"}), 404
@@ -6432,51 +6470,80 @@ def edr_process_detail(pid):
 
 @app.route("/api/edr/start", methods=["POST"])
 @auth
+@require_session
+@require_role("admin")
 @csrf_protect
+@limiter.limit("5 per minute")
 def edr_start():
     if not EDR_AVAILABLE:
         return jsonify({"error": "EDR indisponível"}), 503
     _get_edr().start()
+    audit("EDR_START", ip=request.remote_addr or "-")
     return jsonify({"ok": True, "status": "running"})
 
 @app.route("/api/edr/stop", methods=["POST"])
 @auth
+@require_session
+@require_role("admin")
 @csrf_protect
+@limiter.limit("5 per minute")
 def edr_stop():
     if not EDR_AVAILABLE:
         return jsonify({"error": "EDR indisponível"}), 503
     _get_edr().stop()
+    audit("EDR_STOP", ip=request.remote_addr or "-")
     return jsonify({"ok": True, "status": "stopped"})
 
 @app.route("/api/edr/scan", methods=["POST"])
 @auth
+@require_session
+@require_role("admin")
 @csrf_protect
+@limiter.limit("3 per minute")
 def edr_scan_now():
     if not EDR_AVAILABLE:
         return jsonify({"error": "EDR indisponível"}), 503
     result = _get_edr().scan_now()
+    audit("EDR_SCAN", ip=request.remote_addr or "-")
     return jsonify({"ok": True, "result": result})
 
 # ── Incident endpoints ────────────────────────────────────────────
 @app.route("/api/incidents")
 @auth
+@require_session
+@require_role("analyst", "admin")
 def incidents_list():
     if not INCIDENT_AVAILABLE:
         return jsonify({"error": "Incident Engine indisponível"}), 503
-    status   = request.args.get("status")
-    severity = request.args.get("severity")
-    limit    = int(request.args.get("limit", 50))
-    eng      = _get_incidents()
+    status   = request.args.get("status", "")
+    severity = request.args.get("severity", "")
+    limit    = _safe_limit(request.args.get("limit", 50))
+
+    # Valida enums antes de passar à query
+    if status   and status   not in _VALID_INCIDENT_STATUS:
+        return jsonify({"error": f"status inválido: {status}"}), 400
+    if severity and severity not in _VALID_SEVERITY:
+        return jsonify({"error": f"severity inválido: {severity}"}), 400
+
+    eng = _get_incidents()
     return jsonify({
-        "incidents": eng.list_incidents(status=status, severity=severity, limit=limit),
-        "stats":     eng.stats(),
+        "incidents": eng.list_incidents(
+            status   = status   or None,
+            severity = severity or None,
+            limit    = limit,
+        ),
+        "stats": eng.stats(),
     })
 
 @app.route("/api/incidents/<int:iid>")
 @auth
+@require_session
+@require_role("analyst", "admin")
 def incidents_get(iid):
     if not INCIDENT_AVAILABLE:
         return jsonify({"error": "Incident Engine indisponível"}), 503
+    if iid < 1:
+        return jsonify({"error": "ID inválido"}), 400
     inc = _get_incidents().get_incident(iid)
     if not inc:
         return jsonify({"error": "Incidente não encontrado"}), 404
@@ -6485,27 +6552,40 @@ def incidents_get(iid):
 
 @app.route("/api/incidents/<int:iid>/status", methods=["PATCH"])
 @auth
+@require_session
+@require_role("analyst", "admin")
 @csrf_protect
 def incidents_update_status(iid):
     if not INCIDENT_AVAILABLE:
         return jsonify({"error": "Incident Engine indisponível"}), 503
+    if iid < 1:
+        return jsonify({"error": "ID inválido"}), 400
     data   = request.get_json(force=True) or {}
-    status = data.get("status", "")
-    note   = data.get("note", "")
+    status = _sanitize_text(str(data.get("status", "")), max_len=30)
+    note   = _sanitize_text(str(data.get("note",   "")), max_len=2000)
+    if status not in _VALID_INCIDENT_STATUS:
+        return jsonify({"error": f"status inválido: {status}"}), 400
     try:
         inc = _get_incidents().update_status(iid, status, actor="analyst", note=note)
+        audit("INCIDENT_STATUS", ip=request.remote_addr or "-",
+              detail=f"iid={iid} status={status}")
         return jsonify({"ok": True, "incident": inc})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
 @app.route("/api/incidents/<int:iid>/note", methods=["POST"])
 @auth
+@require_session
+@require_role("analyst", "admin")
 @csrf_protect
+@limiter.limit("30 per minute")
 def incidents_add_note(iid):
     if not INCIDENT_AVAILABLE:
         return jsonify({"error": "Incident Engine indisponível"}), 503
+    if iid < 1:
+        return jsonify({"error": "ID inválido"}), 400
     data = request.get_json(force=True) or {}
-    note = data.get("note", "").strip()
+    note = _sanitize_text(str(data.get("note", "")), max_len=2000)
     if not note:
         return jsonify({"error": "Nota vazia"}), 400
     inc = _get_incidents().add_note(iid, note, actor="analyst")
@@ -6513,13 +6593,19 @@ def incidents_add_note(iid):
 
 @app.route("/api/incidents/<int:iid>/assign", methods=["POST"])
 @auth
+@require_session
+@require_role("analyst", "admin")
 @csrf_protect
 def incidents_assign(iid):
     if not INCIDENT_AVAILABLE:
         return jsonify({"error": "Incident Engine indisponível"}), 503
+    if iid < 1:
+        return jsonify({"error": "ID inválido"}), 400
     data     = request.get_json(force=True) or {}
-    assignee = data.get("assignee", "").strip()
+    assignee = _sanitize_text(str(data.get("assignee", "")), max_len=120)
     inc = _get_incidents().assign(iid, assignee)
+    audit("INCIDENT_ASSIGN", ip=request.remote_addr or "-",
+          detail=f"iid={iid} assignee={assignee}")
     return jsonify({"ok": True, "incident": inc})
 
 
