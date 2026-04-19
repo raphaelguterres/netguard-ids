@@ -2020,6 +2020,7 @@ th.sortable:hover{color:var(--cyn)}
     <div class="tab" onclick="goPage('hosts',this)" title="Hosts">🖥 Hosts</div>
     <div class="tab" onclick="goPage('webhooks',this)" title="Webhook Alerts">🔔 Webhooks</div>
     <div class="tab" id="tab-trials-btn" style="display:none" onclick="goPage('trials',this)" title="Trials de Clientes">🔗 Trials</div>
+    <div class="tab" id="tab-godview" style="display:none" onclick="goPage('godview',this)" title="God View — todos os clientes">🌐 God View</div>
     <div class="tab" onclick="goPage('edr',this)" title="EDR — Processos">🛡 EDR</div>
     <div class="tab" onclick="goPage('incidents',this)" title="Incidentes">🚨 Incidents</div>
     <div class="tab" onclick="goPage('remediation',this)" title="Remote Remediation">🔧 Remediation</div>
@@ -3055,6 +3056,7 @@ th.sortable:hover{color:var(--cyn)}
 <div class="page" id="p-hosts"></div>
 <div class="page" id="p-webhooks"></div>
 <div class="page" id="p-trials"></div>
+<div class="page" id="p-godview"></div>
 <div class="page" id="p-edr"></div>
 <div class="page" id="p-incidents"></div>
 <div class="page" id="p-remediation"></div>
@@ -3905,6 +3907,7 @@ function goPage(name,el){
   if(name==='webhooks')      loadWebhooks();
   if(name==='remediation')   loadRemediation();
   if(name==='trials')        loadTrials();
+  if(name==='godview')       loadGodView();
   if(name==='edr')           loadEDR();
   if(name==='incidents')     loadIncidents();
   if(name==='xdr')           loadXdr();
@@ -9255,12 +9258,176 @@ async function addIncNote(id){
   setInterval(render, 700);
   render();
 })();
+
+// ══════════════════════════════════════════ ADMIN GOD VIEW ════════
+
+let gvSelectedTenant = null;
+let gvRefreshTimer   = null;
+
+async function loadGodView(){
+  const pg = document.getElementById('p-godview');
+  if(!pg) return;
+  pg.innerHTML = `
+  <div style="display:flex;flex-direction:column;width:100%;height:100%;overflow:hidden">
+    <!-- Header -->
+    <div style="padding:16px 20px 10px;border-bottom:1px solid var(--b2);flex-shrink:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-size:1.05rem;font-weight:700">🌐 God View — Todos os Clientes</div>
+          <div style="font-size:.75rem;color:var(--txt3);margin-top:2px">Monitoramento centralizado de todos os tenants na sua VPS</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="gv-last-refresh" style="font-size:.7rem;color:var(--txt3)"></span>
+          <button class="fbtn" onclick="refreshGodView()">↻ Atualizar</button>
+        </div>
+      </div>
+      <!-- Summary bar -->
+      <div id="gv-summary" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"></div>
+    </div>
+
+    <!-- Body: tenant cards + event feed -->
+    <div style="display:flex;flex:1;min-height:0;overflow:hidden">
+      <!-- Left: tenant list -->
+      <div style="width:320px;min-width:240px;border-right:1px solid var(--b2);overflow-y:auto;flex-shrink:0">
+        <div id="gv-tenant-list" style="padding:8px">
+          <div class="empty"><span>Carregando tenants…</span></div>
+        </div>
+      </div>
+      <!-- Right: event feed -->
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden">
+        <div id="gv-feed-header" style="padding:10px 16px;border-bottom:1px solid var(--b2);font-size:.8rem;color:var(--txt3);flex-shrink:0">
+          Selecione um cliente para ver os eventos →
+        </div>
+        <div id="gv-feed" style="flex:1;overflow-y:auto;padding:8px 12px">
+          <div class="empty" style="height:100px"><span>Nenhum cliente selecionado</span></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+  await refreshGodView();
+  // Auto-refresh a cada 30s
+  if(gvRefreshTimer) clearInterval(gvRefreshTimer);
+  gvRefreshTimer = setInterval(refreshGodView, 30000);
+}
+
+async function refreshGodView(){
+  const r = await api('/admin/overview');
+  if(!r) return;
+  const tenants = r.tenants || [];
+  const el = document.getElementById('gv-last-refresh');
+  if(el) el.textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+
+  // Summary bar
+  const critCount = tenants.filter(t=>t.risk_label==='CRÍTICO').length;
+  const altoCount = tenants.filter(t=>t.risk_label==='ALTO').length;
+  const sumEl = document.getElementById('gv-summary');
+  if(sumEl) sumEl.innerHTML = [
+    [tenants.length,  'Clientes',    'var(--txt2)'],
+    [critCount,       'Críticos',    'var(--red)'],
+    [altoCount,       'Alto Risco',  'var(--ora)'],
+    [tenants.reduce((a,t)=>a+t.last_24h,0), 'Eventos 24h', 'var(--blu)'],
+  ].map(([v,l,c])=>`<div style="background:var(--s2);border:1px solid var(--b2);border-radius:6px;padding:5px 12px;display:flex;gap:8px;align-items:center">
+    <span style="font-size:1.1rem;font-weight:800;color:${c}">${v}</span>
+    <span style="font-size:.7rem;color:var(--txt3)">${l}</span>
+  </div>`).join('');
+
+  // Tenant list
+  const listEl = document.getElementById('gv-tenant-list');
+  if(!listEl) return;
+  if(!tenants.length){
+    listEl.innerHTML='<div class="empty" style="height:80px"><span>Nenhum tenant cadastrado</span></div>';
+    return;
+  }
+
+  const riskColor = {'CRÍTICO':'var(--red)','ALTO':'var(--ora)','MÉDIO':'var(--yel)','BAIXO':'var(--grn)'};
+  const riskBg    = {'CRÍTICO':'rgba(248,81,73,.12)','ALTO':'rgba(240,136,62,.12)',
+                     'MÉDIO':'rgba(210,153,34,.1)','BAIXO':'rgba(63,185,80,.08)'};
+  listEl.innerHTML = tenants.map(t=>`
+  <div class="gv-tenant-card ${gvSelectedTenant===t.tenant_id?'selected':''}"
+       onclick="selectGvTenant('${t.tenant_id}','${(t.name||t.tenant_id).replace(/'/g,"\\'")}',this)"
+       style="cursor:pointer;background:${gvSelectedTenant===t.tenant_id?'var(--s3)':'var(--s2)'};
+              border:1px solid ${gvSelectedTenant===t.tenant_id?'var(--blu)':'var(--b2)'};
+              border-radius:8px;padding:10px 12px;margin-bottom:6px;transition:all .15s">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <span style="font-weight:600;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px" title="${t.name||t.tenant_id}">${t.name||t.tenant_id}</span>
+      <span style="font-size:.68rem;padding:1px 7px;border-radius:8px;background:${riskBg[t.risk_label]||'transparent'};color:${riskColor[t.risk_label]||'var(--txt3)'};font-weight:700;white-space:nowrap">${t.risk_label}</span>
+    </div>
+    <div style="display:flex;gap:10px;font-size:.7rem;color:var(--txt3)">
+      <span style="color:var(--red)">${t.critical} crit</span>
+      <span style="color:var(--ora)">${t.high} alto</span>
+      <span>${t.last_24h} /24h</span>
+      <span style="margin-left:auto">${t.plan||'free'}</span>
+    </div>
+    ${t.last_event_threat?`<div style="font-size:.68rem;color:var(--txt3);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${t.last_event_threat}">↳ ${t.last_event_threat}</div>`:''}
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="fbtn" style="font-size:.68rem;padding:2px 8px" onclick="event.stopPropagation();openTenantView('${t.tenant_id}')">↗ Abrir dashboard</button>
+    </div>
+  </div>`).join('');
+}
+
+async function selectGvTenant(tenantId, name, el){
+  gvSelectedTenant = tenantId;
+  // Highlight visual
+  document.querySelectorAll('.gv-tenant-card').forEach(c=>{
+    c.style.background='var(--s2)';
+    c.style.borderColor='var(--b2)';
+  });
+  el.style.background='var(--s3)';
+  el.style.borderColor='var(--blu)';
+
+  const headerEl = document.getElementById('gv-feed-header');
+  const feedEl   = document.getElementById('gv-feed');
+  if(headerEl) headerEl.innerHTML = `<span style="color:var(--txt2);font-weight:600">${name}</span> — eventos recentes <button class="fbtn" style="margin-left:8px;font-size:.68rem" onclick="openTenantView('${tenantId}')">↗ Abrir dashboard completo</button>`;
+  if(feedEl)   feedEl.innerHTML = '<div class="empty" style="height:60px"><span>Carregando…</span></div>';
+
+  const r = await api(`/admin/tenant/${tenantId}/feed?limit=60`);
+  if(!r || !feedEl) return;
+  const events = r.events || [];
+  if(!events.length){
+    feedEl.innerHTML='<div class="empty" style="height:80px"><span>Nenhum evento registrado</span></div>';
+    return;
+  }
+  const sevCol = {CRITICAL:'var(--red)',HIGH:'var(--ora)',MEDIUM:'var(--yel)',LOW:'var(--grn)',
+                  critical:'var(--red)',high:'var(--ora)',medium:'var(--yel)',low:'var(--grn)'};
+  feedEl.innerHTML = events.map(e=>`
+  <div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--b1)">
+    <span style="width:7px;height:7px;border-radius:50%;background:${sevCol[e.severity]||'var(--txt3)'};margin-top:5px;flex-shrink:0"></span>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:.75rem;font-weight:600;color:${sevCol[e.severity]||'var(--txt2)'}">${(e.severity||'').toUpperCase()}</span>
+        <span style="font-size:.78rem;color:var(--txt2);flex:1">${e.rule_name||e.raw?.slice(0,80)||'—'}</span>
+        <span style="font-size:.68rem;color:var(--txt3);white-space:nowrap">${(e.timestamp||'').replace('T',' ').replace('Z','').slice(0,16)}</span>
+      </div>
+      ${e.source?`<div style="font-size:.68rem;color:var(--txt3)">IP: ${e.source} | Host: ${e.host_id||'—'}</div>`:''}
+    </div>
+  </div>`).join('');
+}
+
+async function openTenantView(tenantId){
+  const r = await api(`/admin/tenant/${tenantId}/view`);
+  if(r?.view_url) window.open(r.view_url, '_blank');
+  else toast('Erro ao abrir dashboard do cliente','err');
+}
+
+// Detecta se é admin e exibe aba God View
+(async function detectAdminMode(){
+  try {
+    const r = await fetch('/api/admin/overview');
+    if(r.ok){
+      const btn = document.getElementById('tab-godview');
+      if(btn) btn.style.display = '';
+      const trialBtn = document.getElementById('tab-trials-btn');
+      if(trialBtn) trialBtn.style.display = '';
+    }
+  } catch{}
+})();
 </script>
 
 <!-- ── Módulos: sistema de design ─────────────────────────────── -->
 <style>
 /* ── Página container ────────────────────────────────────────── */
-#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules,#p-webhooks,#p-trials,#p-hosts,#p-xdr,#p-mitre,
+#p-ioc,#p-ml-anomaly,#p-compliance,#p-custom-rules,#p-webhooks,#p-trials,#p-godview,#p-hosts,#p-xdr,#p-mitre,
 #p-threat-intel,#p-playbooks,#p-forensics{
   flex-direction:column;overflow:hidden;
 }

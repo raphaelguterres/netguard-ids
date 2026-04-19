@@ -6754,6 +6754,142 @@ def host_timeline(host_id):
         return jsonify({"error": str(exc)}), 500
 
 
+# ═══════════════════════════════════════════ ADMIN GOD VIEW ════════
+
+@app.route("/api/admin/overview")
+@auth
+def admin_overview():
+    """
+    Retorna stats de TODOS os tenants para o painel God View.
+    Apenas acessível com token de admin (IDS_AUTH=true).
+    """
+    tenants = repo.list_tenants()
+    result  = []
+    for t in tenants:
+        tid = t.get("tenant_id") or t.get("id", "")
+        try:
+            s       = repo.stats(tenant_id=tid)
+            last_ev = repo.query(limit=1, tenant_id=tid)
+            last_ts = last_ev[0].get("timestamp","") if last_ev else ""
+            last_threat = last_ev[0].get("rule_name") or last_ev[0].get("raw","")[:60] if last_ev else ""
+            sev     = s.get("by_severity", {})
+            critical= sev.get("CRITICAL", sev.get("critical", 0))
+            high    = sev.get("HIGH",     sev.get("high",     0))
+            medium  = sev.get("MEDIUM",   sev.get("medium",   0))
+            low     = sev.get("LOW",      sev.get("low",      0))
+            total   = s.get("total", 0)
+            last24h = s.get("last_24h", 0)
+            # Risk score simples: peso por severidade nas últimas 24h
+            risk = min(100, critical * 20 + high * 5 + medium * 1)
+            risk_label = ("CRÍTICO" if risk >= 60 else
+                          "ALTO"    if risk >= 30 else
+                          "MÉDIO"   if risk >= 10 else "BAIXO")
+        except Exception:
+            critical = high = medium = low = total = last24h = risk = 0
+            last_ts = last_threat = ""
+            risk_label = "BAIXO"
+
+        result.append({
+            "tenant_id":   tid,
+            "name":        t.get("name", tid),
+            "plan":        t.get("plan", "free"),
+            "total":       total,
+            "last_24h":    last24h,
+            "critical":    critical,
+            "high":        high,
+            "medium":      medium,
+            "low":         low,
+            "risk_score":  risk,
+            "risk_label":  risk_label,
+            "last_event_ts":     last_ts,
+            "last_event_threat": last_threat,
+        })
+
+    # Ordena por risk_score desc para ver os mais críticos primeiro
+    result.sort(key=lambda x: x["risk_score"], reverse=True)
+    return jsonify({"tenants": result, "total_tenants": len(result)})
+
+
+@app.route("/api/admin/tenant/<tenant_id>/feed")
+@auth
+def admin_tenant_feed(tenant_id):
+    """Feed de eventos recentes de um tenant específico."""
+    limit  = min(int(request.args.get("limit", 50)), 200)
+    events = repo.query(limit=limit, tenant_id=tenant_id)
+    stats  = repo.stats(tenant_id=tenant_id)
+    # Busca nome do tenant
+    try:
+        t = repo.get_tenant_by_id(tenant_id)
+        name = t.get("name", tenant_id) if t else tenant_id
+    except Exception:
+        name = tenant_id
+    return jsonify({"tenant_id": tenant_id, "name": name,
+                    "events": events, "stats": stats})
+
+
+@app.route("/api/admin/tenant/<tenant_id>/view")
+@auth
+def admin_tenant_view(tenant_id):
+    """
+    Gera um token de impersonação temporário para abrir o dashboard de um cliente.
+    Retorna a URL com o token que autentica no tenant correto.
+    """
+    try:
+        t = repo.get_tenant_by_id(tenant_id)
+        if not t:
+            return jsonify({"error": "Tenant não encontrado"}), 404
+        token = t.get("token") or t.get("api_token", "")
+        if not token:
+            return jsonify({"error": "Tenant sem token"}), 400
+        base = request.host_url.rstrip("/")
+        # Reutiliza o mecanismo de trial para servir o dashboard com cookie do tenant
+        return jsonify({
+            "ok": True,
+            "tenant_id": tenant_id,
+            "name": t.get("name", tenant_id),
+            "view_url": f"{base}/admin/view/{tenant_id}",
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/admin/view/<tenant_id>")
+@auth
+def admin_view_tenant(tenant_id):
+    """Abre o dashboard autenticado como um tenant específico (impersonação read-only)."""
+    try:
+        t = repo.get_tenant_by_id(tenant_id)
+        if not t:
+            return "Tenant não encontrado", 404
+        token = t.get("token") or t.get("api_token", "")
+        if not token:
+            return "Tenant sem token configurado", 400
+    except Exception as e:
+        return str(e), 500
+
+    p = pathlib.Path(__file__).parent / "dashboard.html"
+    if not p.exists():
+        return "dashboard.html não encontrado", 404
+
+    # Injeta metadados de impersonação no dashboard
+    html = p.read_text(encoding="utf-8")
+    inject = f"""<script>
+window.__IMPERSONATE__ = {{
+  tenant_id: "{tenant_id}",
+  name: "{(t.get('name','') or tenant_id).replace('"','')}",
+  plan: "{t.get('plan','free')}",
+}};
+</script>"""
+    html = html.replace("<body>", f"<body>{inject}", 1)
+
+    resp = make_response(html, 200)
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    resp.set_cookie("netguard_token", token,
+                    httponly=True, samesite="Lax",
+                    max_age=3600, secure=_HTTPS_ONLY)
+    return resp
+
+
 # ═══════════════════════════════════════════ TRIAL SYSTEM ══════════
 
 try:
