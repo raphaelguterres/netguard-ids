@@ -571,6 +571,15 @@ def _resolve_tenant_with_role() -> tuple[str, str]:
 # ── App ───────────────────────────────────────────────────────────
 app = Flask(__name__)
 
+# ── ProxyFix — ngrok / reverse proxy ─────────────────────────────
+# Faz request.host_url usar o host real do ngrok em vez de 127.0.0.1
+# Necessário para gerar links de trial com URL pública correta.
+try:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+except ImportError:
+    pass  # werkzeug sempre presente com Flask, mas por segurança
+
 # ── Limites globais de request ────────────────────────────────────
 # Previne DoS por upload de payload gigante (padrão Flask: 16 MB)
 app.config["MAX_CONTENT_LENGTH"] = int(
