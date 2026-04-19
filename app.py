@@ -2569,6 +2569,21 @@ def analisar(log: str, ip: str = None, field: str = "raw", origem: str = "", ten
             except Exception:
                 pass
 
+        # Auto-incidente para detecções críticas/high
+        if INCIDENT_AVAILABLE and e.severity in ("critical", "high"):
+            try:
+                _get_incidents().open_incident(
+                    title    = f"[IDS] {e.threat_name}",
+                    severity = e.severity,
+                    source   = "ids",
+                    source_ip= ip,
+                    host_id  = os.environ.get("COMPUTERNAME", "netguard-host"),
+                    summary  = log[:300],
+                    tags     = ["ids", e.severity],
+                )
+            except Exception:
+                pass
+
         # Webhook dispatch — envia alerta em background
         if WEBHOOK_AVAILABLE:
             try:
@@ -6334,6 +6349,169 @@ def remediation_history():
         return jsonify({"error": "Remediation Engine indisponível"}), 503
     limit = min(int(request.args.get("limit", 50)), 200)
     return jsonify({"history": _get_remediation().history(limit)})
+
+
+# ════════════════════════════════════════════════ EDR + INCIDENTS ══
+
+try:
+    from engine.edr_sentinel import get_edr_sentinel
+    EDR_AVAILABLE = True
+    logger.info("EDR Sentinel carregado")
+except Exception as _edr_err:
+    EDR_AVAILABLE = False
+    logger.warning("EDR Sentinel indisponível: %s", _edr_err)
+
+try:
+    from engine.incident_engine import get_incident_engine
+    INCIDENT_AVAILABLE = True
+    logger.info("Incident Engine carregado")
+except Exception as _inc_err:
+    INCIDENT_AVAILABLE = False
+    logger.warning("Incident Engine indisponível: %s", _inc_err)
+
+def _get_edr():
+    db = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+    return get_edr_sentinel(db)
+
+def _get_incidents():
+    db  = str(pathlib.Path(__file__).parent / "netguard_soc.db")
+    tid = _resolve_tenant_id()
+    return get_incident_engine(db, tid)
+
+# ── EDR endpoints ─────────────────────────────────────────────────
+@app.route("/api/edr/status")
+@auth
+def edr_status():
+    if not EDR_AVAILABLE:
+        return jsonify({"available": False}), 503
+    s = _get_edr()
+    return jsonify({
+        "available": True,
+        "running":   s.running,
+        "scan_interval": s.scan_interval,
+        "stats":     s.get_stats(),
+    })
+
+@app.route("/api/edr/processes")
+@auth
+def edr_processes():
+    if not EDR_AVAILABLE:
+        return jsonify({"error": "EDR indisponível"}), 503
+    limit     = int(request.args.get("limit", 50))
+    min_score = int(request.args.get("min_score", 0))
+    procs     = _get_edr().get_suspicious_processes(min_score=min_score, limit=limit)
+    return jsonify({"processes": procs})
+
+@app.route("/api/edr/alerts")
+@auth
+def edr_alerts():
+    if not EDR_AVAILABLE:
+        return jsonify({"error": "EDR indisponível"}), 503
+    limit  = int(request.args.get("limit", 50))
+    alerts = _get_edr().get_alerts(limit=limit)
+    return jsonify({"alerts": alerts})
+
+@app.route("/api/edr/process/<int:pid>")
+@auth
+def edr_process_detail(pid):
+    if not EDR_AVAILABLE:
+        return jsonify({"error": "EDR indisponível"}), 503
+    proc = _get_edr().get_process_detail(pid)
+    if not proc:
+        return jsonify({"error": "Processo não encontrado"}), 404
+    return jsonify(proc)
+
+@app.route("/api/edr/start", methods=["POST"])
+@auth
+@csrf_protect
+def edr_start():
+    if not EDR_AVAILABLE:
+        return jsonify({"error": "EDR indisponível"}), 503
+    _get_edr().start()
+    return jsonify({"ok": True, "status": "running"})
+
+@app.route("/api/edr/stop", methods=["POST"])
+@auth
+@csrf_protect
+def edr_stop():
+    if not EDR_AVAILABLE:
+        return jsonify({"error": "EDR indisponível"}), 503
+    _get_edr().stop()
+    return jsonify({"ok": True, "status": "stopped"})
+
+@app.route("/api/edr/scan", methods=["POST"])
+@auth
+@csrf_protect
+def edr_scan_now():
+    if not EDR_AVAILABLE:
+        return jsonify({"error": "EDR indisponível"}), 503
+    result = _get_edr().scan_now()
+    return jsonify({"ok": True, "result": result})
+
+# ── Incident endpoints ────────────────────────────────────────────
+@app.route("/api/incidents")
+@auth
+def incidents_list():
+    if not INCIDENT_AVAILABLE:
+        return jsonify({"error": "Incident Engine indisponível"}), 503
+    status   = request.args.get("status")
+    severity = request.args.get("severity")
+    limit    = int(request.args.get("limit", 50))
+    eng      = _get_incidents()
+    return jsonify({
+        "incidents": eng.list_incidents(status=status, severity=severity, limit=limit),
+        "stats":     eng.stats(),
+    })
+
+@app.route("/api/incidents/<int:iid>")
+@auth
+def incidents_get(iid):
+    if not INCIDENT_AVAILABLE:
+        return jsonify({"error": "Incident Engine indisponível"}), 503
+    inc = _get_incidents().get_incident(iid)
+    if not inc:
+        return jsonify({"error": "Incidente não encontrado"}), 404
+    timeline = _get_incidents().get_timeline(iid)
+    return jsonify({"incident": inc, "timeline": timeline})
+
+@app.route("/api/incidents/<int:iid>/status", methods=["PATCH"])
+@auth
+@csrf_protect
+def incidents_update_status(iid):
+    if not INCIDENT_AVAILABLE:
+        return jsonify({"error": "Incident Engine indisponível"}), 503
+    data   = request.get_json(force=True) or {}
+    status = data.get("status", "")
+    note   = data.get("note", "")
+    try:
+        inc = _get_incidents().update_status(iid, status, actor="analyst", note=note)
+        return jsonify({"ok": True, "incident": inc})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/incidents/<int:iid>/note", methods=["POST"])
+@auth
+@csrf_protect
+def incidents_add_note(iid):
+    if not INCIDENT_AVAILABLE:
+        return jsonify({"error": "Incident Engine indisponível"}), 503
+    data = request.get_json(force=True) or {}
+    note = data.get("note", "").strip()
+    if not note:
+        return jsonify({"error": "Nota vazia"}), 400
+    inc = _get_incidents().add_note(iid, note, actor="analyst")
+    return jsonify({"ok": True, "incident": inc})
+
+@app.route("/api/incidents/<int:iid>/assign", methods=["POST"])
+@auth
+@csrf_protect
+def incidents_assign(iid):
+    if not INCIDENT_AVAILABLE:
+        return jsonify({"error": "Incident Engine indisponível"}), 503
+    data     = request.get_json(force=True) or {}
+    assignee = data.get("assignee", "").strip()
+    inc = _get_incidents().assign(iid, assignee)
+    return jsonify({"ok": True, "incident": inc})
 
 
 # ═══════════════════════════════════════════ TRIAL SYSTEM ══════════

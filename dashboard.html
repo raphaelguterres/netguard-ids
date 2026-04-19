@@ -2019,6 +2019,8 @@ th.sortable:hover{color:var(--cyn)}
     <div class="tab" onclick="goPage('custom-rules',this)" title="Regras Customizadas">⚙ My Rules</div>
     <div class="tab" onclick="goPage('webhooks',this)" title="Webhook Alerts">🔔 Webhooks</div>
     <div class="tab" id="tab-trials-btn" style="display:none" onclick="goPage('trials',this)" title="Trials de Clientes">🔗 Trials</div>
+    <div class="tab" onclick="goPage('edr',this)" title="EDR — Processos">🛡 EDR</div>
+    <div class="tab" onclick="goPage('incidents',this)" title="Incidentes">🚨 Incidents</div>
     <div class="tab" onclick="goPage('remediation',this)" title="Remote Remediation">🔧 Remediation</div>
     <div class="tab" onclick="goPage('xdr',this)" title="XDR/EDR Pipeline">🛡 XDR</div>
     <div class="tab" onclick="goPage('mitre',this)" title="MITRE ATT&CK">🗺 ATT&CK</div>
@@ -3051,6 +3053,8 @@ th.sortable:hover{color:var(--cyn)}
 <div class="page" id="p-custom-rules"></div>
 <div class="page" id="p-webhooks"></div>
 <div class="page" id="p-trials"></div>
+<div class="page" id="p-edr"></div>
+<div class="page" id="p-incidents"></div>
 <div class="page" id="p-remediation"></div>
 <div class="page" id="p-xdr"></div>
 <div class="page" id="p-mitre"></div>
@@ -3898,6 +3902,8 @@ function goPage(name,el){
   if(name==='webhooks')      loadWebhooks();
   if(name==='remediation')   loadRemediation();
   if(name==='trials')        loadTrials();
+  if(name==='edr')           loadEDR();
+  if(name==='incidents')     loadIncidents();
   if(name==='xdr')           loadXdr();
   if(name==='mitre')         loadMitre();
   if(name==='threat-intel')  loadThreatIntel(true);
@@ -8551,6 +8557,249 @@ async function unisolateHost(ip){
   if(r?.ok) toast(`${ip} liberado`,'ok');
   else toast('Erro ao liberar','err');
   loadRemediation();
+}
+
+// ══════════════════════════════════════════════ EDR ═══════════════
+
+async function loadEDR(){
+  const pg = document.getElementById('p-edr');
+  if(!pg) return;
+  pg.innerHTML = `<div style="padding:20px;width:100%;max-width:1100px;margin:0 auto;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-size:1.1rem;font-weight:700">🛡 EDR — Endpoint Detection & Response</div>
+        <div style="font-size:.8rem;color:var(--txt3);margin-top:2px">Monitoramento comportamental de processos em tempo real.</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="fbtn" onclick="edrScanNow()" style="background:var(--blu);color:#fff">⚡ Scan Agora</button>
+        <button class="fbtn" onclick="loadEDR()">↻</button>
+      </div>
+    </div>
+    <div id="edr-status-row" style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap"></div>
+    <div id="edr-alert-list"><div class="empty"><span>Carregando…</span></div></div>
+  </div>`;
+
+  const [statusR, alertsR] = await Promise.all([
+    api('/edr/status'),
+    api('/edr/alerts?limit=40'),
+  ]);
+
+  if(!statusR?.available){
+    document.getElementById('edr-alert-list').innerHTML=
+      '<div class="empty" style="height:120px"><span>EDR indisponível neste sistema.</span></div>';
+    return;
+  }
+
+  const st = statusR.stats || {};
+  document.getElementById('edr-status-row').innerHTML = [
+    ['Processos monitorados', st.total_processes||0,     'var(--blu)'],
+    ['Suspeitos ativos',      st.suspicious||0,          'var(--ora)'],
+    ['Alertas hoje',          st.alerts_today||0,        'var(--red)'],
+    ['Auto-bloqueios',        st.auto_blocked||0,        'var(--grn)'],
+  ].map(([l,v,c])=>`<div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:10px 16px;flex:1;min-width:120px;text-align:center">
+    <div style="font-size:1.5rem;font-weight:800;color:${c}">${v}</div>
+    <div style="font-size:.72rem;color:var(--txt3)">${l}</div>
+  </div>`).join('');
+
+  const alerts = alertsR?.alerts || [];
+  const list   = document.getElementById('edr-alert-list');
+  if(!alerts.length){
+    list.innerHTML='<div class="empty" style="height:120px"><span>Nenhum alerta EDR — sistema limpo ✔</span></div>';
+    return;
+  }
+
+  const sevColor = {critical:'var(--red)',high:'var(--ora)',medium:'var(--yel)',low:'var(--grn)',ok:'var(--txt3)'};
+  const sevIcon  = {critical:'🔴',high:'🟠',medium:'🟡',low:'🟢',ok:'⚪'};
+
+  list.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.8rem">
+    <thead><tr style="color:var(--txt3);border-bottom:1px solid var(--b2)">
+      <th style="padding:6px 8px;text-align:left">Severidade</th>
+      <th style="padding:6px 8px;text-align:left">Processo</th>
+      <th style="padding:6px 8px;text-align:left">PID</th>
+      <th style="padding:6px 8px;text-align:left">Score</th>
+      <th style="padding:6px 8px;text-align:left">Findings</th>
+      <th style="padding:6px 8px;text-align:left">Horário</th>
+    </tr></thead>
+    <tbody>${alerts.map(a=>{
+      const sev = a.severity||'ok';
+      const findings = (a.findings||[]).slice(0,2).map(f=>
+        `<span style="background:rgba(248,81,73,.1);color:var(--red);border-radius:3px;padding:1px 5px;font-size:.68rem;margin-right:3px">${f.reason||f.type||''}</span>`
+      ).join('');
+      return `<tr style="border-bottom:1px solid var(--b1);cursor:pointer" onclick="loadEDRProcess(${a.pid||0})">
+        <td style="padding:7px 8px"><span style="color:${sevColor[sev]}">${sevIcon[sev]} ${sev.toUpperCase()}</span></td>
+        <td style="padding:7px 8px;font-family:var(--mono);font-weight:600">${a.process_name||'?'}</td>
+        <td style="padding:7px 8px;color:var(--txt3)">${a.pid||'—'}</td>
+        <td style="padding:7px 8px"><span style="color:${sevColor[sev]};font-weight:700">${a.score||0}</span></td>
+        <td style="padding:7px 8px">${findings||'<span style="color:var(--txt3)">—</span>'}</td>
+        <td style="padding:7px 8px;color:var(--txt3);font-size:.72rem">${(a.detected_at||a.ts||'').replace('T',' ').replace('Z','')}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>
+  <div id="edr-detail-panel"></div>`;
+}
+
+async function loadEDRProcess(pid){
+  if(!pid) return;
+  const panel = document.getElementById('edr-detail-panel');
+  if(!panel) return;
+  const r = await api(`/edr/process/${pid}`);
+  if(!r){ panel.innerHTML=''; return; }
+  const findings = (r.findings||[]).map(f=>
+    `<li style="margin-bottom:4px"><span style="color:var(--ora)">[${f.type||'?'}]</span> ${f.reason||''} <span style="color:var(--txt3)">(+${f.score||0}pts)</span></li>`
+  ).join('');
+  panel.innerHTML = `<div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:14px;margin-top:12px">
+    <div style="font-weight:700;margin-bottom:10px;font-family:var(--mono)">📋 ${r.process_name} (PID ${r.pid})</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.8rem;margin-bottom:10px">
+      <div><span style="color:var(--txt3)">Usuário:</span> ${r.username||'—'}</div>
+      <div><span style="color:var(--txt3)">Score:</span> <b style="color:var(--red)">${r.score||0}</b></div>
+      <div><span style="color:var(--txt3)">CPU:</span> ${r.cpu_percent||0}%</div>
+      <div><span style="color:var(--txt3)">Memória:</span> ${((r.memory_mb||0)).toFixed(1)} MB</div>
+      <div style="grid-column:1/-1"><span style="color:var(--txt3)">Cmdline:</span> <span style="font-family:var(--mono);font-size:.75rem">${r.cmdline||'—'}</span></div>
+    </div>
+    ${findings?`<div style="font-size:.78rem"><div style="color:var(--txt3);margin-bottom:4px">Findings:</div><ul style="padding-left:16px">${findings}</ul></div>`:''}
+    <button style="margin-top:8px" class="fbtn" onclick="document.getElementById('edr-detail-panel').innerHTML=''">Fechar</button>
+  </div>`;
+}
+
+async function edrScanNow(){
+  toast('Iniciando scan…','info');
+  const r = await api('/edr/scan',{method:'POST'});
+  if(r?.ok) { toast('Scan concluído','ok'); loadEDR(); }
+  else toast('EDR indisponível','err');
+}
+
+// ══════════════════════════════════════ INCIDENTS ═════════════════
+
+const INC_STATUS_LABEL = {open:'🔴 Aberto',investigating:'🟡 Investigando',contained:'🟠 Contido',resolved:'✅ Resolvido',false_positive:'⚪ Falso Positivo'};
+const INC_SEV_COLOR    = {critical:'var(--red)',high:'var(--ora)',medium:'var(--yel)',low:'var(--grn)'};
+let activeIncidentId   = null;
+
+async function loadIncidents(){
+  const pg = document.getElementById('p-incidents');
+  if(!pg) return;
+  pg.innerHTML = `<div style="display:flex;height:100%;overflow:hidden">
+    <div id="inc-list-panel" style="width:380px;min-width:280px;border-right:1px solid var(--b2);overflow-y:auto;padding:16px">
+      <div style="font-size:1rem;font-weight:700;margin-bottom:12px">🚨 Incidentes</div>
+      <div id="inc-filter-row" style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+        <button class="fbtn inc-flt on" data-s="" onclick="filterIncidents(this,'')">Todos</button>
+        <button class="fbtn inc-flt" data-s="open" onclick="filterIncidents(this,'open')">Abertos</button>
+        <button class="fbtn inc-flt" data-s="investigating" onclick="filterIncidents(this,'investigating')">Em investigação</button>
+        <button class="fbtn inc-flt" data-s="resolved" onclick="filterIncidents(this,'resolved')">Resolvidos</button>
+      </div>
+      <div id="inc-list-items"><div class="empty"><span>Carregando…</span></div></div>
+    </div>
+    <div id="inc-detail-panel" style="flex:1;overflow-y:auto;padding:20px">
+      <div class="empty" style="height:200px"><span>Selecione um incidente para ver os detalhes</span></div>
+    </div>
+  </div>`;
+
+  await _renderIncidentList('');
+}
+
+async function _renderIncidentList(status){
+  const el = document.getElementById('inc-list-items');
+  if(!el) return;
+  const r = await api(`/incidents${status?'?status='+status:''}`);
+  const incidents = r?.incidents || [];
+  if(!incidents.length){
+    el.innerHTML='<div class="empty" style="height:100px"><span>Nenhum incidente</span></div>';
+    return;
+  }
+  el.innerHTML = incidents.map(i=>`
+  <div onclick="openIncident(${i.id})" style="background:${activeIncidentId===i.id?'var(--s3)':'var(--s2)'};border:1px solid ${activeIncidentId===i.id?'var(--blu)':'var(--b2)'};border-radius:6px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:border .15s">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+      <span style="width:8px;height:8px;border-radius:50%;background:${INC_SEV_COLOR[i.severity]||'var(--txt3)'};flex-shrink:0"></span>
+      <span style="font-size:.82rem;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.title}</span>
+    </div>
+    <div style="display:flex;gap:8px;font-size:.7rem;color:var(--txt3)">
+      <span>${INC_STATUS_LABEL[i.status]||i.status}</span>
+      <span>·</span>
+      <span>${i.age_minutes!=null?(i.age_minutes<60?i.age_minutes+'min':Math.floor(i.age_minutes/60)+'h'):'—'} atrás</span>
+      ${i.host_id?`<span>· ${i.host_id}</span>`:''}
+    </div>
+  </div>`).join('');
+}
+
+async function filterIncidents(btn, status){
+  document.querySelectorAll('.inc-flt').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  await _renderIncidentList(status);
+}
+
+async function openIncident(id){
+  activeIncidentId = id;
+  const panel = document.getElementById('inc-detail-panel');
+  if(!panel) return;
+  panel.innerHTML='<div style="padding:20px;color:var(--txt3)">Carregando…</div>';
+
+  const r = await api(`/incidents/${id}`);
+  if(!r?.incident){ panel.innerHTML='<div class="empty"><span>Incidente não encontrado</span></div>'; return; }
+
+  const i  = r.incident;
+  const tl = r.timeline || [];
+  const sev = i.severity;
+
+  panel.innerHTML = `
+  <div style="border-bottom:1px solid var(--b2);padding-bottom:12px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <span style="background:${INC_SEV_COLOR[sev]||'var(--txt3)'};color:#000;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:4px">${sev.toUpperCase()}</span>
+      <span style="font-size:.8rem;color:var(--txt3)">${INC_STATUS_LABEL[i.status]||i.status}</span>
+      ${i.assigned_to?`<span style="font-size:.78rem;color:var(--blu)">👤 ${i.assigned_to}</span>`:''}
+    </div>
+    <div style="font-size:1rem;font-weight:700;margin-bottom:4px">${i.title}</div>
+    ${i.summary?`<div style="font-size:.78rem;color:var(--txt3);font-family:var(--mono);margin-top:4px">${i.summary}</div>`:''}
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.8rem;margin-bottom:16px">
+    <div><span style="color:var(--txt3)">ID:</span> #${i.id}</div>
+    <div><span style="color:var(--txt3)">Fonte:</span> ${i.source}</div>
+    <div><span style="color:var(--txt3)">Host:</span> ${i.host_id||'—'}</div>
+    <div><span style="color:var(--txt3)">IP:</span> ${i.source_ip||'—'}</div>
+    <div><span style="color:var(--txt3)">Aberto:</span> ${(i.opened_at||'').replace('T',' ').replace('Z','')}</div>
+    <div><span style="color:var(--txt3)">Atualizado:</span> ${(i.updated_at||'').replace('T',' ').replace('Z','')}</div>
+  </div>
+
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
+    <button class="fbtn" onclick="setIncStatus(${i.id},'investigating')" style="${i.status==='investigating'?'border-color:var(--yel);color:var(--yel)':''}">🟡 Investigar</button>
+    <button class="fbtn" onclick="setIncStatus(${i.id},'contained')"    style="${i.status==='contained'?'border-color:var(--ora);color:var(--ora)':''}">🟠 Conter</button>
+    <button class="fbtn" onclick="setIncStatus(${i.id},'resolved')"     style="color:var(--grn)">✅ Resolver</button>
+    <button class="fbtn" onclick="setIncStatus(${i.id},'false_positive')" style="color:var(--txt3)">⚪ Falso Positivo</button>
+  </div>
+
+  <div style="margin-bottom:12px">
+    <div style="font-size:.78rem;color:var(--txt3);margin-bottom:6px">Adicionar nota</div>
+    <div style="display:flex;gap:6px">
+      <input id="inc-note-${i.id}" class="finput" placeholder="Descreva o que foi encontrado ou feito…" style="flex:1">
+      <button class="fbtn" style="background:var(--blu);color:#fff" onclick="addIncNote(${i.id})">Salvar</button>
+    </div>
+  </div>
+
+  <div style="font-size:.78rem;color:var(--txt3);margin-bottom:8px">Timeline</div>
+  <div>${tl.map(e=>`
+    <div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--b1);font-size:.75rem">
+      <span style="color:var(--txt3);flex-shrink:0;font-size:.68rem">${(e.ts||'').replace('T',' ').replace('Z','')}</span>
+      <span style="color:var(--blu);flex-shrink:0">${e.actor}</span>
+      <span style="color:var(--ora);flex-shrink:0">${e.action}</span>
+      <span style="color:var(--txt2);flex:1">${e.detail}</span>
+    </div>`).join('')}
+  </div>`;
+}
+
+async function setIncStatus(id, status){
+  const note = prompt(`Nota sobre mudança para "${status}" (opcional):`)||'';
+  const r = await api(`/incidents/${id}/status`,{method:'PATCH',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({status,note})});
+  if(r?.ok){ toast('Status atualizado','ok'); openIncident(id); _renderIncidentList(''); }
+  else toast(r?.error||'Erro','err');
+}
+
+async function addIncNote(id){
+  const note = document.getElementById(`inc-note-${id}`)?.value.trim();
+  if(!note){ toast('Nota vazia','err'); return; }
+  const r = await api(`/incidents/${id}/note`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({note})});
+  if(r?.ok){ toast('Nota adicionada','ok'); openIncident(id); }
+  else toast('Erro','err');
 }
 </script>
 
