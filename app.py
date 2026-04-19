@@ -7595,3 +7595,56 @@ if __name__ == "__main__":
         ssl_context=ssl_ctx,
         use_reloader=False,
     )
+
+
+# ── Trial expiry reminder scheduler ──────────────────────────────────────────
+def _trial_expiry_scheduler() -> None:
+    """
+    Roda em background (daemon thread), acorda a cada hora e envia
+    e-mail de lembrete para trials que expiram nas próximas 24-25h
+    e ainda não receberam o lembrete (access_count > 0 = trial foi usado).
+    Usa um set em memória para não enviar duplicatas na mesma sessão.
+    """
+    import time as _time
+
+    _reminded: set = set()
+    _CHECK_INTERVAL = 3600
+
+    def _loop():
+        _time.sleep(60)
+        while True:
+            try:
+                if TRIAL_ENGINE_OK:
+                    engine = get_trial_engine(TRIAL_DB_PATH)
+                    for trial in engine.list_trials(include_expired=False):
+                        token = trial.get("token", "")
+                        if token in _reminded:
+                            continue
+                        rem_h = trial.get("remaining_h", 0)
+                        if trial.get("access_count", 0) > 0 and 0 < rem_h <= 25:
+                            try:
+                                from mailer import send_trial_expiry_reminder
+                                _app_url  = os.environ.get("APP_URL", "http://localhost:5000").rstrip("/")
+                                _trial_url = f"{_app_url}/trial/{token}"
+                                send_trial_expiry_reminder(
+                                    name        = trial.get("name") or trial.get("email", ""),
+                                    email       = trial.get("email", ""),
+                                    company     = trial.get("company", ""),
+                                    trial_url   = _trial_url,
+                                    remaining_h = rem_h,
+                                    upgrade_url = f"{_app_url}/pricing",
+                                )
+                                _reminded.add(token)
+                                logger.info("Trial expiry reminder enviado → %s (%.1fh restantes)",
+                                            trial.get("email"), rem_h)
+                            except Exception as _me:
+                                logger.debug("Trial expiry reminder falhou: %s", _me)
+            except Exception as _exc:
+                logger.debug("Trial expiry scheduler erro: %s", _exc)
+            _time.sleep(_CHECK_INTERVAL)
+
+    threading.Thread(target=_loop, daemon=True, name="trial-expiry-scheduler").start()
+    logger.info("Trial expiry scheduler iniciado (intervalo=1h, janela=1-25h)")
+
+
+_trial_expiry_scheduler()

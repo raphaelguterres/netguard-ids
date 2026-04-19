@@ -623,3 +623,148 @@ Enquanto isso, você pode conhecer melhor o produto:
 </html>"""
 
     _send_async(email, name, subject, html, plain)
+
+
+# ── Trial — lembrete de expiração ────────────────────────────────────────────
+
+def send_trial_expiry_reminder(name: str, email: str, company: str,
+                                trial_url: str, remaining_h: float,
+                                upgrade_url: str = "") -> None:
+    """
+    Envia lembrete quando faltam ~24h para o trial expirar.
+    Chamado automaticamente pelo scheduler do app.py.
+    """
+    if not email:
+        return
+
+    url          = (_cfg("APP_URL") or "http://localhost:5000").rstrip("/")
+    upgrade_url  = upgrade_url or f"{url}/pricing"
+    hours_left   = int(remaining_h)
+    urgency_label = f"{hours_left}h restantes" if hours_left > 1 else "menos de 1h restante"
+
+    subject = f"⚠️ Seu trial do NetGuard IDS expira em {urgency_label}"
+
+    plain = f"""Olá, {name}!
+
+Seu período de avaliação do NetGuard IDS para {company} está chegando ao fim.
+
+Tempo restante: {urgency_label}
+
+── Continue protegendo sua rede ──────────────────────────────────
+Não perca o acesso ao seu dashboard e aos dados de detecção coletados.
+
+Assine agora em: {upgrade_url}
+
+Seu trial: {trial_url}
+
+Planos a partir de R$990/mês:
+✔ Dashboard em tempo real
+✔ Detecção ML + IOC Manager
+✔ Regras customizadas
+✔ Compliance SOC2 / PCI-DSS / HIPAA
+✔ Alertas via Webhook (Slack, Teams, Discord)
+
+Ficou com dúvidas? Responda este e-mail.
+
+— Equipe NetGuard IDS
+"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+</head>
+<body style="margin:0;padding:0;background:#0d1117;font-family:'Segoe UI',Arial,sans-serif;color:#e6edf3;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0d1117;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0"
+             style="max-width:600px;background:#161b22;border-radius:12px;border:1px solid #30363d;overflow:hidden;">
+
+        <!-- Header urgência -->
+        <tr>
+          <td style="background:#b91c1c;padding:14px 36px;text-align:center;">
+            <span style="font-size:14px;font-weight:700;color:#fef2f2;letter-spacing:.5px;">
+              ⏱ {urgency_label.upper()} — SEU TRIAL ESTÁ EXPIRANDO
+            </span>
+          </td>
+        </tr>
+
+        <!-- Logo -->
+        <tr>
+          <td style="background:#0d1117;padding:20px 36px;border-bottom:1px solid #30363d;">
+            <table cellpadding="0" cellspacing="0"><tr>
+              <td style="padding-right:10px;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2">
+                  <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z"/>
+                </svg>
+              </td>
+              <td style="font-size:16px;font-weight:800;color:#58a6ff;">NetGuard IDS</td>
+            </tr></table>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr><td style="padding:36px 36px 0;">
+          <p style="font-size:20px;font-weight:800;margin:0 0 8px;color:#f87171;">
+            Não perca seu acesso, {name}!
+          </p>
+          <p style="color:#8b949e;font-size:14px;line-height:1.6;margin:0 0 24px;">
+            Seu trial de <strong style="color:#e6edf3;">{company}</strong> expira em
+            <strong style="color:#f87171;">{urgency_label}</strong>.
+            Assine agora para manter o dashboard e todos os dados de detecção.
+          </p>
+
+          <!-- CTA principal -->
+          <table cellpadding="0" cellspacing="0" style="margin-bottom:16px;">
+            <tr><td style="background:#1f6feb;border-radius:8px;">
+              <a href="{upgrade_url}"
+                 style="display:block;padding:14px 32px;font-size:15px;font-weight:700;
+                        color:#fff;text-decoration:none;">
+                🔒 Assinar NetGuard IDS →
+              </a>
+            </td></tr>
+          </table>
+
+          <!-- CTA secundário — continuar no trial -->
+          <p style="font-size:13px;color:#8b949e;margin:0 0 24px;">
+            Ainda no trial?
+            <a href="{trial_url}" style="color:#58a6ff;">Voltar ao dashboard →</a>
+          </p>
+
+          <!-- Planos -->
+          <table width="100%" cellpadding="0" cellspacing="0"
+                 style="background:#0d1117;border:1px solid #30363d;border-radius:8px;
+                        margin-bottom:28px;padding:18px 20px;">
+            <tr><td>
+              <p style="font-size:13px;font-weight:700;color:#e6edf3;margin:0 0 14px;">
+                O que você mantém ao assinar:
+              </p>
+              {''.join(f'<p style="font-size:13px;color:#8b949e;margin:0 0 8px;"><span style="color:#3fb950;margin-right:8px;">✔</span>{feat}</p>' for feat in [
+                'Dashboard de segurança em tempo real',
+                'Detecção ML (Isolation Forest) + IOC Manager',
+                'Regras de detecção customizadas (14 operadores)',
+                'Compliance: SOC2, PCI-DSS, HIPAA',
+                'Alertas Webhook — Slack, Teams, Discord, HTTP',
+              ])}
+              <p style="font-size:12px;color:#6e7681;margin:12px 0 0;">
+                Planos a partir de <strong style="color:#e6edf3;">R$990/mês</strong> · 14 dias grátis na assinatura
+              </p>
+            </td></tr>
+          </table>
+        </td></tr>
+
+        <!-- Footer -->
+        <tr><td style="padding:20px 36px 28px;border-top:1px solid #30363d;background:#0d1117;">
+          <p style="color:#8b949e;font-size:12px;margin:0;line-height:1.6;">
+            Dúvidas? Responda este e-mail.<br>
+            <a href="{url}" style="color:#58a6ff;">{url}</a>
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+    _send_async(email, name, subject, html, plain)
