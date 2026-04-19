@@ -436,6 +436,139 @@ def send_welcome(name: str, email: str, token: str,
     _send_async(email, name, subject, html, plain)
 
 
+def send_trial_invite(name: str, email: str, company: str,
+                      trial_url: str, duration_h: int = 72,
+                      expires_at: str = "") -> None:
+    """
+    Envia o link de trial personalizado para o cliente em potencial.
+    """
+    if not email:
+        return
+
+    url      = (_cfg("APP_URL") or "http://localhost:5000").rstrip("/")
+    duration_label = (f"{duration_h // 24} dias" if duration_h >= 24
+                      else f"{duration_h} horas")
+    subject  = f"🔑 Seu acesso de {duration_label} ao NetGuard IDS está pronto"
+
+    plain = f"""Olá, {name}!
+
+Preparamos um acesso exclusivo ao NetGuard IDS para {company}.
+
+══ SEU LINK DE ACESSO ({duration_label}) ══════════════
+{trial_url}
+══════════════════════════════════════════
+
+O acesso expira em {duration_label}. Nenhum cartão de crédito é necessário.
+
+O que você vai encontrar:
+✔ Dashboard de segurança em tempo real
+✔ Detecção de ameaças com ML (Isolation Forest)
+✔ IOC Manager — lista negra de IPs e domínios
+✔ Regras de detecção customizadas
+✔ Relatórios de Compliance (SOC2 / PCI-DSS / HIPAA)
+
+Qualquer dúvida, responda este e-mail.
+
+— Equipe NetGuard IDS
+"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Seu acesso ao NetGuard IDS</title>
+</head>
+<body style="margin:0;padding:0;background:#0d1117;font-family:'Segoe UI',Arial,sans-serif;color:#e6edf3;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0d1117;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0"
+             style="max-width:600px;background:#161b22;border-radius:12px;border:1px solid #30363d;overflow:hidden;">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:#0d1117;padding:24px 36px;border-bottom:1px solid #30363d;">
+            <table cellpadding="0" cellspacing="0"><tr>
+              <td style="padding-right:10px;">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2">
+                  <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z"/>
+                </svg>
+              </td>
+              <td style="font-size:17px;font-weight:800;color:#58a6ff;">NetGuard IDS</td>
+              <td style="padding-left:16px;">
+                <span style="background:#1f6feb22;color:#58a6ff;font-size:11px;font-weight:700;
+                             padding:3px 10px;border-radius:999px;border:1px solid #1f6feb44;">
+                  TRIAL {duration_label.upper()}
+                </span>
+              </td>
+            </tr></table>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr><td style="padding:36px 36px 0;">
+          <p style="font-size:21px;font-weight:800;margin:0 0 8px;">
+            Olá, {name}! Seu acesso está pronto. 🎉
+          </p>
+          <p style="color:#8b949e;font-size:14px;line-height:1.6;margin:0 0 24px;">
+            Preparamos um acesso exclusivo de <strong style="color:#e6edf3;">{duration_label}</strong>
+            ao NetGuard IDS para <strong style="color:#e6edf3;">{company}</strong>.
+            Clique no botão abaixo para entrar direto no dashboard — sem cadastro, sem cartão.
+          </p>
+
+          <!-- CTA -->
+          <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+            <tr><td style="background:#1f6feb;border-radius:8px;">
+              <a href="{trial_url}"
+                 style="display:block;padding:14px 32px;font-size:15px;font-weight:700;
+                        color:#fff;text-decoration:none;">
+                Acessar o NetGuard IDS →
+              </a>
+            </td></tr>
+          </table>
+
+          <!-- URL fallback -->
+          <p style="font-size:12px;color:#8b949e;margin:0 0 24px;">
+            Ou copie o link: <a href="{trial_url}" style="color:#58a6ff;word-break:break-all;">{trial_url}</a>
+          </p>
+
+          <!-- Features -->
+          <table width="100%" cellpadding="0" cellspacing="0"
+                 style="background:#0d1117;border:1px solid #30363d;border-radius:8px;
+                        margin-bottom:28px;padding:18px 20px;">
+            <tr><td>
+              <p style="font-size:13px;font-weight:700;color:#e6edf3;margin:0 0 12px;">
+                O que você vai encontrar no trial:
+              </p>
+              {''.join(f'<p style="font-size:13px;color:#8b949e;margin:0 0 8px;"><span style="color:#3fb950;margin-right:8px;">✔</span>{feat}</p>' for feat in [
+                'Dashboard de segurança em tempo real',
+                'Detecção de ameaças com ML (Isolation Forest)',
+                'IOC Manager — lista negra de IPs, domínios e hashes',
+                'Regras de detecção customizadas (14 operadores)',
+                'Relatórios de Compliance: SOC2 / PCI-DSS / HIPAA',
+              ])}
+            </td></tr>
+          </table>
+        </td></tr>
+
+        <!-- Footer -->
+        <tr><td style="padding:20px 36px 28px;border-top:1px solid #30363d;background:#0d1117;">
+          <p style="color:#8b949e;font-size:12px;margin:0;line-height:1.6;">
+            Dúvidas? Responda este e-mail ou acesse
+            <a href="{url}" style="color:#58a6ff;">netguard.io</a>.<br>
+            Você recebeu este e-mail porque foi convidado para um trial do NetGuard IDS.
+          </p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+    _send_async(email, name, subject, html, plain)
+
+
 def send_contact_confirmation(name: str, email: str,
                               plan: str = "enterprise") -> None:
     """

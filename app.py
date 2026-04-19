@@ -6682,7 +6682,23 @@ def admin_trials_create():
         )
         base = request.host_url.rstrip("/")
         trial["trial_url"] = f"{base}/trial/{trial['token']}"
-        return jsonify({"ok": True, "trial": trial}), 201
+
+        # Envia email automático pro cliente (falha silenciosa se SMTP não configurado)
+        try:
+            from mailer import send_trial_invite
+            send_trial_invite(
+                name       = trial.get("name") or trial.get("email",""),
+                email      = trial["email"],
+                company    = trial.get("company",""),
+                trial_url  = trial["trial_url"],
+                duration_h = trial.get("duration_h", 72),
+                expires_at = trial.get("expires_at",""),
+            )
+            logger.info("Trial invite enviado → %s", trial["email"])
+        except Exception as _me:
+            logger.warning("Trial invite email falhou (SMTP não configurado?): %s", _me)
+
+        return jsonify({"ok": True, "trial": trial, "email_sent": MAILER_OK}), 201
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 

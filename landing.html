@@ -890,7 +890,7 @@ footer p{font-size:.83rem;color:var(--muted);margin-bottom:.3rem}
           <li class="na">Compliance PDF (SOC2/PCI/HIPAA)</li>
           <li class="na">White-label</li>
         </ul>
-        <button class="plan-btn secondary" onclick="document.getElementById('demo').scrollIntoView({behavior:'smooth'})">Começar grátis</button>
+        <a href="/demo" class="plan-btn secondary" style="display:block;text-align:center;text-decoration:none">⚡ Experimentar grátis</a>
       </div>
 
       <!-- Pro -->
@@ -916,7 +916,8 @@ footer p{font-size:.83rem;color:var(--muted);margin-bottom:.3rem}
           <li class="na">Compliance PDF (SOC2/PCI/HIPAA)</li>
           <li class="na">White-label</li>
         </ul>
-        <button class="plan-btn primary" onclick="document.getElementById('demo').scrollIntoView({behavior:'smooth'})">Solicitar demo</button>
+        <button class="plan-btn primary" onclick="openCheckout('pro')">🔒 Assinar agora</button>
+        <p style="font-size:.72rem;color:var(--muted);text-align:center;margin-top:.6rem">14 dias grátis · cancele quando quiser</p>
       </div>
 
       <!-- Enterprise -->
@@ -937,11 +938,71 @@ footer p{font-size:.83rem;color:var(--muted);margin-bottom:.3rem}
           <li>Integração com seu billing</li>
           <li>Suporte 24/7</li>
         </ul>
-        <button class="plan-btn secondary" onclick="document.getElementById('demo').scrollIntoView({behavior:'smooth'})">Falar com vendas</button>
+        <button class="plan-btn secondary" onclick="openCheckout('enterprise')">Falar com especialista</button>
       </div>
     </div>
   </div>
 </section>
+
+<!-- ── Checkout Modal ───────────────────────────────────────────── -->
+<div id="checkout-overlay" onclick="closeCheckout(event)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9000;align-items:center;justify-content:center;padding:1rem">
+  <div id="checkout-modal" style="background:#161b22;border:1px solid #30363d;border-radius:14px;padding:2rem;width:100%;max-width:420px;position:relative" onclick="event.stopPropagation()">
+    <button onclick="closeCheckout()" style="position:absolute;top:12px;right:14px;background:none;border:none;color:#8b949e;font-size:1.2rem;cursor:pointer">✕</button>
+
+    <div id="co-head-pro" style="display:none">
+      <div style="font-size:.75rem;font-weight:700;color:#58a6ff;letter-spacing:.08em;margin-bottom:.4rem">PLANO PRO</div>
+      <div style="font-size:1.5rem;font-weight:800;margin-bottom:.2rem">R$297<span style="font-size:.9rem;font-weight:400;color:#8b949e">/mês</span></div>
+      <div style="font-size:.8rem;color:#3fb950;margin-bottom:1.2rem">✔ 14 dias grátis — sem cobrança agora</div>
+    </div>
+    <div id="co-head-enterprise" style="display:none">
+      <div style="font-size:.75rem;font-weight:700;color:#3fb950;letter-spacing:.08em;margin-bottom:.4rem">ENTERPRISE / MSSP</div>
+      <div style="font-size:1.1rem;font-weight:700;margin-bottom:.2rem">Vamos conversar</div>
+      <div style="font-size:.8rem;color:#8b949e;margin-bottom:1.2rem">Preencha e nossa equipe entra em contato em até 1 dia útil.</div>
+    </div>
+
+    <form id="checkout-form" method="POST" action="/checkout">
+      <input type="hidden" name="plan" id="co-plan" value="pro">
+      <div style="margin-bottom:.9rem">
+        <label style="font-size:.75rem;color:#8b949e;display:block;margin-bottom:.3rem">Nome completo *</label>
+        <input name="name" required placeholder="João Silva" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:9px 12px;color:#e6edf3;font-size:.9rem;outline:none" onfocus="this.style.borderColor='#58a6ff'" onblur="this.style.borderColor='#30363d'">
+      </div>
+      <div style="margin-bottom:.9rem">
+        <label style="font-size:.75rem;color:#8b949e;display:block;margin-bottom:.3rem">E-mail corporativo *</label>
+        <input name="email" type="email" required placeholder="joao@empresa.com" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:9px 12px;color:#e6edf3;font-size:.9rem;outline:none" onfocus="this.style.borderColor='#58a6ff'" onblur="this.style.borderColor='#30363d'">
+      </div>
+      <div style="margin-bottom:1.2rem">
+        <label style="font-size:.75rem;color:#8b949e;display:block;margin-bottom:.3rem">Empresa</label>
+        <input name="company" placeholder="ACME Ltda" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:9px 12px;color:#e6edf3;font-size:.9rem;outline:none" onfocus="this.style.borderColor='#58a6ff'" onblur="this.style.borderColor='#30363d'">
+      </div>
+      <button type="submit" id="co-submit-btn" style="width:100%;background:#1f6feb;color:#fff;border:none;border-radius:8px;padding:12px;font-size:.95rem;font-weight:700;cursor:pointer">
+        🔒 Continuar para pagamento →
+      </button>
+      <p id="co-note-pro" style="font-size:.7rem;color:#8b949e;text-align:center;margin-top:.6rem;display:none">Você será redirecionado para o checkout seguro do Stripe.</p>
+      <p id="co-note-enterprise" style="font-size:.7rem;color:#8b949e;text-align:center;margin-top:.6rem;display:none">Nossa equipe retornará em até 1 dia útil.</p>
+    </form>
+  </div>
+</div>
+
+<script>
+function openCheckout(plan){
+  const ov = document.getElementById('checkout-overlay');
+  document.getElementById('co-plan').value = plan;
+  document.getElementById('co-head-pro').style.display        = plan==='pro' ? 'block' : 'none';
+  document.getElementById('co-head-enterprise').style.display = plan==='enterprise' ? 'block' : 'none';
+  document.getElementById('co-note-pro').style.display        = plan==='pro' ? 'block' : 'none';
+  document.getElementById('co-note-enterprise').style.display = plan==='enterprise' ? 'block' : 'none';
+  const btn = document.getElementById('co-submit-btn');
+  btn.textContent = plan==='pro' ? '🔒 Continuar para pagamento →' : '📩 Solicitar contato →';
+  ov.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+function closeCheckout(e){
+  if(e && e.target !== document.getElementById('checkout-overlay')) return;
+  document.getElementById('checkout-overlay').style.display='none';
+  document.body.style.overflow='';
+}
+document.addEventListener('keydown', e => { if(e.key==='Escape') closeCheckout(); });
+</script>
 
 <!-- ═══════════════════════════════════════════════ DEMO FORM -->
 <section class="demo-section" id="demo">
