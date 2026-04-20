@@ -54,7 +54,7 @@
         <p class="auth-subtitle">Use seu token de API para acessar o command center de monitoramento.</p>
 
         <div class="error-msg" id="error-msg">
-          Token invalido ou expirado. Revise o valor informado e tente novamente.
+          Nao conseguimos validar seu acesso. Revise o token e tente novamente.
         </div>
 
         <form class="auth-form" id="login-form" onsubmit="doLogin(event)">
@@ -65,6 +65,16 @@
               <button type="button" class="toggle-vis" onclick="toggleVis()" title="Mostrar ou ocultar">Ver</button>
             </div>
             <p class="field-note">Comeca com <code>ng_</code> e e entregue ao criar sua conta.</p>
+          </label>
+
+          <label id="totp-field" style="display:none">
+            <span class="field-label">Codigo 2FA</span>
+            <div class="input-shell">
+              <input class="input-field" type="text" id="totp-input" name="totp"
+                     placeholder="000000" inputmode="numeric" pattern="[0-9]{6}"
+                     maxlength="6" autocomplete="one-time-code">
+            </div>
+            <p class="field-note">6 digitos do app autenticador (Google Authenticator, 1Password, Authy).</p>
           </label>
 
           <button type="submit" class="auth-submit" id="submit-btn">Entrar no dashboard</button>
@@ -90,10 +100,11 @@
       e.preventDefault();
       const token = document.getElementById('token-input').value.trim();
       if (!token) return;
-      validateAndRedirect(token);
+      const totp = document.getElementById('totp-input').value.trim();
+      validateAndRedirect(token, totp);
     }
 
-    function validateAndRedirect(token) {
+    function validateAndRedirect(token, totp) {
       const btn = document.getElementById('submit-btn');
       btn.textContent = 'Validando acesso...';
       btn.disabled = true;
@@ -101,35 +112,106 @@
       const csrfToken = document.cookie.split(';')
         .map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
 
+      const body = { token };
+      if (totp) body.totp = totp;
+
       fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
         credentials: 'same-origin',
-        body: JSON.stringify({ token })
+        body: JSON.stringify(body)
       })
-      .then(r => {
-        if (r.ok) return r.json();
-        throw new Error('invalid');
+      .then(async r => {
+        const data = await r.json().catch(() => ({}));
+        return { ok: r.ok, status: r.status, data };
       })
-      .then(data => {
-        if (data.valid) {
+      .then(({ ok, status, data }) => {
+        if (ok && data.valid) {
           const next = new URLSearchParams(location.search).get('next') || '/dashboard';
           window.location.href = next;
-        } else {
-          showError();
+          return;
+        }
+        // Primeiro login admin sem 2FA — revela campo e explica o que fazer
+        if (status === 401 && data.totp_required) {
+          revealTotpField(
+            'Seu login exige verificacao em duas etapas. Abra seu app ' +
+            'autenticador (Google Authenticator, 1Password, Authy, Microsoft ' +
+            'Authenticator) e digite o codigo de 6 digitos abaixo.'
+          );
           btn.textContent = 'Entrar no dashboard';
           btn.disabled = false;
+          return;
         }
+        // Diferencia erro de token vs erro de 2FA pelo status + conteudo
+        showError(humanizeLoginError(status, data));
+        btn.textContent = 'Entrar no dashboard';
+        btn.disabled = false;
       })
       .catch(() => {
-        showError();
+        showError(
+          'Nao conseguimos falar com o servidor. Verifique sua conexao ' +
+          'e tente de novo em alguns segundos.'
+        );
         btn.textContent = 'Entrar no dashboard';
         btn.disabled = false;
       });
     }
 
-    function showError() {
-      document.getElementById('error-msg').classList.add('show');
+    // Traduz status HTTP + payload do backend em mensagem em PT-BR.
+    // Por que: o backend manda strings tipo "invalid code", "token ausente",
+    // que assustam o operador sem dar acao. Aqui a gente reconta em
+    // linguagem humana e separa "problema no token" de "problema no 2FA".
+    function humanizeLoginError(status, data) {
+      const raw = (data && data.error ? String(data.error) : '').toLowerCase();
+      const totpField = document.getElementById('totp-field');
+      const totpVisible = totpField && totpField.style.display !== 'none';
+
+      // 429 — bruteforce guard bloqueou o IP
+      if (status === 429) {
+        return 'Muitas tentativas de login falharam. Por seguranca, ' +
+               'bloqueamos esse IP por alguns minutos. Tente novamente ' +
+               'mais tarde.';
+      }
+      // 403 — CSRF invalido (atipico em fluxo de login comum)
+      if (status === 403 || raw.includes('csrf')) {
+        return 'Sessao expirada. Recarregue a pagina (F5) e tente de novo.';
+      }
+      // 2FA visivel + erro: o codigo 2FA foi errado
+      if (totpVisible && (raw.includes('totp') || raw.includes('codigo') ||
+                          raw.includes('code') || raw.includes('2fa'))) {
+        return 'Codigo 2FA invalido. Confirme que o relogio do seu celular ' +
+               'esta correto e tente o proximo codigo que aparecer no app ' +
+               '(eles mudam a cada 30s).';
+      }
+      // 401 padrao — token incorreto
+      if (status === 401) {
+        return 'Token invalido ou expirado. Confirme que copiou o valor ' +
+               'completo (comeca com "ng_") e que nao tem espacos extras.';
+      }
+      // 500+ — erro do servidor
+      if (status >= 500) {
+        return 'Erro no servidor. Avise o time tecnico ou tente novamente ' +
+               'em alguns minutos.';
+      }
+      // Fallback: o que o backend mandou, ou mensagem generica
+      return (data && data.error) ||
+             'Nao conseguimos validar seu acesso. Revise o token e tente de novo.';
+    }
+
+    function revealTotpField(msg) {
+      const f = document.getElementById('totp-field');
+      f.style.display = '';
+      setTimeout(() => document.getElementById('totp-input').focus(), 50);
+      const err = document.getElementById('error-msg');
+      if (msg) err.textContent = msg;
+      err.classList.add('show');
+    }
+
+    function showError(msg) {
+      const err = document.getElementById('error-msg');
+      // Fallback pra mensagem do HTML estatico se veio vazio
+      if (msg) err.textContent = msg;
+      err.classList.add('show');
     }
   </script>
 </body>

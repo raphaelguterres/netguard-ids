@@ -205,6 +205,31 @@ class TestBruteForceGuard(unittest.TestCase):
 
 class TestRequireRole(unittest.TestCase):
 
+    def setUp(self):
+        """
+        Liga AUTH_ENABLED durante os testes de RBAC.
+
+        Por que: require_role() em security.py tem early-return quando
+        auth.AUTH_ENABLED é False (modo dev local sem autenticacao). Sem
+        esse patch os testes nunca atingem o bloco do gate 403 e toda
+        chamada passa direto — falsos positivos em cima de decoradores
+        realmente quebrados em prod.
+        """
+        try:
+            import auth
+            self._auth_enabled_orig = getattr(auth, "AUTH_ENABLED", False)
+            auth.AUTH_ENABLED = True
+        except Exception:
+            self._auth_enabled_orig = None
+
+    def tearDown(self):
+        try:
+            import auth
+            if self._auth_enabled_orig is not None:
+                auth.AUTH_ENABLED = self._auth_enabled_orig
+        except Exception:
+            pass
+
     def _call_with_role(self, fn, role):
         """Chama a função decorada dentro de um contexto Flask mínimo."""
         try:
@@ -945,6 +970,28 @@ class TestRBACProfiles(unittest.TestCase):
     Testa os perfis viewer/analyst/admin nos decoradores @require_role
     usando contextos Flask leves (sem app completo).
     """
+
+    def setUp(self):
+        """
+        Liga AUTH_ENABLED durante os testes de RBAC.
+
+        Mesmo motivo de TestRequireRole.setUp: sem isso, require_role()
+        faz early-return em modo dev e o 403 nunca dispara.
+        """
+        try:
+            import auth
+            self._auth_enabled_orig = getattr(auth, "AUTH_ENABLED", False)
+            auth.AUTH_ENABLED = True
+        except Exception:
+            self._auth_enabled_orig = None
+
+    def tearDown(self):
+        try:
+            import auth
+            if self._auth_enabled_orig is not None:
+                auth.AUTH_ENABLED = self._auth_enabled_orig
+        except Exception:
+            pass
 
     def _make_app(self):
         try:

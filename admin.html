@@ -366,8 +366,25 @@ hr{border:none;border-top:1px solid var(--border);margin:20px 0}
         O token antigo é invalidado imediatamente e o novo é exibido uma única vez.
       </p>
       <div class="flex">
-        <button class="btn danger" onclick="rotateAdminToken()">↻ Rotacionar token admin</button>
+        <button class="btn danger" onclick="rotateAdminToken(event)">↻ Rotacionar token admin</button>
         <span style="font-size:.72rem;color:var(--muted)">Ação destrutiva — requer re-login após rotação.</span>
+      </div>
+    </div>
+
+    <!-- Painel de segurança — TOTP 2FA -->
+    <div class="panel">
+      <div class="panel-title">🔒 Segurança — 2FA (TOTP)</div>
+      <p style="color:var(--muted);font-size:.83rem;margin-bottom:12px">
+        Ative 2FA opcional para o login admin. Secret em <code style="background:var(--surface2);padding:1px 6px;border-radius:3px">.netguard_totp</code>.
+        Compatível com Google Authenticator, 1Password, Authy.
+      </p>
+      <div class="flex" style="margin-bottom:8px">
+        <span id="totp-status-badge" style="font-size:.72rem;padding:3px 10px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)">carregando…</span>
+        <button class="btn" onclick="setupTotp(event)">↻ Gerar / regerar secret</button>
+        <button class="btn danger" onclick="disableTotp(event)">✕ Desativar 2FA</button>
+      </div>
+      <div style="font-size:.72rem;color:var(--muted)">
+        Ao gerar um novo secret, o anterior é invalidado. Escaneie o QR (ou cole a URI) no app autenticador ANTES de fazer logout.
       </div>
     </div>
 
@@ -393,6 +410,44 @@ hr{border:none;border-top:1px solid var(--border);margin:20px 0}
              style="font-size:.78rem;color:var(--green);user-select:all;min-height:28px;line-height:1.6"></div>
         <div class="flex mt" style="justify-content:flex-end">
           <button class="btn primary" onclick="closeRotateModal()">Entendi, salvei</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ TOTP SETUP MODAL ═══════════════ -->
+  <div id="totp-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1100;align-items:center;justify-content:center;padding:20px">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;width:100%;max-width:560px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:1rem;font-weight:700">✅ 2FA configurado</div>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:2px">Escaneie no app autenticador agora.</div>
+        </div>
+        <button class="btn sm" onclick="closeTotpModal()">✕</button>
+      </div>
+      <div style="padding:16px 20px">
+        <div class="alert error" style="margin-bottom:14px">
+          <strong>⚠️ Aviso:</strong> O secret anterior (se existia) foi invalidado. Sem este código você não conseguirá logar como admin.
+        </div>
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:6px">Secret (base32) — cole manualmente se o QR não aparecer:</div>
+        <div id="totp-secret" class="link-box" onclick="copyText(this.textContent.trim())"
+             style="font-size:.84rem;color:var(--green);user-select:all;letter-spacing:2px"></div>
+
+        <div style="margin-top:14px;font-size:.72rem;color:var(--muted);margin-bottom:6px">URI de provisionamento (otpauth://):</div>
+        <div id="totp-uri" class="link-box" onclick="copyText(this.textContent.trim())"
+             style="font-size:.7rem;color:var(--blue);user-select:all;word-break:break-all"></div>
+
+        <div style="margin-top:14px;font-size:.72rem;color:var(--muted);margin-bottom:6px">Teste (digite o código atual):</div>
+        <div class="flex" style="gap:6px">
+          <input id="totp-test-code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+                 placeholder="000000"
+                 style="flex:1;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:1rem;font-family:monospace;letter-spacing:4px;text-align:center">
+          <button class="btn" onclick="testTotpCode()">Testar</button>
+        </div>
+        <div id="totp-test-result" style="font-size:.72rem;margin-top:6px;min-height:1em"></div>
+
+        <div class="flex mt" style="justify-content:flex-end">
+          <button class="btn primary" onclick="closeTotpModal()">Entendi, ja escaneei</button>
         </div>
       </div>
     </div>
@@ -531,12 +586,39 @@ function toggleForm(id){
   el.style.display = el.style.display==='none'?'block':'none';
 }
 
+// ── CSRF helper ───────────────────────────────────────────────────
+// Lê o cookie csrf_token (seto pelo /admin route) e injeta em mutativos.
+function _csrfToken(){
+  const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
 // ── API helper ────────────────────────────────────────────────────
+// Adiciona X-CSRFToken automaticamente em POST/PUT/PATCH/DELETE.
 async function api(path, opts={}){
   try{
+    const method = (opts.method || 'GET').toUpperCase();
+    if(method !== 'GET' && method !== 'HEAD'){
+      const tok = _csrfToken();
+      if(tok){
+        opts.headers = Object.assign({}, opts.headers || {}, {'X-CSRFToken': tok});
+      }
+    }
     const r = await fetch(BASE+'/api'+path, opts);
     return await r.json();
   }catch{ return null; }
+}
+
+// fetch() direto (sem /api prefix) com CSRF — para endpoints que não vão via api().
+async function fetchCsrf(url, opts={}){
+  const method = (opts.method || 'GET').toUpperCase();
+  if(method !== 'GET' && method !== 'HEAD'){
+    const tok = _csrfToken();
+    if(tok){
+      opts.headers = Object.assign({}, opts.headers || {}, {'X-CSRFToken': tok});
+    }
+  }
+  return fetch(url, opts);
 }
 
 // ── Toast ─────────────────────────────────────────────────────────
@@ -567,8 +649,29 @@ function initDevBanner(){
   }
 }
 
+// ── Anti double-submit helper ───────────────────────────────────
+// Por que: requests duplicadas em endpoints sensiveis (rotacionar token, gerar
+// secret 2FA) podem gerar secrets descartados, audit log ruidoso ou ate race
+// condition no backend. Desabilitar o botao + trocar o label cobre o caso comum
+// (usuario ansioso clicando 2-3 vezes). Usa try/finally pra SEMPRE reabilitar,
+// mesmo se a promise rejeitar.
+async function _withBusyBtn(ev, busyLabel, fn){
+  const btn = ev && ev.currentTarget;
+  let original = null;
+  if(btn){
+    if(btn.disabled) return;           // ja esta rodando — descarta clique
+    original = btn.textContent;
+    btn.disabled = true;
+    if(busyLabel) btn.textContent = busyLabel;
+  }
+  try { return await fn(); }
+  finally {
+    if(btn){ btn.disabled = false; if(busyLabel) btn.textContent = original; }
+  }
+}
+
 // ── Rotação do admin token ──────────────────────────────────────
-async function rotateAdminToken(){
+async function rotateAdminToken(ev){
   if(!confirm(
     'ROTACIONAR ADMIN TOKEN?\n\n' +
     'O token atual será invalidado IMEDIATAMENTE.\n' +
@@ -576,25 +679,142 @@ async function rotateAdminToken(){
     'Continuar?'
   )) return;
 
-  const r = await fetch('/api/admin/rotate-admin-token', {method: 'POST'});
-  let data = null;
-  try { data = await r.json(); } catch { /* ignore */ }
-  if(!r.ok || !data?.ok){
-    toast('Falha ao rotacionar: ' + (data?.error || r.status), 'err');
-    return;
-  }
-  const modal = document.getElementById('rotate-modal');
-  document.getElementById('rotate-new-token').textContent = data.new_token;
-  modal.style.display = 'flex';
+  return _withBusyBtn(ev, 'Rotacionando...', async () => {
+    const r = await fetchCsrf('/api/admin/rotate-admin-token', {method: 'POST'});
+    let data = null;
+    try { data = await r.json(); } catch { /* ignore */ }
+    if(!r.ok || !data?.ok){
+      // Traduz o status HTTP em algo acionavel antes de fallback pro detail
+      const hint = r.status === 429
+        ? 'Muitas requisicoes admin num curto intervalo. Aguarde 1 minuto e tente de novo.'
+        : r.status === 403
+          ? 'Sessao expirada ou sem permissao. Recarregue a pagina e relogue.'
+          : (data?.error || ('HTTP ' + r.status));
+      toast('Nao foi possivel rotacionar o token: ' + hint, 'err');
+      return;
+    }
+    const modal = document.getElementById('rotate-modal');
+    document.getElementById('rotate-new-token').textContent = data.new_token;
+    modal.style.display = 'flex';
+  });
 }
 
 function closeRotateModal(){
   const modal = document.getElementById('rotate-modal');
   modal.style.display = 'none';
-  // Token atual está invalidado — força re-login se em prod
+  // IMPORTANTE: remover o token do DOM ao fechar. Sem isso, quem sentar
+  // nesse computador depois consegue inspecionar o elemento e ler o token
+  // (o display:none esconde visualmente mas nao remove do HTML).
+  const box = document.getElementById('rotate-new-token');
+  if(box) box.textContent = '';
+  // Token atual está invalidado no backend — forca re-login em prod pra
+  // obrigar o admin a colocar o novo token. Em dev, _is_admin_request()
+  // passa direto, entao nao adianta redirecionar.
   if((window.__NETGUARD_AUTH__||{}).enabled){
     setTimeout(()=>{ window.location.href = '/login?admin_required=1'; }, 200);
   }
+}
+
+// ══════════════════════════════════════ TOTP 2FA ═════════════════════
+
+async function refreshTotpStatus(){
+  const badge = document.getElementById('totp-status-badge');
+  if(!badge) return;
+  const r = await api('/admin/totp/status');
+  if(!r){ badge.textContent = '? erro'; return; }
+  if(r.enabled){
+    badge.textContent = '● 2FA ativo';
+    badge.style.color = 'var(--green)';
+    badge.style.borderColor = 'rgba(54,211,153,.4)';
+  } else if(r.configured){
+    badge.textContent = '○ configurado (desativado via env)';
+    badge.style.color = 'var(--orange)';
+    badge.style.borderColor = 'rgba(240,136,62,.4)';
+  } else {
+    badge.textContent = '○ 2FA desativado';
+    badge.style.color = 'var(--muted)';
+    badge.style.borderColor = 'var(--border)';
+  }
+}
+
+async function setupTotp(ev){
+  if(!confirm(
+    'GERAR NOVO SECRET TOTP?\n\n' +
+    'O secret atual (se existe) sera INVALIDADO imediatamente.\n' +
+    'Sem escanear o novo no app autenticador voce nao consegue logar.\n\n' +
+    'Continuar?'
+  )) return;
+
+  return _withBusyBtn(ev, 'Gerando secret...', async () => {
+    const r = await api('/admin/totp/setup', {method:'POST'});
+    if(!r?.ok){
+      toast('Nao conseguimos gerar o secret 2FA. Detalhe: '+(r?.error||'resposta vazia do servidor'), 'err');
+      return;
+    }
+
+    document.getElementById('totp-secret').textContent = r.secret;
+    document.getElementById('totp-uri').textContent    = r.uri;
+    document.getElementById('totp-test-code').value    = '';
+    document.getElementById('totp-test-result').textContent = '';
+    document.getElementById('totp-modal').style.display = 'flex';
+    refreshTotpStatus();
+  });
+}
+
+async function disableTotp(ev){
+  if(!confirm(
+    'DESATIVAR 2FA?\n\n' +
+    'O arquivo .netguard_totp sera removido. Login admin volta a pedir so o token.\n\n' +
+    'Continuar?'
+  )) return;
+  return _withBusyBtn(ev, 'Desativando...', async () => {
+    const r = await api('/admin/totp/disable', {method:'POST'});
+    if(!r?.ok){
+      toast('Nao conseguimos desativar o 2FA. Verifique se o arquivo .netguard_totp e gravavel pelo processo.', 'err');
+      return;
+    }
+    toast(r.was_enabled ? '2FA desativado.' : '2FA ja estava inativo.');
+    refreshTotpStatus();
+  });
+}
+
+async function testTotpCode(){
+  const code = document.getElementById('totp-test-code').value.trim();
+  const result = document.getElementById('totp-test-result');
+  if(!/^\d{6}$/.test(code)){
+    result.textContent = 'O codigo precisa ter exatamente 6 digitos (so numeros).';
+    result.style.color = 'var(--orange)';
+    return;
+  }
+  const r = await api('/admin/totp/verify', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({code})
+  });
+  if(r?.ok){
+    result.textContent = '[OK] Codigo valido — seu app esta sincronizado. Pode fazer logout com seguranca.';
+    result.style.color = 'var(--green)';
+  } else {
+    result.textContent = '[!] Codigo invalido. Confirme que: (1) o app esta ' +
+      'lendo o secret correto; (2) o relogio do celular esta sincronizado com ' +
+      'a internet; (3) voce esta usando o codigo mais recente (troca a cada 30s).';
+    result.style.color = 'var(--red)';
+  }
+}
+
+function closeTotpModal(){
+  document.getElementById('totp-modal').style.display = 'none';
+  // IMPORTANTE: limpar secret/URI/codigo do DOM ao fechar. Display:none nao
+  // remove o conteudo do HTML — quem sentar nesse computador depois abre o
+  // DevTools e le o secret TOTP (equivalente a roubar a chave do 2FA).
+  const s = document.getElementById('totp-secret');
+  const u = document.getElementById('totp-uri');
+  const t = document.getElementById('totp-test-code');
+  if(s) s.textContent = '';
+  if(u) u.textContent = '';
+  if(t) t.value = '';
+  const r = document.getElementById('totp-test-result');
+  if(r){ r.textContent = ''; r.style.color = ''; }
 }
 
 // ══════════════════════════════════════ AUDIT LOG ═══════════════════
@@ -878,6 +1098,9 @@ async function deleteWebhook(id){
 // ══════════════════════════════════════ OVERVIEW ═════════════════
 
 async function loadOverview(){
+  // Atualiza status do TOTP em paralelo (nao bloqueia overview)
+  refreshTotpStatus();
+
   const r = await api('/health');
   if(!r){ document.getElementById('overview-content').innerHTML='<div class="empty-state">Erro ao carregar status.</div>'; return; }
   const subs = r.subsystems || {};

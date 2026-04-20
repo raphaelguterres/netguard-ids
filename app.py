@@ -143,7 +143,9 @@ try:
     from auth import (  # noqa: F401
         auth, AUTH_ENABLED, get_ssl_context, print_startup_info, HTTPS_PORT,
         verify_any_token, _extract_token, require_session, DASHBOARD_AUTH,
-        csrf_protect, rotate_admin_token,
+        csrf_protect, rotate_admin_token, _get_or_set_csrf_cookie,
+        totp_is_enabled, totp_verify, totp_generate_secret, totp_disable,
+        totp_provisioning_uri, totp_get_secret,
     )
     AUTH_MODULE_OK = True
 except Exception as _auth_err:
@@ -151,6 +153,13 @@ except Exception as _auth_err:
     def auth(f): return f
     def require_session(f): return f
     def csrf_protect(f): return f
+    def _get_or_set_csrf_cookie(resp=None): return ""
+    def totp_is_enabled(): return False
+    def totp_verify(code, at_time=None): return False
+    def totp_generate_secret(): return ""
+    def totp_disable(): return False
+    def totp_provisioning_uri(secret_b32=None, account=None, issuer=None): return ""
+    def totp_get_secret(): return ""
     AUTH_ENABLED    = False
     DASHBOARD_AUTH  = False
     AUTH_MODULE_OK  = False
@@ -4923,13 +4932,38 @@ def auth_login():
         audit("LOGIN_FAIL", actor="unknown", ip=ip, detail=f"token_prefix={token[:8]}")
         return jsonify({"valid": False, "error": "Token inválido"}), 401
 
+    # ── TOTP 2FA leve — só para logins admin, só se ativado ─────────
+    # Opt-in: precisa de .netguard_totp E IDS_ADMIN_TOTP != 'false'.
+    # Tenants não passam por TOTP (apenas admin).
+    if result["type"] == "admin" and totp_is_enabled():
+        totp_code = (data.get("totp") or "").strip()
+        if not totp_code:
+            # Token está correto, só falta o código — pede e não conta como falha
+            return jsonify({
+                "valid":          False,
+                "totp_required":  True,
+                "error":          "Código 2FA obrigatório",
+            }), 401
+        if not totp_verify(totp_code):
+            if _bf:
+                _bf.record_failure(ip)
+            logger.warning("TOTP inválido | ip=%s", ip)
+            audit("LOGIN_TOTP_FAIL", actor="admin", ip=ip,
+                  detail=f"code_len={len(totp_code)}")
+            return jsonify({
+                "valid":          False,
+                "totp_required":  True,
+                "error":          "Código 2FA inválido",
+            }), 401
+
     # Login OK — reseta contador de falhas
     if _bf:
         _bf.reset(ip)
 
     tenant_id = (result.get("tenant") or {}).get("tenant_id", "-")
     logger.info("Login OK | ip=%s | type=%s", ip, result["type"])
-    audit("LOGIN_OK", actor=tenant_id, ip=ip, detail=f"type={result['type']}")
+    audit("LOGIN_OK", actor=tenant_id, ip=ip,
+          detail=f"type={result['type']} 2fa={totp_is_enabled() and result['type']=='admin'}")
     resp = make_response(jsonify({
         "valid":  True,
         "type":   result["type"],
@@ -5668,24 +5702,54 @@ def _admin_only(f):
     return wrapped
 
 
-# ── Rate limit específico pra /api/admin/* ────────────────────────
-# Lightweight in-memory limiter (sem dependência externa). Mesmo em dev,
-# protege contra loops acidentais no frontend e abuso se o token vazar.
-_admin_rl_state   = {}          # { ip: [t0, t1, ...] }
+# ─────────────────────────────────────────────────────────────────
+# Rate limit pra /api/admin/* — defesa em profundidade
+# ─────────────────────────────────────────────────────────────────
+#
+# POR QUE EXISTE:
+#   Mesmo com auth + CSRF + 2FA, se um token vazar o atacante pode
+#   enumerar recursos (list tenants, varrer audit log) em ritmo alto
+#   antes que o operador perceba e rotacione. Limitar req/min/IP faz o
+#   ataque ficar observável (ADMIN_RATE_LIMITED aparece no audit log).
+#
+# POR QUE IN-MEMORY E NÃO REDIS:
+#   Deploy do NetGuard é single-process Flask. Adicionar Redis só pra
+#   isso é over-engineering. Quando virar multi-worker (gunicorn -w N),
+#   trocar pra storage externo — cada worker ter seu contador
+#   sobrestima o limite real por Nx.
+#
+# LIMITES (padrão generoso — anti-abuse, não anti-cliente):
+#   - 120 req/min/IP (2/s) cobre uso humano com auto-refresh + drill-downs
+#   - Janela 60s: sliding window via lista de timestamps + poda
+#   - /api/admin/stream isento: SSE long-lived, conta como 1 req e nunca
+#     fecha (incluí-lo derrubaria o refresh em poucos segundos)
+#
+# THREAD SAFETY:
+#   Lock global porque Flask dev server é multi-threaded (threading mode).
+#   Contenção é mínima — a seção crítica é ~10 linhas em memória.
+
+_admin_rl_state   = {}          # { ip: [t0, t1, ...] monotonic timestamps }
 _admin_rl_lock    = threading.Lock()
-_ADMIN_RL_LIMIT   = int(os.environ.get("IDS_ADMIN_RL_LIMIT",  "120"))  # req/min/IP
+_ADMIN_RL_LIMIT   = int(os.environ.get("IDS_ADMIN_RL_LIMIT",  "120"))  # req/janela/IP
 _ADMIN_RL_WINDOW  = int(os.environ.get("IDS_ADMIN_RL_WINDOW", "60"))   # segundos
-# Stream é long-lived (SSE) — não conta pro rate limit.
+# Stream é long-lived (SSE) — se incluir, consumiria o limite em 1 conexão.
 _ADMIN_RL_EXEMPT  = {"/api/admin/stream"}
 
 
 def _admin_rate_check(ip: str) -> bool:
-    """True se pode passar; False se estourou o limite."""
+    """
+    True se a request pode passar, False se estourou o limite.
+    Sliding window: mantém lista de timestamps dentro de _ADMIN_RL_WINDOW,
+    poda o que saiu, verifica tamanho. O(1) amortizado por IP.
+
+    Usa monotonic — time.time() pode voltar atrás se o sistema sincroniza
+    NTP durante a janela e quebra a lógica de poda.
+    """
     now = time.monotonic()
     cutoff = now - _ADMIN_RL_WINDOW
     with _admin_rl_lock:
         hits = _admin_rl_state.setdefault(ip, [])
-        # Poda janela
+        # Poda janela: remove timestamps mais velhos que a janela
         while hits and hits[0] < cutoff:
             hits.pop(0)
         if len(hits) >= _ADMIN_RL_LIMIT:
@@ -5696,6 +5760,15 @@ def _admin_rate_check(ip: str) -> bool:
 
 @app.before_request
 def _enforce_admin_rate_limit():
+    """
+    Hook global que roda ANTES de cada request. Só age em /api/admin/*;
+    outros paths passam direto.
+
+    Quando estoura:
+      - Audit log registra ADMIN_RATE_LIMITED com IP + path
+      - Retorna 429 com Retry-After (cliente educado espera)
+      - Não propaga pra view function (nenhum handler executa)
+    """
     p = request.path or ""
     if not p.startswith("/api/admin/"):
         return None
@@ -5706,6 +5779,7 @@ def _enforce_admin_rate_limit():
         try:
             audit("ADMIN_RATE_LIMITED", ip=ip, detail=f"path={p}")
         except Exception:
+            # Audit falhar não pode causar 500 — swallow e continua o 429
             pass
         resp = jsonify({
             "error":   "Rate limit",
@@ -5745,6 +5819,12 @@ def admin_panel():
     resp = make_response(html, 200)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
     _set_no_cache_headers(resp)
+    # Garante que o cookie csrf_token está presente — admin.html lê ele pra
+    # enviar em X-CSRFToken nos POST/DELETE. Sem isso, todo mutativo 403.
+    try:
+        _get_or_set_csrf_cookie(resp)
+    except Exception:
+        pass
     return resp
 
 
@@ -7502,6 +7582,7 @@ def admin_rotate_tenant_token(tid):
 
 @app.route("/api/admin/rotate-admin-token", methods=["POST"])
 @_admin_only
+@csrf_protect
 def admin_rotate_admin_token_route():
     """
     Rotaciona o token de admin (arquivo .netguard_token).
@@ -7529,19 +7610,122 @@ def admin_rotate_admin_token_route():
     })
 
 
+# ═══════════════════════ TOTP 2FA (admin) ═══════════════════════════
+# Endpoints opt-in. Só fazem sentido quando AUTH_ENABLED=True, mas os
+# handlers funcionam em dev também (o arquivo é criado e TOTP só é
+# exigido no login quando o arquivo existe).
+
+@app.route("/api/admin/totp/status", methods=["GET"])
+@_admin_only
+def admin_totp_status():
+    """Retorna estado do TOTP: ativo ou não."""
+    return jsonify({
+        "enabled": bool(totp_is_enabled()),
+        "configured": bool(totp_get_secret()),
+    })
+
+
+@app.route("/api/admin/totp/setup", methods=["POST"])
+@_admin_only
+@csrf_protect
+def admin_totp_setup():
+    """
+    Gera NOVO secret TOTP e retorna a URI de provisionamento (otpauth://).
+    O admin precisa escanear com Google Authenticator / 1Password / Authy
+    ANTES do próximo login. Sobrescreve secret anterior se existir.
+    """
+    try:
+        secret = totp_generate_secret()
+        uri    = totp_provisioning_uri(secret)
+    except Exception as exc:
+        logger.error("totp_setup falhou: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+
+    audit("ADMIN_TOTP_ENABLED", actor="admin",
+          ip=request.remote_addr or "-",
+          detail=f"secret_len={len(secret)}")
+    resp = jsonify({
+        "ok":     True,
+        "secret": secret,
+        "uri":    uri,
+        "issuer":  os.environ.get("IDS_TOTP_ISSUER", "NetGuard IDS"),
+        "account": os.environ.get("IDS_TOTP_ACCOUNT", "admin"),
+        "warning": "Salve no app autenticador AGORA. Sem este código você "
+                   "não conseguirá logar como admin.",
+    })
+    # Secret TOTP é credencial sensível — um proxy/CDN que cache-asse a resposta
+    # entregaria o secret pra próxima sessão que pedisse o mesmo endpoint. O
+    # header abaixo proíbe QUALQUER camada (browser, proxy, reverse proxy) de
+    # armazenar a resposta. Pragma/Expires cobrem HTTP/1.0 legado.
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
+
+@app.route("/api/admin/totp/disable", methods=["POST"])
+@_admin_only
+@csrf_protect
+def admin_totp_disable():
+    """Remove .netguard_totp. Desativa 2FA imediatamente."""
+    existed = totp_disable()
+    if existed:
+        audit("ADMIN_TOTP_DISABLED", actor="admin",
+              ip=request.remote_addr or "-")
+    return jsonify({"ok": True, "was_enabled": bool(existed)})
+
+
+@app.route("/api/admin/totp/verify", methods=["POST"])
+@_admin_only
+@csrf_protect
+def admin_totp_verify():
+    """
+    Verifica um código TOTP — útil pro admin testar que o Authenticator
+    está configurado antes de fazer logout e precisar de fato.
+    """
+    data = request.get_json(silent=True) or {}
+    code = (data.get("code") or "").strip()
+    ok   = bool(totp_verify(code))
+    return jsonify({"ok": ok, "enabled": bool(totp_is_enabled())})
+
+
 @app.route("/api/admin/audit", methods=["GET"])
 @_admin_only
 def admin_audit_log():
     """
-    Retorna entradas do audit log (netguard_audit.log) como JSON.
-    Parâmetros:
-      - limit  (default 200, máx 1000)
-      - action (filtro case-insensitive, ex: LOGIN_BLOCKED)
-      - since  (ISO datetime — só entradas com ts >= since)
-      - q      (busca textual em actor/detail/ip)
+    Retorna entradas do audit log (netguard_audit.log) em JSON.
+
+    POR QUE UM ENDPOINT E NÃO APENAS O ARQUIVO:
+      - Host do Flask geralmente não é acessível diretamente; expor via HTTP
+        dá ao operador uma forma de auditar sem SSH
+      - Permite filtros server-side (evita shipar megabytes pro browser)
+      - Restringe a @_admin_only — tenant não vê ações de outros
+
+    Parâmetros (todos opcionais):
+      - limit  (default 200, clamp em [1, 1000])
+      - action (filtro exato case-insensitive, ex: LOGIN_BLOCKED)
+      - since  (ISO datetime string — só entradas com ts >= since)
+      - q      (busca textual em actor/ip/detail, case-insensitive)
+
+    Formato de retorno:
+      {"entries": [{ts, action, actor, ip, detail}, ...], "total": N}
+      entries vem ordenado do MAIS RECENTE pro mais antigo (últimos N).
+
+    Tolerância:
+      - Linha não-JSON no arquivo: ignora (log corrompido parcialmente)
+      - event_type ausente: mantém (compat com entradas legadas)
+      - source_ip ou ip: tenta os dois (schema mudou entre versões)
     """
     import json as _json
-    limit         = min(int(request.args.get("limit", 200)), 1000)
+    # Clamp defensivo em [1, 1000]:
+    #   - limit=0 ou negativo quebra o slice [-limit:] (retornava TUDO)
+    #   - int(...) pode lançar ValueError se vier lixo na query string
+    #   - máx 1000 evita que um operador curioso puxe o arquivo inteiro
+    try:
+        raw_limit = int(request.args.get("limit", 200))
+    except (TypeError, ValueError):
+        raw_limit = 200
+    limit         = max(1, min(raw_limit, 1000))
     action_filter = request.args.get("action", "").strip().upper()
     since_filter  = request.args.get("since", "").strip()
     q_filter      = request.args.get("q", "").strip().lower()

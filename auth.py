@@ -270,9 +270,42 @@ def auth(f):
     return decorated
 
 
-# ── Proteção CSRF (double-submit cookie) ─────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# Proteção CSRF — pattern double-submit cookie
+# ─────────────────────────────────────────────────────────────────
+#
+# POR QUE:
+#   A sessão admin autentica via cookie (HttpOnly + Secure). Sem CSRF, um
+#   site malicioso aberto na mesma sessão do browser poderia disparar um
+#   POST pra /api/admin/* — o browser anexaria o cookie automaticamente
+#   e o servidor trataria como ação legítima. CSRF fecha esse vetor.
+#
+# COMO FUNCIONA (double-submit cookie):
+#   1. Servidor gera token aleatório e coloca em cookie csrf_token (NÃO
+#      HttpOnly — JS precisa ler pra mandar no header).
+#   2. Client lê o cookie e anexa no header X-CSRFToken de cada request
+#      mutativa (POST/PUT/PATCH/DELETE).
+#   3. Servidor compara cookie vs header com compare_digest. Se diferem
+#      ou faltam, 403.
+#
+# POR QUE FUNCIONA:
+#   Um site cross-origin malicioso NÃO CONSEGUE ler o cookie csrf_token
+#   (Same-Origin Policy). O navegador manda o cookie automaticamente mas
+#   sem saber o valor ele não consegue preencher o header X-CSRFToken
+#   → compare_digest falha → 403.
+#
+# BYPASS INTENCIONAL:
+#   Clientes que autenticam via header explícito (Authorization / X-API-Token)
+#   não dependem de cookie de sessão — portanto não sofrem CSRF. Pular a
+#   checagem pra esses evita que clientes server-to-server quebrem.
+#
+# SAMESITE=STRICT:
+#   Defesa em profundidade. Mesmo sem o double-submit, o browser não
+#   enviaria o cookie em navegação cross-site. Os dois juntos cobrem
+#   navegadores legados + extensões de browser maliciosas.
 
-# Desative com IDS_CSRF_DISABLED=true (apenas desenvolvimento local)
+# Desative com IDS_CSRF_DISABLED=true APENAS em dev local.
+# Em prod, rodar com isso ligado é perda imediata da proteção.
 _CSRF_ENABLED = os.environ.get("IDS_CSRF_DISABLED", "false").lower() != "true"
 
 _CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -282,6 +315,10 @@ def _get_or_set_csrf_cookie(response=None):
     """
     Retorna o token CSRF do cookie existente ou gera um novo.
     Se `response` for passado, define o cookie nele.
+
+    Idempotente: se o cliente já tem o cookie, reusa. Novo token = nova
+    sessão CSRF (o cliente precisa pegar o valor novo antes do próximo POST).
+    max_age 8h casa com a duração típica de uma sessão operacional.
     """
     from flask import request as _req, make_response  # noqa: F401
     token = _req.cookies.get("csrf_token")
@@ -300,11 +337,20 @@ def _get_or_set_csrf_cookie(response=None):
 def csrf_protect(f):
     """
     Decorador que valida CSRF token em mutações (POST/PUT/PATCH/DELETE).
-    Cliente deve enviar o valor do cookie csrf_token no header X-CSRFToken.
-    Pattern: double-submit cookie.
 
-    Bypass apenas para clientes que autenticam via header explícito
-    (Authorization / X-API-Token), já que esse fluxo não depende de cookie.
+    Contrato do cliente (já implementado em admin.html via helper _csrfToken()):
+      - Ler valor do cookie csrf_token
+      - Enviar no header X-CSRFToken em toda request mutativa
+
+    Bypass para clientes com autenticação explícita via header:
+      - Authorization: Bearer ... / X-API-Token: ...
+      - Rationale: esses fluxos não dependem do cookie de sessão, logo
+        não têm o vetor "cookie anexado automaticamente" que CSRF explora.
+
+    Retornos:
+      - 403 + {"error": "CSRF token ausente"} se cookie OU header faltam
+      - 403 + {"error": "CSRF token inválido"} se valores não conferem
+      - passa pro handler se tudo OK
     """
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -442,3 +488,199 @@ def print_startup_info():
         print(f"  ⚠️  Auth desativada — qualquer pessoa na rede pode acessar")
         print(f"     Para ativar: $env:IDS_AUTH='true'")
     print("─" * 50 + "\n")
+
+
+# ─────────────────────────────────────────────────────────────────
+# TOTP 2FA (RFC 6238) — opt-in, stdlib-only
+# ─────────────────────────────────────────────────────────────────
+#
+# POR QUE EXISTE:
+#   O login admin depende de um único token bearer (.netguard_token). Se o
+#   token vaza (post em log, screenshot, commit acidental), o atacante entra
+#   direto. 2FA TOTP exige um fator adicional que está FORA do repo e FORA
+#   do servidor: o secret fica no celular do operador.
+#
+# POR QUE OPT-IN (e não obrigatório):
+#   Durante dev/demo o operador roda sem TOTP pra iterar rápido. Ativar é
+#   uma ação explícita: /api/admin/totp/setup cria .netguard_totp. Enquanto
+#   o arquivo não existe, o login pede só o bearer token.
+#
+# POR QUE STDLIB-ONLY (sem pyotp):
+#   Manter a superfície de dependências mínima. TOTP = HMAC-SHA1 + unpack
+#   + módulo — 20 linhas. Cada dep a menos é uma CVE a menos pra auditar.
+#
+# ACTIVATION GATE (dupla):
+#   1) Arquivo .netguard_totp existe (secret está configurado)
+#   2) env IDS_ADMIN_TOTP != 'false' (kill switch pra emergência)
+#   Precisa dos dois pra 2FA ser exigido. Remover o arquivo OU setar a env
+#   como 'false' desativa.
+
+TOTP_FILE        = pathlib.Path(__file__).parent / ".netguard_totp"
+TOTP_ISSUER      = os.environ.get("IDS_TOTP_ISSUER", "NetGuard IDS")
+TOTP_ACCOUNT     = os.environ.get("IDS_TOTP_ACCOUNT", "admin")
+# Janela de tolerância — aceita código do período anterior/posterior.
+# Por que ±1: relógios de celulares dessincronizam em segundos; sem janela
+# o usuário vê "código inválido" por 2-3s no fim de cada janela de 30s.
+# Janela muito larga (>2) aumenta brute-force window — 1 é o default da RFC.
+TOTP_WINDOW      = int(os.environ.get("IDS_TOTP_WINDOW", "1"))
+
+def _b32_decode(s: str) -> bytes:
+    """
+    Decodifica base32 tolerante — aceita o formato que os apps mostram
+    (uppercase, com espaços, sem padding). Google Authenticator mostra
+    o secret em grupos tipo 'ABCD EFGH...'; se o usuário colar isso no
+    form de teste o código tem que funcionar.
+    """
+    import base64
+    s = s.strip().replace(" ", "").replace("-", "").upper()
+    pad = (-len(s)) % 8
+    return base64.b32decode(s + "=" * pad, casefold=True)
+
+def _b32_encode(raw: bytes) -> str:
+    """Base32 sem padding — é o formato que o otpauth:// espera."""
+    import base64
+    return base64.b32encode(raw).decode("ascii").rstrip("=")
+
+def totp_is_enabled() -> bool:
+    """
+    True se TOTP está ativo AGORA (deve ser exigido no próximo login admin).
+    Duas condições:
+      1) IDS_ADMIN_TOTP != 'false' (env kill-switch)
+      2) .netguard_totp existe e tem secret mínimo (>=16 chars base32)
+    O check de tamanho protege contra arquivo corrompido/vazio.
+    """
+    if os.environ.get("IDS_ADMIN_TOTP", "auto").lower() == "false":
+        return False
+    return TOTP_FILE.exists() and len(TOTP_FILE.read_text(encoding="utf-8").strip()) >= 16
+
+def totp_get_secret() -> str:
+    """Lê o secret base32 de .netguard_totp. Retorna '' se não existir."""
+    if not TOTP_FILE.exists():
+        return ""
+    return TOTP_FILE.read_text(encoding="utf-8").strip()
+
+def totp_generate_secret() -> str:
+    """
+    Gera NOVO secret TOTP (160 bits = 20 bytes, base32 sem padding) e grava
+    em .netguard_totp. Sobrescreve se já existir. Retorna o secret base32.
+
+    Por que 160 bits: recomendação da RFC 4226 §4 — HMAC-SHA1 usa chaves
+    do tamanho do bloco hash (SHA1 = 160). Menos que isso reduz a entropia
+    efetiva; mais que isso não agrega (a HMAC trunca internamente).
+
+    Chmod 0o600 pra evitar que outros users do host leiam o arquivo. Em
+    Windows o chmod vira no-op e a proteção fica a cargo do ACL da pasta.
+
+    Sobrescrever secret anterior é intencional: chamar setup é equivalente
+    a "regerar" — o admin precisa reescanear o QR no app autenticador
+    ANTES de fazer logout (senão fica trancado fora).
+    """
+    raw = secrets.token_bytes(20)
+    secret_b32 = _b32_encode(raw)
+    TOTP_FILE.write_text(secret_b32, encoding="utf-8")
+    try:
+        TOTP_FILE.chmod(0o600)
+    except (OSError, NotImplementedError):
+        pass
+    logger.warning("TOTP secret gerado e gravado em %s", TOTP_FILE)
+    return secret_b32
+
+def totp_disable() -> bool:
+    """
+    Remove .netguard_totp. Retorna True se existia.
+
+    Caminho de emergência: admin perdeu o celular. Quem tem acesso ao
+    host remove o arquivo e o login volta a aceitar só o token bearer.
+    Alternativa sem acesso a arquivo: setar IDS_ADMIN_TOTP=false.
+    """
+    try:
+        if TOTP_FILE.exists():
+            TOTP_FILE.unlink()
+            logger.warning("TOTP desativado — arquivo %s removido", TOTP_FILE)
+            return True
+    except Exception as exc:
+        logger.error("Falha ao remover %s: %s", TOTP_FILE, exc)
+    return False
+
+def _totp_code_at(secret_b32: str, counter: int) -> str:
+    """
+    Calcula o código TOTP de 6 dígitos pra um counter (RFC 6238).
+
+    Algoritmo (fixo pela RFC — não mexer):
+      1. HMAC-SHA1(secret, counter_big_endian_8bytes)
+      2. Dynamic truncation: offset = último nibble do digest (0..15)
+      3. Pega 4 bytes a partir do offset, mascara bit alto (evita sinal)
+      4. Mod 10^6 pra reduzir a 6 dígitos decimais, pad com zeros
+
+    Mantém SHA1/6-dígitos/30s mesmo sabendo que SHA1 tem colisões —
+    é o default de TODOS os apps autenticadores. Mudar quebra compat.
+    """
+    import hmac, hashlib, struct
+    key = _b32_decode(secret_b32)
+    msg = struct.pack(">Q", counter)
+    digest = hmac.new(key, msg, hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    code_int = ((digest[offset]   & 0x7F) << 24 |
+                (digest[offset+1] & 0xFF) << 16 |
+                (digest[offset+2] & 0xFF) << 8  |
+                (digest[offset+3] & 0xFF)) % 1_000_000
+    return f"{code_int:06d}"
+
+def totp_verify(code: str, at_time: float = None) -> bool:
+    """
+    Verifica código TOTP (6 dígitos) contra o secret em .netguard_totp.
+
+    Proteções:
+      - Fail-closed: sem TOTP habilitado, sempre False. O caller NUNCA
+        deve chamar isso pra decidir "2FA precisa?" — use totp_is_enabled.
+      - compare_digest: comparação de tempo constante, evita timing attack
+        pra distinguir "1º dígito errado" de "6º dígito errado".
+      - Janela ±TOTP_WINDOW: tolera sync drift. NUNCA aumente pra >2 em
+        prod — cada incremento dobra a superfície de brute-force.
+
+    Não implementa replay-prevention (cada código pode ser usado 2x dentro
+    da janela). Pra SOC/IDS o risco é aceitável: o atacante precisaria
+    roubar o código DENTRO de 30-60s. Se esse risco importar, adicionar
+    cache de "last_used_counter" e rejeitar deltas <= ele.
+    """
+    import time as _time
+    if not totp_is_enabled():
+        return False
+    code = (code or "").strip().replace(" ", "")
+    if not code.isdigit() or len(code) != 6:
+        return False
+    secret = totp_get_secret()
+    if not secret:
+        return False
+    ts = at_time if at_time is not None else _time.time()
+    counter_now = int(ts // 30)
+    for delta in range(-TOTP_WINDOW, TOTP_WINDOW + 1):
+        try:
+            expected = _totp_code_at(secret, counter_now + delta)
+        except Exception:
+            return False
+        if secrets.compare_digest(expected, code):
+            return True
+    return False
+
+def totp_provisioning_uri(secret_b32: str = None, account: str = None, issuer: str = None) -> str:
+    """
+    Monta a URI otpauth:// que o admin cola no Google Authenticator / 1Password
+    (ou escaneia como QR code).
+
+    Formato (padrão Google Authenticator Key URI):
+      otpauth://totp/{issuer}:{account}?secret=...&issuer=...&algorithm=SHA1&digits=6&period=30
+
+    Por que passar issuer tanto no label quanto no query param: apps antigos
+    leem do label (colon-separated), apps novos leem do query. Passar nos
+    dois maximiza compat (Authy antigo, Microsoft Authenticator, etc).
+
+    URL-encoda issuer/account pra suportar espaços ("NetGuard IDS" vira
+    "NetGuard%20IDS") — senão o app quebra ou mostra label truncado.
+    """
+    from urllib.parse import quote
+    s = (secret_b32 or totp_get_secret()).replace("=", "")
+    issuer_safe  = quote(issuer  or TOTP_ISSUER,  safe="")
+    account_safe = quote(account or TOTP_ACCOUNT, safe="")
+    label = f"{issuer_safe}:{account_safe}"
+    return f"otpauth://totp/{label}?secret={s}&issuer={issuer_safe}&algorithm=SHA1&digits=6&period=30"
