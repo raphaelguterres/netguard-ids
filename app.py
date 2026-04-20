@@ -6826,12 +6826,10 @@ def host_timeline(host_id):
 # _is_admin_request() e _admin_only estão definidos acima (antes de /admin),
 # pois decoradores rodam no import.
 
-@app.route("/api/admin/overview")
-@_admin_only
-def admin_overview():
+def _build_admin_overview() -> dict:
     """
-    Retorna stats de TODOS os tenants para o painel God View.
-    Apenas acessível com token de admin (IDS_AUTH=true).
+    Helper compartilhado entre /api/admin/overview e o stream SSE.
+    Calcula stats de TODOS os tenants e retorna o payload do God View.
     """
     tenants = repo.list_tenants()
     result  = []
@@ -6877,7 +6875,17 @@ def admin_overview():
 
     # Ordena por risk_score desc para ver os mais críticos primeiro
     result.sort(key=lambda x: x["risk_score"], reverse=True)
-    return jsonify({"tenants": result, "total_tenants": len(result)})
+    return {"tenants": result, "total_tenants": len(result)}
+
+
+@app.route("/api/admin/overview")
+@_admin_only
+def admin_overview():
+    """
+    Retorna stats de TODOS os tenants para o painel God View.
+    Apenas acessível com token de admin (IDS_AUTH=true).
+    """
+    return jsonify(_build_admin_overview())
 
 
 @app.route("/api/admin/tenant/<tenant_id>/feed")
@@ -6895,6 +6903,150 @@ def admin_tenant_feed(tenant_id):
         name = tenant_id
     return jsonify({"tenant_id": tenant_id, "name": name,
                     "events": events, "stats": stats})
+
+
+@app.route("/api/admin/tenant/<tenant_id>/drilldown")
+@_admin_only
+def admin_tenant_drilldown(tenant_id):
+    """
+    Drill-down para a God View: timeline por hora nas últimas 24h,
+    top 5 regras e top 5 IPs de origem.
+    """
+    from datetime import datetime, timedelta, timezone as _tz
+    now = datetime.now(_tz.utc).replace(minute=0, second=0, microsecond=0)
+    since_dt = now - timedelta(hours=23)
+    since_iso = since_dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+    # Busca eventos das últimas 24h (cap em 5000 pra não estourar memória)
+    try:
+        events = repo.query(limit=5000, tenant_id=tenant_id, since=since_iso)
+    except Exception as e:
+        logger.warning("drilldown query falhou: %s", e)
+        events = []
+
+    # Buckets por hora (24 slots)
+    buckets = []
+    for i in range(24):
+        h = since_dt + timedelta(hours=i)
+        buckets.append({
+            "hour":     h.strftime("%Y-%m-%dT%H:00"),
+            "total":    0,
+            "critical": 0,
+            "high":     0,
+            "medium":   0,
+            "low":      0,
+        })
+
+    def _bucket_index(ts_str: str) -> int:
+        """Retorna o índice do bucket (0..23) ou -1 se fora da janela."""
+        try:
+            # Aceita formatos com/sem Z ou microssegundos
+            s = str(ts_str).replace("Z", "").split(".")[0]
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_tz.utc)
+            diff = (dt - since_dt).total_seconds() / 3600.0
+            idx = int(diff)
+            if 0 <= idx < 24:
+                return idx
+        except Exception:
+            pass
+        return -1
+
+    # Top-N counters
+    rule_counts = {}
+    ip_counts   = {}
+    sev_totals  = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+
+    for e in events:
+        ts = e.get("timestamp", "")
+        idx = _bucket_index(ts)
+        if idx >= 0:
+            b = buckets[idx]
+            b["total"] += 1
+            sev_raw = (e.get("severity") or "").upper()
+            if sev_raw == "CRITICAL":
+                b["critical"] += 1; sev_totals["critical"] += 1
+            elif sev_raw == "HIGH":
+                b["high"]     += 1; sev_totals["high"]     += 1
+            elif sev_raw == "MEDIUM":
+                b["medium"]   += 1; sev_totals["medium"]   += 1
+            elif sev_raw == "LOW":
+                b["low"]      += 1; sev_totals["low"]      += 1
+
+        rule = e.get("rule_name") or e.get("rule_id") or "—"
+        rule_counts[rule] = rule_counts.get(rule, 0) + 1
+
+        src = e.get("source") or e.get("source_ip") or ""
+        if src:
+            ip_counts[src] = ip_counts.get(src, 0) + 1
+
+    top_rules = [{"rule": k, "count": v}
+                 for k, v in sorted(rule_counts.items(), key=lambda x: x[1], reverse=True)[:5]]
+    top_ips   = [{"ip": k, "count": v}
+                 for k, v in sorted(ip_counts.items(),   key=lambda x: x[1], reverse=True)[:5]]
+
+    try:
+        t = repo.get_tenant_by_id(tenant_id)
+        name = t.get("name", tenant_id) if t else tenant_id
+    except Exception:
+        name = tenant_id
+
+    return jsonify({
+        "tenant_id": tenant_id,
+        "name":      name,
+        "since":     since_iso,
+        "timeline":  buckets,
+        "top_rules": top_rules,
+        "top_ips":   top_ips,
+        "summary": {
+            "total_24h":    sum(b["total"]    for b in buckets),
+            "critical_24h": sev_totals["critical"],
+            "high_24h":     sev_totals["high"],
+            "medium_24h":   sev_totals["medium"],
+            "low_24h":      sev_totals["low"],
+        },
+    })
+
+
+@app.route("/api/admin/stream")
+@_admin_only
+def admin_stream():
+    """
+    Server-Sent Events stream do God View.
+    Envia um evento 'overview' a cada 15s e 'ping' keep-alive a cada 5s.
+    O cliente é um EventSource no admin.html.
+    """
+    from flask import stream_with_context
+
+    def _gen():
+        # Primeiro payload imediato pra popular a UI sem esperar 15s
+        try:
+            data = _build_admin_overview()
+            yield f"event: overview\ndata: {json.dumps(data, default=str)}\n\n"
+        except Exception as e:
+            logger.warning("SSE initial overview falhou: %s", e)
+
+        last_overview = time.monotonic()
+        # Limite de duração por conexão — EventSource reconecta sozinho
+        deadline = time.monotonic() + 300  # 5 min por socket
+        while time.monotonic() < deadline:
+            # Ciclo curto pra keep-alive + overview a cada 15s
+            time.sleep(5)
+            yield ": keepalive\n\n"  # comentário SSE, não dispara evento
+            if time.monotonic() - last_overview >= 15:
+                try:
+                    data = _build_admin_overview()
+                    yield f"event: overview\ndata: {json.dumps(data, default=str)}\n\n"
+                    last_overview = time.monotonic()
+                except Exception as e:
+                    logger.warning("SSE overview falhou: %s", e)
+
+    resp = Response(stream_with_context(_gen()), mimetype="text/event-stream")
+    resp.headers["Cache-Control"]    = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"    # desliga buffering no nginx
+    resp.headers["Connection"]       = "keep-alive"
+    return resp
 
 
 @app.route("/api/admin/tenant/<tenant_id>/view")
