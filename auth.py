@@ -213,13 +213,15 @@ def auth(f):
       - Browser (Accept: text/html) → redireciona para /login?next=<path>
       - API (Accept: application/json ou outros) → retorna 401 JSON
 
-    Para rotas /api/*, sempre exige um token válido.
-    Em outras rotas protegidas, respeita AUTH_ENABLED.
+    Respeita AUTH_ENABLED globalmente: quando False (dev local single-user),
+    nenhuma rota exige token — inclusive /api/*. Isso é intencional, já que
+    o dev mode é "máquina única, usuário = admin automático".
+
+    Em prod (AUTH_ENABLED=True), todas as rotas protegidas exigem token válido.
     """
     @wraps(f)
     def decorated(*args, **kwargs):
-        requires_auth = request.path.startswith("/api/") or AUTH_ENABLED
-        if not requires_auth:
+        if not AUTH_ENABLED:
             return f(*args, **kwargs)
 
         token = _extract_token()

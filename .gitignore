@@ -40,6 +40,27 @@ venv/
 .coverage
 
 # ========================
+# Caches/temporários de teste
+# (evita poluição como pytest-cache-files-* e tenant-isolation-* no root)
+# ========================
+pytest-cache-files-*/
+tenant-isolation-*/
+.pip-audit-cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+htmlcov/
+
+# ========================
+# Backups e artefatos de agente/IDE
+# ========================
+.godview-fix-commit-msg.txt
+*.bak
+*.orig
+*.rej
+.claude/
+
+# ========================
 # Build / distribuição
 # ========================
 build/

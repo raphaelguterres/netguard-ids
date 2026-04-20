@@ -7114,8 +7114,7 @@ def trial_access(token):
 
 # ── Admin: gestão de trials ───────────────────────────────────────
 @app.route("/api/admin/trials", methods=["GET"])
-@auth
-@require_role("admin")
+@_admin_only
 def admin_trials_list():
     if not TRIAL_AVAILABLE:
         return jsonify({"error": "Trial Engine indisponível"}), 503
@@ -7127,8 +7126,7 @@ def admin_trials_list():
     return jsonify({"trials": trials, "stats": stats})
 
 @app.route("/api/admin/trials", methods=["POST"])
-@auth
-@require_role("admin")
+@_admin_only
 @csrf_protect
 def admin_trials_create():
     if not TRIAL_AVAILABLE:
@@ -7165,8 +7163,7 @@ def admin_trials_create():
         return jsonify({"error": str(e)}), 400
 
 @app.route("/api/admin/trials/<token>/revoke", methods=["POST"])
-@auth
-@require_role("admin")
+@_admin_only
 @csrf_protect
 def admin_trials_revoke(token):
     if not TRIAL_AVAILABLE:
@@ -7175,8 +7172,7 @@ def admin_trials_revoke(token):
     return jsonify({"ok": True})
 
 @app.route("/api/admin/trials/<token>/extend", methods=["POST"])
-@auth
-@require_role("admin")
+@_admin_only
 @csrf_protect
 def admin_trials_extend(token):
     if not TRIAL_AVAILABLE:
@@ -7186,37 +7182,12 @@ def admin_trials_extend(token):
     return jsonify({"ok": True, "trial": trial})
 
 
-# ── Admin Dashboard ───────────────────────────────────────────────
-
-@app.route("/admin")
-@require_session
-@require_role("admin")
-def admin_dashboard():
-    """
-    Painel de administração.
-    Acesso: apenas tenants com role=admin E plano pago (pro/business/enterprise).
-    Usuários free são redirecionados para /pricing mesmo que tenham role=admin.
-    """
-    from flask import render_template, redirect as _redir
-    # Modo local (sem auth) → acesso total ao admin
-    if not AUTH_ENABLED:
-        return render_template("admin_dashboard.html")
-    # Verificação extra de plano pago (dupla barreira além do require_role)
-    token = (
-        request.cookies.get("netguard_token", "")
-        or request.headers.get("X-API-Token", "")
-    )
-    result = verify_any_token(token, repo)
-    if result.get("type") != "admin":                  # admin token do sistema → acesso total
-        tenant = result.get("tenant")
-        if tenant:
-            t    = dict(tenant) if not isinstance(tenant, dict) else tenant
-            plan = t.get("plan", "free")
-            if plan not in ("pro", "business", "enterprise"):
-                logger.warning("Tentativa de acesso ao admin por tenant free | tid=%s",
-                               t.get("tenant_id",""))
-                return _redir("/pricing?upgrade=admin_required")
-    return render_template("admin_dashboard.html")
+# ── Admin Dashboard (legado) ──────────────────────────────────────
+# A rota /admin agora é servida por admin_panel() (God View + Trials +
+# Webhooks + Overview + Demo) em admin.html. A função admin_dashboard
+# abaixo existia no mesmo endpoint /admin e virou código morto — o
+# primeiro @app.route("/admin") registrado é o que o Flask usa.
+# Mantemos templates/admin_dashboard.html caso haja refs externas.
 
 
 @app.route("/api/admin/tenants", methods=["GET"])
