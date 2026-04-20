@@ -143,7 +143,7 @@ try:
     from auth import (  # noqa: F401
         auth, AUTH_ENABLED, get_ssl_context, print_startup_info, HTTPS_PORT,
         verify_any_token, _extract_token, require_session, DASHBOARD_AUTH,
-        csrf_protect,
+        csrf_protect, rotate_admin_token,
     )
     AUTH_MODULE_OK = True
 except Exception as _auth_err:
@@ -158,6 +158,7 @@ except Exception as _auth_err:
     def print_startup_info(): pass
     def verify_any_token(token, repo=None): return {"valid": False, "type": None}
     def _extract_token(): return ""
+    def rotate_admin_token(): raise RuntimeError("auth module indisponível")
     print(f"[WARN] Auth module: {_auth_err}")
 
 # Correlation Engine
@@ -5666,6 +5667,55 @@ def _admin_only(f):
     return wrapped
 
 
+# ── Rate limit específico pra /api/admin/* ────────────────────────
+# Lightweight in-memory limiter (sem dependência externa). Mesmo em dev,
+# protege contra loops acidentais no frontend e abuso se o token vazar.
+_admin_rl_state   = {}          # { ip: [t0, t1, ...] }
+_admin_rl_lock    = threading.Lock()
+_ADMIN_RL_LIMIT   = int(os.environ.get("IDS_ADMIN_RL_LIMIT",  "120"))  # req/min/IP
+_ADMIN_RL_WINDOW  = int(os.environ.get("IDS_ADMIN_RL_WINDOW", "60"))   # segundos
+# Stream é long-lived (SSE) — não conta pro rate limit.
+_ADMIN_RL_EXEMPT  = {"/api/admin/stream"}
+
+
+def _admin_rate_check(ip: str) -> bool:
+    """True se pode passar; False se estourou o limite."""
+    now = time.monotonic()
+    cutoff = now - _ADMIN_RL_WINDOW
+    with _admin_rl_lock:
+        hits = _admin_rl_state.setdefault(ip, [])
+        # Poda janela
+        while hits and hits[0] < cutoff:
+            hits.pop(0)
+        if len(hits) >= _ADMIN_RL_LIMIT:
+            return False
+        hits.append(now)
+        return True
+
+
+@app.before_request
+def _enforce_admin_rate_limit():
+    p = request.path or ""
+    if not p.startswith("/api/admin/"):
+        return None
+    if p in _ADMIN_RL_EXEMPT:
+        return None
+    ip = request.remote_addr or "-"
+    if not _admin_rate_check(ip):
+        try:
+            audit("ADMIN_RATE_LIMITED", ip=ip, detail=f"path={p}")
+        except Exception:
+            pass
+        resp = jsonify({
+            "error":   "Rate limit",
+            "message": "Muitas requisições admin; aguarde alguns segundos.",
+        })
+        resp.status_code = 429
+        resp.headers["Retry-After"] = str(_ADMIN_RL_WINDOW)
+        return resp
+    return None
+
+
 @app.route("/admin")
 @_admin_only
 def admin_panel():
@@ -5674,11 +5724,23 @@ def admin_panel():
     Protegido por @_admin_only (substitui @auth): em dev (IDS_AUTH=false)
     passa direto; em prod exige token de admin. Tenants/sem token → 403 JSON
     ou redirect /login (navegador).
+
+    Injeta window.__NETGUARD_AUTH__ com o estado do modo auth, pra UI
+    exibir o banner "DEV MODE" quando AUTH_ENABLED=False.
     """
     admin_path = pathlib.Path(__file__).parent / "admin.html"
     if not admin_path.exists():
         return "admin.html não encontrado", 404
     html = admin_path.read_text(encoding="utf-8")
+    inject = (
+        "<script>window.__NETGUARD_AUTH__="
+        + json.dumps({
+            "enabled": bool(AUTH_ENABLED),
+            "https":   bool(os.environ.get("IDS_HTTPS","false").lower() == "true"),
+        })
+        + ";</script>"
+    )
+    html = re.sub(r"(<body\b[^>]*>)", rf"\1{inject}", html, count=1, flags=re.IGNORECASE)
     resp = make_response(html, 200)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
     _set_no_cache_headers(resp)
@@ -7089,6 +7151,9 @@ def admin_view_tenant(tenant_id):
     try:
         t = repo.get_tenant_by_id(tenant_id)
         if not t:
+            audit("IMPERSONATE_FAIL", actor="admin",
+                  ip=request.remote_addr or "-",
+                  detail=f"tenant={tenant_id} reason=not_found")
             return "Tenant não encontrado", 404
     except Exception as e:
         return str(e), 500
@@ -7115,6 +7180,9 @@ window.__IMPERSONATE__ = {{
     resp.set_cookie("netguard_impersonate", tenant_id,
                     httponly=True, samesite="Lax",
                     max_age=3600, secure=_HTTPS_ONLY)
+    audit("IMPERSONATE_START", actor="admin",
+          ip=request.remote_addr or "-",
+          detail=f"tenant={tenant_id} name={safe_name[:40]}")
     return resp
 
 
@@ -7123,8 +7191,12 @@ window.__IMPERSONATE__ = {{
 def admin_view_exit():
     """Limpa a impersonação e volta ao dashboard do admin."""
     from flask import redirect as _redir
+    prev = request.cookies.get("netguard_impersonate", "")
     resp = make_response(_redir("/"))
     resp.delete_cookie("netguard_impersonate")
+    audit("IMPERSONATE_EXIT", actor="admin",
+          ip=request.remote_addr or "-",
+          detail=f"tenant={prev}" if prev else "")
     return resp
 
 
@@ -7425,6 +7497,35 @@ def admin_rotate_tenant_token(tid):
         return jsonify({"ok": True, "new_token": new_token})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/admin/rotate-admin-token", methods=["POST"])
+@_admin_only
+def admin_rotate_admin_token_route():
+    """
+    Rotaciona o token de admin (arquivo .netguard_token).
+    O token antigo é invalidado imediatamente. O novo é retornado UMA ÚNICA
+    vez no corpo da resposta — o admin precisa salvar em gerenciador de senha.
+
+    Em dev (IDS_AUTH=false) não há efeito operacional porque _is_admin_request()
+    passa direto, mas o arquivo é rotacionado do mesmo jeito pra evitar que
+    um token antigo vazado volte a funcionar quando o modo auth for ativado.
+    """
+    try:
+        new_token = rotate_admin_token()
+    except Exception as exc:
+        logger.error("rotate_admin_token falhou: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+
+    audit("ADMIN_TOKEN_ROTATED", actor="admin",
+          ip=request.remote_addr or "-",
+          detail=f"new_prefix={new_token[:8]}")
+    return jsonify({
+        "ok":        True,
+        "new_token": new_token,
+        "warning":   "Salve este token AGORA — ele não será mostrado novamente. "
+                     "O token anterior foi invalidado.",
+    })
 
 
 @app.route("/api/admin/audit", methods=["GET"])

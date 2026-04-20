@@ -43,9 +43,29 @@ def get_or_create_token() -> str:
 
     token = secrets.token_urlsafe(32)
     TOKEN_FILE.write_text(token)
-    TOKEN_FILE.chmod(0o600)  # Somente o dono pode ler
+    try:
+        TOKEN_FILE.chmod(0o600)  # Somente o dono pode ler (ignorado no Windows)
+    except (OSError, NotImplementedError):
+        pass
     logger.info("Token gerado e salvo em %s", TOKEN_FILE)
     return token
+
+
+def rotate_admin_token() -> str:
+    """
+    Gera um NOVO admin token, sobrescreve o arquivo .netguard_token e
+    retorna o novo valor. O token antigo é invalidado imediatamente.
+
+    Usado pelo endpoint /api/admin/rotate-admin-token.
+    """
+    new_token = secrets.token_urlsafe(32)
+    TOKEN_FILE.write_text(new_token)
+    try:
+        TOKEN_FILE.chmod(0o600)
+    except (OSError, NotImplementedError):
+        pass
+    logger.warning("Admin token rotacionado — novo token gravado em %s", TOKEN_FILE)
+    return new_token
 
 
 def verify_token(token: str) -> bool:

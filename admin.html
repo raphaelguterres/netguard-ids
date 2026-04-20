@@ -138,6 +138,18 @@ hr{border:none;border-top:1px solid var(--border);margin:20px 0}
 <!-- ── Main ── -->
 <div id="main">
 
+  <!-- ═══════════════ DEV MODE BANNER ═══════════════ -->
+  <div id="dev-banner" style="display:none;background:linear-gradient(90deg,rgba(240,136,62,.15),rgba(240,136,62,.05));border:1px solid rgba(240,136,62,.4);border-left:4px solid var(--orange);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:.82rem;display:flex;align-items:center;gap:10px">
+    <span style="font-size:1.1rem">⚠️</span>
+    <div style="flex:1;min-width:0">
+      <strong style="color:var(--orange)">MODO DEV — autenticação desativada</strong>
+      <span style="color:var(--muted);margin-left:8px">
+        <code style="background:var(--surface2);padding:1px 6px;border-radius:3px">IDS_AUTH=false</code> · qualquer request passa como admin. <strong>Não use em produção.</strong>
+      </span>
+    </div>
+    <span id="dev-banner-https" style="font-size:.7rem;color:var(--muted);white-space:nowrap"></span>
+  </div>
+
   <!-- ═══════════════ GOD VIEW ═══════════════ -->
   <div class="page active" id="page-godview">
     <div class="flex-between" style="margin-bottom:6px">
@@ -343,7 +355,46 @@ hr{border:none;border-top:1px solid var(--border);margin:20px 0}
   <div class="page" id="page-overview">
     <div class="page-title">📊 Overview do Sistema</div>
     <div class="page-sub">Status em tempo real de todos os subsistemas.</div>
+
+    <!-- Painel de segurança — rotação do admin token -->
+    <div class="panel">
+      <div class="panel-title">🔐 Segurança — Admin Token</div>
+      <p style="color:var(--muted);font-size:.83rem;margin-bottom:12px">
+        O token de admin fica em <code style="background:var(--surface2);padding:1px 6px;border-radius:3px">.netguard_token</code>.
+        Rotacione se suspeitar de vazamento ou periodicamente como prática de segurança.
+        O token antigo é invalidado imediatamente e o novo é exibido uma única vez.
+      </p>
+      <div class="flex">
+        <button class="btn danger" onclick="rotateAdminToken()">↻ Rotacionar token admin</button>
+        <span style="font-size:.72rem;color:var(--muted)">Ação destrutiva — requer re-login após rotação.</span>
+      </div>
+    </div>
+
     <div id="overview-content"><div class="empty-state">Carregando…</div></div>
+  </div>
+
+  <!-- ═══════════════ ADMIN TOKEN ROTATE MODAL ═══════════════ -->
+  <div id="rotate-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1100;align-items:center;justify-content:center;padding:20px">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;width:100%;max-width:560px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:1rem;font-weight:700">✅ Novo admin token gerado</div>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:2px">Salve agora — não aparece de novo.</div>
+        </div>
+        <button class="btn sm" onclick="closeRotateModal()">✕</button>
+      </div>
+      <div style="padding:16px 20px">
+        <div class="alert error" style="margin-bottom:14px">
+          <strong>⚠️ Aviso:</strong> O token antigo foi invalidado. Seu login atual vai cair. Copie o novo token e use em <code>.netguard_token</code> / cookie / header.
+        </div>
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:6px">Novo token (clique para copiar):</div>
+        <div id="rotate-new-token" class="link-box" onclick="copyText(this.textContent.trim())"
+             style="font-size:.78rem;color:var(--green);user-select:all;min-height:28px;line-height:1.6"></div>
+        <div class="flex mt" style="justify-content:flex-end">
+          <button class="btn primary" onclick="closeRotateModal()">Entendi, salvei</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ═══════════════ DEMO ═══════════════ -->
@@ -428,6 +479,48 @@ function copyText(txt){
   navigator.clipboard.writeText(txt)
     .then(()=>toast('Link copiado!'))
     .catch(()=>{ prompt('Copie o link:', txt); });
+}
+
+// ── Dev mode banner ─────────────────────────────────────────────
+function initDevBanner(){
+  const cfg = window.__NETGUARD_AUTH__ || {enabled: true, https: false};
+  const banner = document.getElementById('dev-banner');
+  if(!banner) return;
+  if(cfg.enabled === false){
+    banner.style.display = 'flex';
+    const hint = document.getElementById('dev-banner-https');
+    if(hint) hint.textContent = cfg.https ? 'HTTPS: on' : 'HTTPS: off';
+  }
+}
+
+// ── Rotação do admin token ──────────────────────────────────────
+async function rotateAdminToken(){
+  if(!confirm(
+    'ROTACIONAR ADMIN TOKEN?\n\n' +
+    'O token atual será invalidado IMEDIATAMENTE.\n' +
+    'Você precisará re-logar com o novo token.\n\n' +
+    'Continuar?'
+  )) return;
+
+  const r = await fetch('/api/admin/rotate-admin-token', {method: 'POST'});
+  let data = null;
+  try { data = await r.json(); } catch { /* ignore */ }
+  if(!r.ok || !data?.ok){
+    toast('Falha ao rotacionar: ' + (data?.error || r.status), 'err');
+    return;
+  }
+  const modal = document.getElementById('rotate-modal');
+  document.getElementById('rotate-new-token').textContent = data.new_token;
+  modal.style.display = 'flex';
+}
+
+function closeRotateModal(){
+  const modal = document.getElementById('rotate-modal');
+  modal.style.display = 'none';
+  // Token atual está invalidado — força re-login se em prod
+  if((window.__NETGUARD_AUTH__||{}).enabled){
+    setTimeout(()=>{ window.location.href = '/login?admin_required=1'; }, 200);
+  }
 }
 
 // ══════════════════════════════════════ TRIALS ═══════════════════
@@ -1103,6 +1196,7 @@ function gvCheckCriticalTransitions(newTenants){
 
 // ══════════════════════════════════════ INIT ═════════════════════
 
+initDevBanner();
 loadGodView();
 gvStartStream();
 gvUpdateNotifBtn();
