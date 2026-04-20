@@ -5616,11 +5616,21 @@ def demo_access():
 
 
 @app.route("/admin")
+@auth
 def admin_panel():
     """
-    Painel de administração do sistema — gerenciamento de trials, webhooks e visão geral.
-    Acesso direto sem require_session (protegido em produção por IP/VPN ou Basic Auth no proxy).
+    Painel de administração — Trials, Webhooks, Overview, Demo e God View.
+    Protegido por @auth + _admin_only: qualquer tenant autenticado que
+    tente acessar recebe 403. Tokens aceitos: .netguard_token (admin).
     """
+    if not _is_admin_request():
+        logger.warning("/admin negado (não-admin) | ip=%s", request.remote_addr)
+        # Browser → redireciona pra /login com flag; API → 403 JSON
+        if "text/html" in request.headers.get("Accept", ""):
+            return redirect("/login?next=/admin&admin_required=1")
+        return jsonify({"error": "Forbidden",
+                        "message": "Painel admin restrito ao administrador."}), 403
+
     admin_path = pathlib.Path(__file__).parent / "admin.html"
     if not admin_path.exists():
         return "admin.html não encontrado", 404

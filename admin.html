@@ -118,8 +118,11 @@ hr{border:none;border-top:1px solid var(--border);margin:20px 0}
     </div>
   </div>
 
+  <div class="sb-section">Monitoramento</div>
+  <button class="sb-item active" onclick="nav('godview',this)"><span class="icon">🌐</span>God View<span class="sb-badge" id="sb-gv-badge" style="display:none">0</span></button>
+
   <div class="sb-section">Clientes</div>
-  <button class="sb-item active" onclick="nav('trials',this)"><span class="icon">🔗</span>Trials<span class="sb-badge" id="sb-trials-badge">0</span></button>
+  <button class="sb-item" onclick="nav('trials',this)"><span class="icon">🔗</span>Trials<span class="sb-badge" id="sb-trials-badge">0</span></button>
   <button class="sb-item" onclick="nav('webhooks',this)"><span class="icon">🔔</span>Webhooks</button>
 
   <div class="sb-section">Sistema</div>
@@ -135,8 +138,49 @@ hr{border:none;border-top:1px solid var(--border);margin:20px 0}
 <!-- ── Main ── -->
 <div id="main">
 
+  <!-- ═══════════════ GOD VIEW ═══════════════ -->
+  <div class="page active" id="page-godview">
+    <div class="flex-between" style="margin-bottom:6px">
+      <div>
+        <div class="page-title">🌐 God View — Todos os Clientes</div>
+        <div class="page-sub">Monitoramento centralizado de todos os tenants na sua VPS.</div>
+      </div>
+      <div class="flex">
+        <span id="gv-last-refresh" style="font-size:.72rem;color:var(--muted);margin-right:8px;align-self:center"></span>
+        <button class="btn sm" onclick="loadGodView()">↻ Atualizar</button>
+      </div>
+    </div>
+
+    <div class="stat-grid" id="gv-stats"></div>
+
+    <div class="panel" style="padding:0;overflow:hidden">
+      <div style="display:flex;min-height:480px">
+        <!-- Lista de tenants -->
+        <div style="width:340px;min-width:280px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--surface2)">
+          <div style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);display:flex;justify-content:space-between;align-items:center">
+            <span>TENANTS</span>
+            <span id="gv-tenants-count" style="color:var(--text)">—</span>
+          </div>
+          <div id="gv-tenant-list" style="flex:1;overflow-y:auto;padding:6px">
+            <div class="empty-state" style="padding:20px">Carregando…</div>
+          </div>
+        </div>
+        <!-- Feed de eventos do tenant selecionado -->
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+          <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <div class="gv-feed-title" id="gv-feed-title" style="font-size:.88rem;font-weight:600;color:var(--muted)">Selecione um cliente →</div>
+            <div id="gv-feed-actions"></div>
+          </div>
+          <div id="gv-feed" style="flex:1;overflow-y:auto;padding:4px 14px;min-height:400px">
+            <div class="empty-state" style="padding:40px">Nenhum cliente selecionado</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════════ TRIALS ═══════════════ -->
-  <div class="page active" id="page-trials">
+  <div class="page" id="page-trials">
     <div class="flex-between" style="margin-bottom:6px">
       <div>
         <div class="page-title">🔗 Trials de Clientes</div>
@@ -286,6 +330,7 @@ function nav(page, el){
   document.querySelectorAll('.sb-item').forEach(b=>b.classList.remove('active'));
   document.getElementById('page-'+page)?.classList.add('active');
   el?.classList.add('active');
+  if(page==='godview')  loadGodView();
   if(page==='trials')   loadTrials();
   if(page==='webhooks') loadWebhooks();
   if(page==='overview') loadOverview();
@@ -524,9 +569,176 @@ async function resetDemo(){
   else toast('Erro ao resetar','err');
 }
 
+// ══════════════════════════════════════ GOD VIEW ═════════════════
+
+let gvSelected = null;
+let gvTimer    = null;
+
+const GV_RISK_COLOR = {
+  'CRÍTICO':'var(--red)', 'ALTO':'var(--orange)',
+  'MÉDIO':'var(--yellow)','BAIXO':'var(--green)'
+};
+const GV_RISK_BG = {
+  'CRÍTICO':'rgba(248,81,73,.15)', 'ALTO':'rgba(240,136,62,.15)',
+  'MÉDIO':'rgba(210,153,34,.13)',  'BAIXO':'rgba(63,185,80,.1)'
+};
+const GV_SEV_COLOR = {
+  CRITICAL:'var(--red)', HIGH:'var(--orange)', MEDIUM:'var(--yellow)', LOW:'var(--green)',
+  critical:'var(--red)', high:'var(--orange)', medium:'var(--yellow)', low:'var(--green)'
+};
+
+function gvEsc(s){
+  return String(s||'').replace(/[<>&"']/g, c=>(
+    {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]
+  ));
+}
+
+async function loadGodView(){
+  const r = await api('/admin/overview');
+  if(!r){
+    document.getElementById('gv-tenant-list').innerHTML =
+      '<div class="empty-state" style="padding:20px">Erro ao carregar. Token inválido?</div>';
+    return;
+  }
+  const tenants = r.tenants || [];
+  document.getElementById('gv-last-refresh').textContent =
+    'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+  document.getElementById('gv-tenants-count').textContent = tenants.length;
+
+  // Badge na sidebar com tenants críticos
+  const crit = tenants.filter(t=>t.risk_label==='CRÍTICO').length;
+  const badge = document.getElementById('sb-gv-badge');
+  if(badge){
+    if(crit > 0){
+      badge.textContent = crit;
+      badge.style.display = '';
+      badge.style.background = 'var(--red)';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  // KPIs
+  const alto = tenants.filter(t=>t.risk_label==='ALTO').length;
+  const sum24h = tenants.reduce((a,t)=>a+(t.last_24h||0),0);
+  const totalCrit = tenants.reduce((a,t)=>a+(t.critical||0),0);
+  document.getElementById('gv-stats').innerHTML = [
+    ['Clientes ativos',        tenants.length, 'var(--blue)'],
+    ['Tenants críticos',       crit,           'var(--red)'],
+    ['Alto risco',             alto,           'var(--orange)'],
+    ['Eventos críticos (24h)', totalCrit,      'var(--red)'],
+    ['Total eventos (24h)',    sum24h,         'var(--blue)'],
+  ].map(([l,v,c])=>
+    `<div class="stat-card">
+      <div class="val" style="color:${c}">${v}</div>
+      <div class="lbl">${l}</div>
+    </div>`
+  ).join('');
+
+  // Lista de tenants (ordenada por risk_score desc — já vem do backend)
+  const listEl = document.getElementById('gv-tenant-list');
+  if(!tenants.length){
+    listEl.innerHTML = '<div class="empty-state" style="padding:20px">Nenhum tenant cadastrado</div>';
+    return;
+  }
+  listEl.innerHTML = tenants.map(t=>{
+    const name = gvEsc(t.name || t.tenant_id);
+    const tid  = gvEsc(t.tenant_id);
+    const risk = t.risk_label || 'BAIXO';
+    const selected = gvSelected === t.tenant_id;
+    return `
+    <div class="gv-card" data-tid="${tid}" data-name="${name}"
+         onclick="gvSelectTenant(this)"
+         style="cursor:pointer;background:${selected?'var(--surface)':'transparent'};
+                border:1px solid ${selected?'var(--blue)':'transparent'};
+                border-radius:7px;padding:10px 12px;margin-bottom:4px;transition:all .15s">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <span style="font-weight:600;font-size:.84rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px" title="${name}">${name}</span>
+        <span style="font-size:.65rem;padding:2px 8px;border-radius:10px;font-weight:800;letter-spacing:.3px;
+                     background:${GV_RISK_BG[risk]};color:${GV_RISK_COLOR[risk]}">${risk}</span>
+      </div>
+      <div style="display:flex;gap:10px;font-size:.7rem;color:var(--muted)">
+        <span style="color:var(--red)">${t.critical||0} crit</span>
+        <span style="color:var(--orange)">${t.high||0} alto</span>
+        <span>${t.last_24h||0} /24h</span>
+        <span style="margin-left:auto;text-transform:uppercase;font-size:.64rem">${gvEsc(t.plan||'free')}</span>
+      </div>
+      ${t.last_event_threat ? `<div style="font-size:.68rem;color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${gvEsc(t.last_event_threat)}">↳ ${gvEsc(t.last_event_threat)}</div>` : ''}
+      <div style="margin-top:7px">
+        <button class="btn sm" style="font-size:.68rem;padding:3px 9px"
+                onclick="event.stopPropagation();gvOpenTenantDash('${tid}')">↗ Abrir dashboard</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Auto-refresh
+  if(gvTimer) clearInterval(gvTimer);
+  gvTimer = setInterval(loadGodView, 30000);
+}
+
+async function gvSelectTenant(el){
+  const tid  = el.dataset.tid;
+  const name = el.dataset.name;
+  gvSelected = tid;
+
+  document.querySelectorAll('.gv-card').forEach(c=>{
+    c.style.background = 'transparent';
+    c.style.borderColor= 'transparent';
+  });
+  el.style.background = 'var(--surface)';
+  el.style.borderColor= 'var(--blue)';
+
+  document.getElementById('gv-feed-title').innerHTML =
+    `<span style="color:var(--text)">${gvEsc(name)}</span>
+     <span style="font-size:.72rem;color:var(--muted);margin-left:8px;font-weight:400">eventos recentes</span>`;
+  document.getElementById('gv-feed-actions').innerHTML =
+    `<button class="btn sm" onclick="gvOpenTenantDash('${gvEsc(tid)}')">↗ Abrir dashboard completo</button>`;
+  document.getElementById('gv-feed').innerHTML =
+    '<div class="empty-state" style="padding:20px">Carregando…</div>';
+
+  const r = await api('/admin/tenant/' + encodeURIComponent(tid) + '/feed?limit=80');
+  if(!r) return;
+  const events = r.events || [];
+  const feedEl = document.getElementById('gv-feed');
+  if(!events.length){
+    feedEl.innerHTML = '<div class="empty-state" style="padding:20px">Nenhum evento registrado</div>';
+    return;
+  }
+  feedEl.innerHTML = events.map(e=>{
+    const sev = (e.severity||'').toUpperCase();
+    const col = GV_SEV_COLOR[e.severity] || 'var(--muted)';
+    const threat = gvEsc(e.rule_name || (e.raw||'').slice(0,100) || '—');
+    const ts = String(e.timestamp||'').replace('T',' ').replace('Z','').slice(0,16);
+    const meta = (e.source || e.host_id)
+      ? `<div style="font-size:.68rem;color:var(--muted);margin-top:2px">IP: ${gvEsc(e.source||'—')} | Host: ${gvEsc(e.host_id||'—')}</div>`
+      : '';
+    return `
+    <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 2px;border-bottom:1px solid var(--border)">
+      <span style="width:8px;height:8px;border-radius:50%;background:${col};margin-top:6px;flex-shrink:0"></span>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:.7rem;font-weight:700;letter-spacing:.3px;color:${col}">${sev}</span>
+          <span style="font-size:.8rem;color:var(--text);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${threat}</span>
+          <span style="font-size:.68rem;color:var(--muted);white-space:nowrap">${gvEsc(ts)}</span>
+        </div>
+        ${meta}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function gvOpenTenantDash(tid){
+  const r = await api('/admin/tenant/' + encodeURIComponent(tid) + '/view');
+  if(r && r.view_url){
+    window.open(r.view_url, '_blank');
+  } else {
+    toast('Erro ao abrir dashboard do cliente','err');
+  }
+}
+
 // ══════════════════════════════════════ INIT ═════════════════════
 
-loadTrials();
+loadGodView();
 </script>
 </body>
 </html>
