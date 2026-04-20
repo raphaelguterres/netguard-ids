@@ -127,6 +127,7 @@ hr{border:none;border-top:1px solid var(--border);margin:20px 0}
 
   <div class="sb-section">Sistema</div>
   <button class="sb-item" onclick="nav('overview',this)"><span class="icon">📊</span>Overview</button>
+  <button class="sb-item" onclick="nav('audit',this)"><span class="icon">📋</span>Audit Log</button>
   <button class="sb-item" onclick="nav('demo',this)"><span class="icon">⚡</span>Demo</button>
 
   <div class="sb-footer">
@@ -397,6 +398,78 @@ hr{border:none;border-top:1px solid var(--border);margin:20px 0}
     </div>
   </div>
 
+  <!-- ═══════════════ AUDIT LOG ═══════════════ -->
+  <div class="page" id="page-audit">
+    <div class="flex-between" style="margin-bottom:6px">
+      <div>
+        <div class="page-title">📋 Audit Log</div>
+        <div class="page-sub">Ações administrativas, login, impersonação e rotações de token.</div>
+      </div>
+      <div class="flex">
+        <span id="audit-count" style="font-size:.72rem;color:var(--muted);margin-right:8px;align-self:center"></span>
+        <button class="btn sm" onclick="loadAudit()">↻ Atualizar</button>
+      </div>
+    </div>
+
+    <!-- Filtros -->
+    <div class="panel" style="padding:12px 14px;margin-bottom:12px">
+      <div class="flex" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div style="flex:1;min-width:180px">
+          <label style="display:block;font-size:.7rem;color:var(--muted);margin-bottom:4px">Buscar (actor / IP / detalhe)</label>
+          <input id="audit-q" type="text" placeholder="Ex: 192.168, admin, impersonate…"
+                 style="width:100%;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.84rem"
+                 oninput="auditScheduleApply()">
+        </div>
+        <div style="min-width:180px">
+          <label style="display:block;font-size:.7rem;color:var(--muted);margin-bottom:4px">Ação</label>
+          <select id="audit-action"
+                  style="width:100%;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.84rem"
+                  onchange="auditScheduleApply()">
+            <option value="">Todas</option>
+          </select>
+        </div>
+        <div style="min-width:180px">
+          <label style="display:block;font-size:.7rem;color:var(--muted);margin-bottom:4px">Desde</label>
+          <input id="audit-since" type="datetime-local"
+                 style="width:100%;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.84rem"
+                 onchange="auditScheduleApply()">
+        </div>
+        <div style="min-width:90px">
+          <label style="display:block;font-size:.7rem;color:var(--muted);margin-bottom:4px">Limite</label>
+          <select id="audit-limit"
+                  style="width:100%;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.84rem"
+                  onchange="loadAudit()">
+            <option value="100">100</option>
+            <option value="200" selected>200</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+          </select>
+        </div>
+        <button class="btn sm" onclick="auditClearFilters()">Limpar</button>
+      </div>
+    </div>
+
+    <!-- Tabela -->
+    <div class="panel" style="padding:0">
+      <div style="max-height:calc(100vh - 340px);overflow:auto">
+        <table class="tbl" id="audit-table" style="margin:0">
+          <thead style="position:sticky;top:0;background:var(--surface);z-index:2">
+            <tr>
+              <th style="width:170px">Timestamp (UTC)</th>
+              <th style="width:180px">Ação</th>
+              <th style="width:140px">Actor</th>
+              <th style="width:120px">IP</th>
+              <th>Detalhe</th>
+            </tr>
+          </thead>
+          <tbody id="audit-body">
+            <tr><td colspan="5" class="empty-state">Carregando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════════ DEMO ═══════════════ -->
   <div class="page" id="page-demo">
     <div class="page-title">⚡ Demo Público</div>
@@ -448,6 +521,7 @@ function nav(page, el){
   if(page==='trials')   loadTrials();
   if(page==='webhooks') loadWebhooks();
   if(page==='overview') loadOverview();
+  if(page==='audit')    loadAudit();
   if(page==='demo')     initDemo();
 }
 
@@ -521,6 +595,119 @@ function closeRotateModal(){
   if((window.__NETGUARD_AUTH__||{}).enabled){
     setTimeout(()=>{ window.location.href = '/login?admin_required=1'; }, 200);
   }
+}
+
+// ══════════════════════════════════════ AUDIT LOG ═══════════════════
+// Cache das entradas da última request para filtrar client-side (search / since)
+let _auditEntries = [];
+let _auditApplyTimer = null;
+
+// Classifica ações por cor/severidade. Ordenado por prefixo para manter enxuto.
+function auditActionColor(action){
+  const a = (action||'').toUpperCase();
+  // Vermelho — falhas de segurança
+  if(a==='LOGIN_BLOCKED' || a==='LOGIN_FAIL' || a==='ADMIN_RATE_LIMITED' ||
+     a==='IMPERSONATE_FAIL' || a.endsWith('_FAIL') || a.endsWith('_BLOCKED')){
+    return 'var(--red)';
+  }
+  // Laranja — ações sensíveis (impersonate, rotação, delete)
+  if(a.startsWith('IMPERSONATE_') || a==='ADMIN_TOKEN_ROTATED' ||
+     a==='TOKEN_ROTATED' || a==='TENANT_DELETED'){
+    return 'var(--orange)';
+  }
+  // Verde — sucesso rotineiro
+  if(a==='LOGIN_OK' || a==='TENANT_CREATED' || a.endsWith('_OK')){
+    return 'var(--green)';
+  }
+  return 'var(--muted)';
+}
+
+function auditFmtTs(ts){
+  if(!ts) return '—';
+  // Mostra só o dia+hora sem "T" e sem fração
+  return ts.replace('T',' ').replace('Z','').replace(/\.\d+/,'');
+}
+
+function auditEscape(s){
+  return String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+async function loadAudit(){
+  const body = document.getElementById('audit-body');
+  if(body) body.innerHTML = '<tr><td colspan="5" class="empty-state">Carregando…</td></tr>';
+
+  const limit = document.getElementById('audit-limit').value || '200';
+  const r = await api('/admin/audit?limit='+encodeURIComponent(limit));
+  if(!r){
+    body.innerHTML = '<tr><td colspan="5" class="empty-state">Erro ao carregar audit log.</td></tr>';
+    return;
+  }
+  _auditEntries = r.entries || [];
+
+  // Popula dropdown de ações únicas (preserva seleção atual)
+  const sel   = document.getElementById('audit-action');
+  const cur   = sel.value;
+  const uniq  = Array.from(new Set(_auditEntries.map(e=>e.action).filter(Boolean))).sort();
+  sel.innerHTML = '<option value="">Todas</option>' +
+    uniq.map(a=>`<option value="${auditEscape(a)}">${auditEscape(a)}</option>`).join('');
+  if(uniq.includes(cur)) sel.value = cur;
+
+  auditApplyFilters();
+}
+
+function auditScheduleApply(){
+  // Debounce 180ms pra busca enquanto digita
+  clearTimeout(_auditApplyTimer);
+  _auditApplyTimer = setTimeout(auditApplyFilters, 180);
+}
+
+function auditApplyFilters(){
+  const q      = (document.getElementById('audit-q').value || '').trim().toLowerCase();
+  const action = (document.getElementById('audit-action').value || '').trim();
+  const since  = (document.getElementById('audit-since').value || '').trim();
+
+  // datetime-local → "YYYY-MM-DDTHH:MM" (sem Z) — audit ts tem "Z". Comparação lexicográfica
+  // funciona porque ambos usam o mesmo prefixo "YYYY-MM-DDTHH:MM:SS".
+  const sinceCmp = since ? since : '';
+
+  const filtered = _auditEntries.filter(e=>{
+    if(action && e.action !== action) return false;
+    if(sinceCmp && (e.ts || '') < sinceCmp) return false;
+    if(q){
+      const hay = `${e.actor||''} ${e.ip||''} ${e.detail||''} ${e.action||''}`.toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const body  = document.getElementById('audit-body');
+  const count = document.getElementById('audit-count');
+  count.textContent = filtered.length + ' de ' + _auditEntries.length + ' entradas';
+
+  if(!filtered.length){
+    body.innerHTML = '<tr><td colspan="5" class="empty-state">Nenhum evento encontrado com os filtros atuais.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = filtered.map(e=>{
+    const color = auditActionColor(e.action);
+    return `<tr>
+      <td style="color:var(--muted);font-size:.72rem;font-family:monospace">${auditEscape(auditFmtTs(e.ts))}</td>
+      <td><span style="color:${color};font-weight:600;font-size:.78rem">${auditEscape(e.action||'—')}</span></td>
+      <td style="font-family:monospace;font-size:.75rem">${auditEscape(e.actor||'—')}</td>
+      <td style="font-family:monospace;font-size:.75rem;color:var(--muted)">${auditEscape(e.ip||'—')}</td>
+      <td style="font-size:.78rem;color:var(--muted);word-break:break-word">${auditEscape(e.detail||'')}</td>
+    </tr>`;
+  }).join('');
+}
+
+function auditClearFilters(){
+  document.getElementById('audit-q').value = '';
+  document.getElementById('audit-action').value = '';
+  document.getElementById('audit-since').value = '';
+  auditApplyFilters();
 }
 
 // ══════════════════════════════════════ TRIALS ═══════════════════

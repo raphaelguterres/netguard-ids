@@ -309,7 +309,8 @@ class JSONFormatter(logging.Formatter):
 
         # Campos extras passados via logger.xxx(msg, extra={...})
         for key in ("event_type", "source_ip", "severity", "threat",
-                    "duration_ms", "status_code", "endpoint"):
+                    "duration_ms", "status_code", "endpoint",
+                    "actor", "detail"):
             val = r.__dict__.get(key)
             if val is not None:
                 record[key] = val
@@ -7529,16 +7530,21 @@ def admin_rotate_admin_token_route():
 
 
 @app.route("/api/admin/audit", methods=["GET"])
-@auth
-@require_role("admin")
+@_admin_only
 def admin_audit_log():
     """
     Retorna entradas do audit log (netguard_audit.log) como JSON.
-    Parâmetros: limit (default 200), action (filtro), since (ISO datetime)
+    Parâmetros:
+      - limit  (default 200, máx 1000)
+      - action (filtro case-insensitive, ex: LOGIN_BLOCKED)
+      - since  (ISO datetime — só entradas com ts >= since)
+      - q      (busca textual em actor/detail/ip)
     """
     import json as _json
-    limit  = min(int(request.args.get("limit", 200)), 1000)
+    limit         = min(int(request.args.get("limit", 200)), 1000)
     action_filter = request.args.get("action", "").strip().upper()
+    since_filter  = request.args.get("since", "").strip()
+    q_filter      = request.args.get("q", "").strip().lower()
 
     entries = []
     audit_path = os.environ.get("IDS_AUDIT_LOG", "netguard_audit.log")
@@ -7551,17 +7557,35 @@ def admin_audit_log():
                         continue
                     try:
                         obj = _json.loads(line)
-                        if action_filter and obj.get("msg","").upper() != action_filter:
-                            continue
-                        entries.append({
-                            "ts":     obj.get("ts",""),
-                            "action": obj.get("msg",""),
-                            "actor":  obj.get("actor","—"),
-                            "ip":     obj.get("ip","—"),
-                            "detail": obj.get("detail",""),
-                        })
                     except _json.JSONDecodeError:
-                        pass
+                        continue
+
+                    # Só linhas de audit
+                    if obj.get("event_type") and obj.get("event_type") != "audit":
+                        continue
+
+                    action_val = obj.get("msg", "")
+                    ts_val     = obj.get("ts", "")
+                    actor_val  = obj.get("actor", "—")
+                    ip_val     = obj.get("source_ip") or obj.get("ip") or "—"
+                    detail_val = obj.get("detail", "")
+
+                    if action_filter and action_val.upper() != action_filter:
+                        continue
+                    if since_filter and ts_val < since_filter:
+                        continue
+                    if q_filter:
+                        hay = f"{actor_val} {ip_val} {detail_val}".lower()
+                        if q_filter not in hay:
+                            continue
+
+                    entries.append({
+                        "ts":     ts_val,
+                        "action": action_val,
+                        "actor":  actor_val,
+                        "ip":     ip_val,
+                        "detail": detail_val,
+                    })
         # Retorna as mais recentes primeiro
         entries = list(reversed(entries[-limit:]))
     except Exception as exc:
@@ -7572,8 +7596,7 @@ def admin_audit_log():
 
 
 @app.route("/api/admin/security-stats", methods=["GET"])
-@auth
-@require_role("admin")
+@_admin_only
 def admin_security_stats():
     """
     Stats de segurança: tentativas bloqueadas hoje, MRR estimado.
