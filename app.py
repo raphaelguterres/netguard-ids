@@ -5615,22 +5615,66 @@ def demo_access():
     return resp
 
 
+# ═══════════════════════════════════════════ ADMIN GOD VIEW ════════
+# Definido antes da rota /admin porque decoradores rodam no import.
+
+def _is_admin_request() -> bool:
+    """
+    True somente se o token da requisição é o do admin (.netguard_token).
+    Quando AUTH_ENABLED=False (dev local single-user), trata como admin também.
+    """
+    if not AUTH_ENABLED:
+        return True
+    try:
+        token = _extract_token()
+        if not token:
+            return False
+        result = verify_any_token(token, repo)
+        return result.get("valid") and result.get("type") == "admin"
+    except Exception:
+        return False
+
+
+def _admin_only(f):
+    """
+    Decorator autossuficiente para endpoints da God View.
+
+    Comportamento:
+      - Dev mode (AUTH_ENABLED=False) → passa direto (single-user local).
+      - Prod com token admin válido       → passa direto.
+      - Prod com token tenant ou sem token → 403 JSON (ou redirect /login
+        se a requisição parecer vir de um browser — Accept: text/html).
+
+    IMPORTANTE: NÃO use junto com @auth. @auth sempre exige token para /api/*,
+    o que quebra o modo dev (IDS_AUTH=false). _admin_only faz o papel dos dois
+    (autentica e autoriza) de forma consistente.
+    """
+    @functools.wraps(f)
+    def wrapped(*a, **kw):
+        if _is_admin_request():
+            return f(*a, **kw)
+        logger.warning("Admin-only negado | ip=%s | path=%s",
+                       request.remote_addr, request.path)
+        # Browser → manda pro login com flag amigável
+        if "text/html" in request.headers.get("Accept", ""):
+            next_url = request.path
+            if request.query_string:
+                next_url += "?" + request.query_string.decode()
+            return redirect(f"/login?next={next_url}&admin_required=1")
+        return jsonify({"error": "Forbidden",
+                        "message": "Endpoint restrito ao administrador."}), 403
+    return wrapped
+
+
 @app.route("/admin")
-@auth
+@_admin_only
 def admin_panel():
     """
     Painel de administração — Trials, Webhooks, Overview, Demo e God View.
-    Protegido por @auth + _admin_only: qualquer tenant autenticado que
-    tente acessar recebe 403. Tokens aceitos: .netguard_token (admin).
+    Protegido por @_admin_only (substitui @auth): em dev (IDS_AUTH=false)
+    passa direto; em prod exige token de admin. Tenants/sem token → 403 JSON
+    ou redirect /login (navegador).
     """
-    if not _is_admin_request():
-        logger.warning("/admin negado (não-admin) | ip=%s", request.remote_addr)
-        # Browser → redireciona pra /login com flag; API → 403 JSON
-        if "text/html" in request.headers.get("Accept", ""):
-            return redirect("/login?next=/admin&admin_required=1")
-        return jsonify({"error": "Forbidden",
-                        "message": "Painel admin restrito ao administrador."}), 403
-
     admin_path = pathlib.Path(__file__).parent / "admin.html"
     if not admin_path.exists():
         return "admin.html não encontrado", 404
@@ -6778,40 +6822,11 @@ def host_timeline(host_id):
         return jsonify({"error": str(exc)}), 500
 
 
-# ═══════════════════════════════════════════ ADMIN GOD VIEW ════════
-
-def _is_admin_request() -> bool:
-    """
-    True somente se o token da requisição é o do admin (.netguard_token).
-    Quando AUTH_ENABLED=False (dev local single-user), trata como admin também.
-    """
-    if not AUTH_ENABLED:
-        return True
-    try:
-        token = _extract_token()
-        if not token:
-            return False
-        result = verify_any_token(token, repo)
-        return result.get("valid") and result.get("type") == "admin"
-    except Exception:
-        return False
-
-
-def _admin_only(f):
-    """Decorator: 403 se o requester não for admin. Usar DEPOIS de @auth."""
-    @functools.wraps(f)
-    def wrapped(*a, **kw):
-        if not _is_admin_request():
-            logger.warning("Admin-only negado | ip=%s | path=%s",
-                           request.remote_addr, request.path)
-            return jsonify({"error": "Forbidden",
-                            "message": "Endpoint restrito ao administrador."}), 403
-        return f(*a, **kw)
-    return wrapped
-
+# ═══════════════════════════════════════════ ADMIN GOD VIEW (rotas) ═
+# _is_admin_request() e _admin_only estão definidos acima (antes de /admin),
+# pois decoradores rodam no import.
 
 @app.route("/api/admin/overview")
-@auth
 @_admin_only
 def admin_overview():
     """
@@ -6866,7 +6881,6 @@ def admin_overview():
 
 
 @app.route("/api/admin/tenant/<tenant_id>/feed")
-@auth
 @_admin_only
 def admin_tenant_feed(tenant_id):
     """Feed de eventos recentes de um tenant específico."""
@@ -6884,7 +6898,6 @@ def admin_tenant_feed(tenant_id):
 
 
 @app.route("/api/admin/tenant/<tenant_id>/view")
-@auth
 @_admin_only
 def admin_tenant_view(tenant_id):
     """
@@ -6909,7 +6922,6 @@ def admin_tenant_view(tenant_id):
 
 
 @app.route("/admin/view/<tenant_id>")
-@auth
 @_admin_only
 def admin_view_tenant(tenant_id):
     """
@@ -6955,7 +6967,6 @@ window.__IMPERSONATE__ = {{
 
 
 @app.route("/admin/view/exit")
-@auth
 @_admin_only
 def admin_view_exit():
     """Limpa a impersonação e volta ao dashboard do admin."""
