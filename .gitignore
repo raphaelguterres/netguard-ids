@@ -94,3 +94,9 @@ desktop.ini
 !storage/
 !storage/**
 !billing.py
+
+# caches/artefatos reintroduzidos por !storage/**
+storage/__pycache__/
+.commit-csrf-totp.ps1
+.csrf-totp-commit-msg.txt
+pytest-totp-basetemp/
