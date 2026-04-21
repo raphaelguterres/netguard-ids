@@ -8,6 +8,7 @@ import logging
 import secrets
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -37,11 +38,19 @@ class TrialEngine:
         self._lock   = threading.Lock()
         self._init_db()
 
+    @contextmanager
     def _db(self):
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        conn.execute("PRAGMA journal_mode=WAL").close()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_db(self):
         with self._db() as c:

@@ -7,14 +7,12 @@ from __future__ import annotations  # noqa: F401
 
 import json
 import logging
-import os
 import platform
 import re
 import sqlite3
 import subprocess
 import threading
 import time
-from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Callable, Optional
 

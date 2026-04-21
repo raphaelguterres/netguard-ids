@@ -37,7 +37,11 @@ os.environ.setdefault("HTTPS_ONLY",           "false")
 os.environ.setdefault("SECRET_KEY",           "integration-test-secret")
 
 _APP_OK = False
+app_module = None
+auth_module = None
 try:
+    import app as app_module
+    import auth as auth_module
     from app import app, repo
     app.config["TESTING"] = True
     app.config["WTF_CSRF_ENABLED"] = False
@@ -57,10 +61,21 @@ def skip_if_no_app(cls):
 # ══════════════════════════════════════════════════════════════════
 
 class BaseIntegration(unittest.TestCase):
+    FORCE_REAL_AUTH = False
+
     @classmethod
     def setUpClass(cls):
         if not _APP_OK:
             return
+        cls._orig_auth_enabled = getattr(auth_module, "AUTH_ENABLED", None)
+        cls._orig_dashboard_auth = getattr(auth_module, "DASHBOARD_AUTH", None)
+        cls._orig_app_auth_enabled = getattr(app_module, "AUTH_ENABLED", None)
+        cls._orig_app_dashboard_auth = getattr(app_module, "DASHBOARD_AUTH", None)
+        if cls.FORCE_REAL_AUTH:
+            auth_module.AUTH_ENABLED = True
+            auth_module.DASHBOARD_AUTH = True
+            app_module.AUTH_ENABLED = True
+            app_module.DASHBOARD_AUTH = True
         cls.client = app.test_client()
         cls.ctx    = app.app_context()
         cls.ctx.push()
@@ -73,6 +88,14 @@ class BaseIntegration(unittest.TestCase):
             cls.ctx.pop()
         except Exception:
             pass
+        if cls._orig_auth_enabled is not None:
+            auth_module.AUTH_ENABLED = cls._orig_auth_enabled
+        if cls._orig_dashboard_auth is not None:
+            auth_module.DASHBOARD_AUTH = cls._orig_dashboard_auth
+        if cls._orig_app_auth_enabled is not None:
+            app_module.AUTH_ENABLED = cls._orig_app_auth_enabled
+        if cls._orig_app_dashboard_auth is not None:
+            app_module.DASHBOARD_AUTH = cls._orig_app_dashboard_auth
 
     def post_json(self, url, data, **kw):
         return self.client.post(url, data=json.dumps(data),
@@ -328,6 +351,7 @@ class TestAuthFlow(BaseIntegration):
 
 @skip_if_no_app
 class TestProtectedRoutePolicies(BaseIntegration):
+    FORCE_REAL_AUTH = True
 
     @classmethod
     def setUpClass(cls):
@@ -440,6 +464,7 @@ class TestHealthFlow(BaseIntegration):
 
 @skip_if_no_app
 class TestDetectionFlow(BaseIntegration):
+    FORCE_REAL_AUTH = True
 
     @classmethod
     def setUpClass(cls):

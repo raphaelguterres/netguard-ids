@@ -1,7 +1,6 @@
 """
 Tests for custom_rules.py
 """
-import pytest
 from custom_rules import evaluate_rule, _extract_field, _eval_condition
 
 

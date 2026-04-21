@@ -18,7 +18,6 @@ import importlib
 import os
 import pathlib
 import sys
-import tempfile
 import time
 
 import pytest

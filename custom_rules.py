@@ -120,13 +120,16 @@ def _extract_field(event: dict, field: str) -> Any:
 def _eval_condition(event: dict, condition: dict) -> bool:
     """Avalia uma condição contra um evento. Retorna True se matched."""
     field = condition.get("field", "")
-    op    = condition.get("op", "eq")
+    op    = condition.get("operator", condition.get("op", "eq"))
     value = condition.get("value")
 
     actual = _extract_field(event, field)
 
     if op == "exists":
-        return actual is not None and actual != ""
+        exists = actual is not None and actual != ""
+        if isinstance(value, bool):
+            return exists is value
+        return exists
 
     if actual is None:
         return False
@@ -185,6 +188,9 @@ def evaluate_rule(rule: dict, event: dict) -> bool:
     Avalia uma regra customizada contra um evento.
     Retorna True se o evento satisfaz as condições da regra.
     """
+    if not rule.get("enabled", True):
+        return False
+
     conditions = rule.get("conditions") or []
     if not conditions:
         return False

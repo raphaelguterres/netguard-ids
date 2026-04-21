@@ -1,24 +1,10 @@
 """
-NetGuard IDS — IOC Manager
-Gerencia Indicadores de Comprometimento (IOCs) customizados por tenant.
-
-Suporta:
-  - IP addresses (IPv4 / IPv6)
-  - Domains / hostnames
-  - File hashes (MD5, SHA1, SHA256)
-  - URLs
-
-Uso:
-    from ioc_manager import IOCManager, get_ioc_manager
-    mgr = get_ioc_manager(repo)
-    hit = mgr.check_ip("1.2.3.4", tenant_id="abc")
-    # hit = {"type": "ip", "value": "1.2.3.4", "threat": "C2 Server", ...}
+NetGuard IDS - IOC Manager
+Manages custom indicators of compromise per tenant.
 """
-
-from __future__ import annotations  # noqa: F401
+from __future__ import annotations
 
 import csv
-import hashlib  # noqa: F401
 import io
 import ipaddress
 import json
@@ -26,71 +12,32 @@ import logging
 import re
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger("ids.ioc")
 
-# ── Tipos suportados ──────────────────────────────────────────────────────────
 IOC_TYPES = {"ip", "domain", "hash", "url"}
 
-# ── Regex helpers ─────────────────────────────────────────────────────────────
-_RE_IPV4    = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
-_RE_HASH_MD5    = re.compile(r"^[a-fA-F0-9]{32}$")
-_RE_HASH_SHA1   = re.compile(r"^[a-fA-F0-9]{40}$")
+_RE_IPV4 = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+_RE_HASH_MD5 = re.compile(r"^[a-fA-F0-9]{32}$")
+_RE_HASH_SHA1 = re.compile(r"^[a-fA-F0-9]{40}$")
 _RE_HASH_SHA256 = re.compile(r"^[a-fA-F0-9]{64}$")
-_RE_URL     = re.compile(r"^https?://", re.IGNORECASE)
-_RE_DOMAIN  = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-\.]{1,253}[a-zA-Z0-9]$")
+_RE_URL = re.compile(r"^https?://", re.IGNORECASE)
+_RE_DOMAIN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-.]{1,253}[a-zA-Z0-9]$")
 
-
-def _detect_ioc_type(value: str) -> Optional[str]:
-    """Detecta automaticamente o tipo de IOC a partir do valor."""
-    v = value.strip()
-    if _RE_IPV4.match(v):
-        try:
-            ipaddress.ip_address(v)
-            return "ip"
-        except ValueError:
-            pass
-    if ":" in v:
-        try:
-            ipaddress.ip_address(v)
-            return "ip"
-        except ValueError:
-            pass
-    if _RE_HASH_MD5.match(v) or _RE_HASH_SHA1.match(v) or _RE_HASH_SHA256.match(v):
-        return "hash"
-    if _RE_URL.match(v):
-        return "url"
-    if _RE_DOMAIN.match(v) and "." in v:
-        return "domain"
-    return None
-
-
-def _normalize(value: str, ioc_type: str) -> str:
-    """Normaliza o valor do IOC para comparação."""
-    v = value.strip().lower()
-    if ioc_type == "hash":
-        return v  # hashes já são hex
-    if ioc_type == "ip":
-        return v
-    if ioc_type == "domain":
-        return v.rstrip(".")
-    return v
-
-
-# ── DDL ───────────────────────────────────────────────────────────────────────
 DDL_IOCS = """
 CREATE TABLE IF NOT EXISTS ioc_list (
     ioc_id      TEXT PRIMARY KEY,
     tenant_id   TEXT NOT NULL DEFAULT 'default',
-    ioc_type    TEXT NOT NULL,          -- ip | domain | hash | url
-    value       TEXT NOT NULL,          -- valor normalizado
-    value_raw   TEXT NOT NULL,          -- valor original
+    ioc_type    TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    value_raw   TEXT NOT NULL,
     threat_name TEXT NOT NULL DEFAULT '',
-    confidence  INTEGER NOT NULL DEFAULT 80,   -- 0-100
+    confidence  INTEGER NOT NULL DEFAULT 80,
     source      TEXT NOT NULL DEFAULT 'manual',
-    tags        TEXT NOT NULL DEFAULT '[]',    -- JSON array
+    tags        TEXT NOT NULL DEFAULT '[]',
     notes       TEXT DEFAULT '',
     active      INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL,
@@ -121,338 +68,412 @@ CREATE INDEX IF NOT EXISTS idx_ioc_hits_tenant
 """
 
 
+def _detect_ioc_type(value: str) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if _RE_IPV4.match(raw):
+        try:
+            ipaddress.ip_address(raw)
+            return "ip"
+        except ValueError:
+            pass
+    if ":" in raw:
+        try:
+            ipaddress.ip_address(raw)
+            return "ip"
+        except ValueError:
+            pass
+    if _RE_HASH_MD5.match(raw) or _RE_HASH_SHA1.match(raw) or _RE_HASH_SHA256.match(raw):
+        return "hash"
+    if _RE_URL.match(raw):
+        return "url"
+    if "." in raw and _RE_DOMAIN.match(raw):
+        return "domain"
+    return None
+
+
+def _normalize(value: str, ioc_type: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if ioc_type == "domain":
+        return normalized.rstrip(".")
+    return normalized
+
+
 class IOCManager:
-    """
-    Gerencia IOCs por tenant. Thread-safe via SQLite WAL.
-
-    Uso básico:
-        mgr = IOCManager(db_path="netguard_events.db", tenant_id="abc")
-        mgr.import_csv(csv_bytes)
-        hit = mgr.check_ip("1.2.3.4")
-    """
-
-    def __init__(self, db_path: str = "netguard_events.db",
-                 tenant_id: str = "default"):
-        self.db_path  = db_path
+    def __init__(self, db_path: str = "netguard_events.db", tenant_id: str = "default"):
+        self.db_path = db_path
         self.tenant_id = tenant_id
+        self._cache_ip: dict[str, dict] = {}
+        self._cache_domain: dict[str, dict] = {}
+        self._cache_hash: dict[str, dict] = {}
+        self._cache_loaded = False
         self._init_db()
 
-        # Cache em memória para performance (invalidado em imports)
-        self._cache_ip:     dict[str, dict]  = {}
-        self._cache_domain: dict[str, dict]  = {}
-        self._cache_hash:   dict[str, dict]  = {}
-        self._cache_loaded = False
-
-    # ── Init ──────────────────────────────────────────────────────────────────
+    @contextmanager
+    def _conn(self):
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL").close()
+        conn.execute("PRAGMA foreign_keys=ON").close()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
         with self._conn() as conn:
             conn.executescript(DDL_IOCS + DDL_IOC_HITS)
 
-    def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+    def _detect_ioc_type(self, value: str) -> str:
+        return _detect_ioc_type(value) or "unknown"
 
-    # ── Cache ─────────────────────────────────────────────────────────────────
+    def _serialize_ioc(self, row: dict | sqlite3.Row | None) -> Optional[dict]:
+        if not row:
+            return None
+        data = dict(row)
+        tags = data.get("tags", [])
+        if isinstance(tags, str):
+            try:
+                tags = json.loads(tags or "[]")
+            except (json.JSONDecodeError, ValueError):
+                tags = []
+        data["tags"] = tags
+        data["id"] = data.get("ioc_id")
+        data["enabled"] = int(data.get("active", 1))
+        data["value"] = data.get("value_raw") or data.get("value", "")
+        return data
 
-    def _load_cache(self) -> None:
-        """Carrega IOCs ativos em memória para checagens rápidas."""
-        self._cache_ip     = {}
-        self._cache_domain = {}
-        self._cache_hash   = {}
-        with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM ioc_list WHERE tenant_id=? AND active=1",
-                (self.tenant_id,)
-            ).fetchall()
-        for r in rows:
-            row = dict(r)
-            t   = row["ioc_type"]
-            v   = row["value"]
-            if t == "ip":
-                self._cache_ip[v] = row
-            elif t == "domain":
-                self._cache_domain[v] = row
-            elif t == "hash":
-                self._cache_hash[v] = row
-        self._cache_loaded = True
-        logger.debug("IOC cache loaded: %d IPs, %d domains, %d hashes",
-                     len(self._cache_ip), len(self._cache_domain), len(self._cache_hash))
+    def _get_ioc_row(self, conn: sqlite3.Connection, ioc_id: str):
+        return conn.execute(
+            "SELECT * FROM ioc_list WHERE ioc_id=? AND tenant_id=?",
+            (ioc_id, self.tenant_id),
+        ).fetchone()
 
     def invalidate_cache(self) -> None:
         self._cache_loaded = False
+
+    def _load_cache(self) -> None:
+        self._cache_ip = {}
+        self._cache_domain = {}
+        self._cache_hash = {}
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM ioc_list WHERE tenant_id=? AND active=1",
+                (self.tenant_id,),
+            ).fetchall()
+        for row in rows:
+            item = dict(row)
+            if item["ioc_type"] == "ip":
+                self._cache_ip[item["value"]] = item
+            elif item["ioc_type"] == "domain":
+                self._cache_domain[item["value"]] = item
+            elif item["ioc_type"] == "hash":
+                self._cache_hash[item["value"]] = item
+        self._cache_loaded = True
 
     def _ensure_cache(self) -> None:
         if not self._cache_loaded:
             self._load_cache()
 
-    # ── Check ─────────────────────────────────────────────────────────────────
+    def _format_hit(self, row: dict, matched_val: str) -> dict:
+        return {
+            "ioc_id": row["ioc_id"],
+            "id": row["ioc_id"],
+            "type": row["ioc_type"],
+            "value": row.get("value_raw") or row["value"],
+            "matched": matched_val,
+            "threat_name": row["threat_name"],
+            "confidence": row["confidence"],
+            "source": row["source"],
+            "tags": json.loads(row.get("tags", "[]")) if isinstance(row.get("tags"), str) else row.get("tags", []),
+            "notes": row.get("notes", ""),
+            "hit_count": row.get("hit_count", 0) + 1,
+        }
+
+    def _record_hit(self, ioc_id: str, matched_val: str, event_id: str = "") -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE ioc_list SET hit_count=hit_count+1, last_hit=? WHERE ioc_id=?",
+                (now, ioc_id),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO ioc_hits VALUES (?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), self.tenant_id, ioc_id, event_id or None, matched_val, "{}", now),
+            )
+        self.invalidate_cache()
 
     def check_ip(self, ip: str, event_id: str = "") -> Optional[dict]:
-        """Verifica se um IP está na lista de IOCs. Retorna o hit ou None."""
         self._ensure_cache()
         normalized = _normalize(ip, "ip")
         hit = self._cache_ip.get(normalized)
-        if hit:
-            self._record_hit(hit["ioc_id"], normalized, event_id)
-            return self._format_hit(hit, normalized)
-        return None
+        if not hit:
+            return None
+        self._record_hit(hit["ioc_id"], normalized, event_id)
+        return self._format_hit(hit, normalized)
 
     def check_domain(self, domain: str, event_id: str = "") -> Optional[dict]:
-        """Verifica se um domínio está na lista de IOCs."""
         self._ensure_cache()
         normalized = _normalize(domain, "domain")
         hit = self._cache_domain.get(normalized)
         if not hit:
-            # Tenta match por sufixo (subdomínio)
             parts = normalized.split(".")
-            for i in range(1, len(parts)):
-                parent = ".".join(parts[i:])
+            for index in range(1, len(parts)):
+                parent = ".".join(parts[index:])
                 hit = self._cache_domain.get(parent)
                 if hit:
                     break
-        if hit:
-            self._record_hit(hit["ioc_id"], normalized, event_id)
-            return self._format_hit(hit, normalized)
-        return None
+        if not hit:
+            return None
+        self._record_hit(hit["ioc_id"], normalized, event_id)
+        return self._format_hit(hit, normalized)
 
     def check_hash(self, file_hash: str, event_id: str = "") -> Optional[dict]:
-        """Verifica se um hash de arquivo está na lista de IOCs."""
         self._ensure_cache()
         normalized = _normalize(file_hash, "hash")
         hit = self._cache_hash.get(normalized)
-        if hit:
-            self._record_hit(hit["ioc_id"], normalized, event_id)
-            return self._format_hit(hit, normalized)
-        return None
+        if not hit:
+            return None
+        self._record_hit(hit["ioc_id"], normalized, event_id)
+        return self._format_hit(hit, normalized)
 
-    def check_all(self, ip: str = "", domain: str = "",
-                  file_hash: str = "", event_id: str = "") -> list[dict]:
-        """Checa múltiplos valores e retorna lista de hits."""
+    def check_all(self, ip: str = "", domain: str = "", file_hash: str = "", event_id: str = "") -> list[dict]:
         hits = []
         if ip:
-            h = self.check_ip(ip, event_id)
-            if h:
-                hits.append(h)
+            hit = self.check_ip(ip, event_id)
+            if hit:
+                hits.append(hit)
         if domain:
-            h = self.check_domain(domain, event_id)
-            if h:
-                hits.append(h)
+            hit = self.check_domain(domain, event_id)
+            if hit:
+                hits.append(hit)
         if file_hash:
-            h = self.check_hash(file_hash, event_id)
-            if h:
-                hits.append(h)
+            hit = self.check_hash(file_hash, event_id)
+            if hit:
+                hits.append(hit)
         return hits
 
-    def _format_hit(self, row: dict, matched_val: str) -> dict:
-        return {
-            "ioc_id":      row["ioc_id"],
-            "type":        row["ioc_type"],
-            "value":       row["value"],
-            "matched":     matched_val,
-            "threat_name": row["threat_name"],
-            "confidence":  row["confidence"],
-            "source":      row["source"],
-            "tags":        json.loads(row.get("tags", "[]")),
-            "notes":       row.get("notes", ""),
-            "hit_count":   row.get("hit_count", 0) + 1,
-        }
+    def add_ioc(
+        self,
+        value: str | dict,
+        ioc_type: str = "",
+        threat_name: str = "",
+        confidence: int = 80,
+        source: str = "manual",
+        tags: list | None = None,
+        notes: str = "",
+    ) -> dict:
+        if isinstance(value, dict):
+            payload = dict(value)
+            value = str(payload.get("value", "") or "")
+            ioc_type = str(payload.get("ioc_type") or payload.get("type") or ioc_type or "")
+            threat_name = str(payload.get("threat_name") or payload.get("description") or threat_name or "")
+            confidence = int(payload.get("confidence", confidence))
+            source = str(payload.get("source") or source)
+            tags = payload.get("tags", tags)
+            notes = str(payload.get("notes") or notes or "")
 
-    def _record_hit(self, ioc_id: str, matched_val: str, event_id: str) -> None:
-        now = datetime.now(timezone.utc).isoformat()
-        try:
-            with self._conn() as conn:
-                conn.execute(
-                    "UPDATE ioc_list SET hit_count=hit_count+1, last_hit=? "
-                    "WHERE ioc_id=?",
-                    (now, ioc_id)
-                )
-                conn.execute(
-                    "INSERT OR IGNORE INTO ioc_hits VALUES (?,?,?,?,?,?,?)",
-                    (str(uuid.uuid4()), self.tenant_id, ioc_id,
-                     event_id or None, matched_val, "{}", now)
-                )
-        except Exception as e:
-            logger.debug("IOC hit record failed: %s", e)
-
-    # ── CRUD ──────────────────────────────────────────────────────────────────
-
-    def add_ioc(self, value: str, ioc_type: str = "",
-                threat_name: str = "", confidence: int = 80,
-                source: str = "manual", tags: list = None,
-                notes: str = "") -> dict:
-        """Adiciona um IOC manualmente. Retorna o registro criado."""
-        value = value.strip()
+        value = str(value or "").strip()
         if len(value) > 512:
-            raise ValueError("IOC value: máximo 512 caracteres")
+            raise ValueError("IOC value: max 512 chars")
         if threat_name and len(threat_name) > 120:
-            raise ValueError("threat_name: máximo 120 caracteres")
+            raise ValueError("threat_name: max 120 chars")
         if notes and len(notes) > 1000:
-            raise ValueError("notes: máximo 1000 caracteres")
+            raise ValueError("notes: max 1000 chars")
+
         if not ioc_type:
-            ioc_type = _detect_ioc_type(value)
+            ioc_type = _detect_ioc_type(value) or ""
         if not ioc_type:
-            raise ValueError(f"Tipo de IOC não reconhecido para: {value!r}")
+            raise ValueError(f"Tipo de IOC nao reconhecido para: {value!r}")
         if ioc_type not in IOC_TYPES:
-            raise ValueError(f"Tipo inválido: {ioc_type!r}. Use: {IOC_TYPES}")
+            raise ValueError(f"Tipo invalido: {ioc_type!r}")
 
         normalized = _normalize(value, ioc_type)
         now = datetime.now(timezone.utc).isoformat()
         ioc_id = str(uuid.uuid4())
 
-        row = (
-            ioc_id, self.tenant_id, ioc_type, normalized, value,
-            threat_name, confidence, source,
-            json.dumps(tags or []), notes, 1, now, now, 0, None
-        )
-
         with self._conn() as conn:
             try:
                 conn.execute(
-                    "INSERT INTO ioc_list VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    row
+                    """
+                    INSERT INTO ioc_list (
+                        ioc_id, tenant_id, ioc_type, value, value_raw, threat_name,
+                        confidence, source, tags, notes, active, created_at,
+                        updated_at, hit_count, last_hit
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        ioc_id,
+                        self.tenant_id,
+                        ioc_type,
+                        normalized,
+                        value,
+                        threat_name,
+                        confidence,
+                        source,
+                        json.dumps(tags or []),
+                        notes,
+                        1,
+                        now,
+                        now,
+                        0,
+                        None,
+                    ),
                 )
-            except sqlite3.IntegrityError:
-                # Atualiza se já existe
-                conn.execute(
-                    "UPDATE ioc_list SET threat_name=?, confidence=?, source=?, "
-                    "tags=?, notes=?, active=1, updated_at=? "
-                    "WHERE tenant_id=? AND ioc_type=? AND value=?",
-                    (threat_name, confidence, source,
-                     json.dumps(tags or []), notes, now,
-                     self.tenant_id, ioc_type, normalized)
-                )
-                existing = conn.execute(
-                    "SELECT * FROM ioc_list WHERE tenant_id=? AND ioc_type=? AND value=?",
-                    (self.tenant_id, ioc_type, normalized)
-                ).fetchone()
-                self.invalidate_cache()
-                return dict(existing)
+                created = self._get_ioc_row(conn, ioc_id)
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("IOC já existe") from exc
 
         self.invalidate_cache()
-        return {
-            "ioc_id": ioc_id, "ioc_type": ioc_type, "value": normalized,
-            "threat_name": threat_name, "confidence": confidence,
-            "source": source, "created_at": now
+        return self._serialize_ioc(created) or {
+            "ioc_id": ioc_id,
+            "id": ioc_id,
+            "ioc_type": ioc_type,
+            "value": value,
+            "enabled": 1,
         }
 
     def delete_ioc(self, ioc_id: str) -> bool:
         with self._conn() as conn:
-            r = conn.execute(
+            result = conn.execute(
                 "DELETE FROM ioc_list WHERE ioc_id=? AND tenant_id=?",
-                (ioc_id, self.tenant_id)
+                (ioc_id, self.tenant_id),
             )
         self.invalidate_cache()
-        return r.rowcount > 0
+        return result.rowcount > 0
 
-    def toggle_ioc(self, ioc_id: str, active: bool) -> bool:
+    def toggle_ioc(self, ioc_id: str, active: Optional[bool] = None):
+        toggle_mode = active is None
         now = datetime.now(timezone.utc).isoformat()
         with self._conn() as conn:
-            r = conn.execute(
-                "UPDATE ioc_list SET active=?, updated_at=? "
-                "WHERE ioc_id=? AND tenant_id=?",
-                (1 if active else 0, now, ioc_id, self.tenant_id)
+            current = self._get_ioc_row(conn, ioc_id)
+            if not current:
+                return None if toggle_mode else False
+            if toggle_mode:
+                active = not bool(current["active"])
+            result = conn.execute(
+                "UPDATE ioc_list SET active=?, updated_at=? WHERE ioc_id=? AND tenant_id=?",
+                (1 if active else 0, now, ioc_id, self.tenant_id),
             )
+            updated = self._get_ioc_row(conn, ioc_id) if result.rowcount else None
         self.invalidate_cache()
-        return r.rowcount > 0
+        if toggle_mode:
+            return self._serialize_ioc(updated)
+        return result.rowcount > 0
 
-    # ── Import CSV ────────────────────────────────────────────────────────────
-
-    def import_csv(self, csv_bytes: bytes,
-                   default_threat: str = "Custom IOC",
-                   default_confidence: int = 80) -> dict:
-        """
-        Importa IOCs de um CSV.
-
-        Formatos suportados:
-          1. Uma coluna: valor apenas (tipo detectado automaticamente)
-          2. Duas colunas: valor,threat_name
-          3. Formato completo: value,type,threat_name,confidence,tags,notes
-
-        Retorna: {"imported": N, "skipped": N, "errors": [...]}
-        """
-        text = csv_bytes.decode("utf-8-sig", errors="replace")
+    def import_csv(
+        self,
+        csv_bytes: bytes | str,
+        default_threat: str = "Custom IOC",
+        default_confidence: int = 80,
+    ) -> dict:
+        text = csv_bytes if isinstance(csv_bytes, str) else csv_bytes.decode("utf-8-sig", errors="replace")
         reader = csv.reader(io.StringIO(text))
 
         imported = 0
-        skipped  = 0
-        errors   = []
+        skipped = 0
+        errors = []
 
         for lineno, row in enumerate(reader, 1):
             if not row or not row[0].strip():
                 skipped += 1
                 continue
-            raw_val = row[0].strip()
-            if raw_val.lower() in ("value", "ioc", "indicator", "#"):
-                skipped += 1  # header
-                continue
-            if raw_val.startswith("#"):
-                skipped += 1  # comentário
+
+            raw_value = row[0].strip()
+            if raw_value.lower() in {"value", "ioc", "indicator", "#"} or raw_value.startswith("#"):
+                skipped += 1
                 continue
 
-            # Extrair campos opcionais
-            ioc_type    = row[1].strip().lower() if len(row) > 1 else ""
-            threat_name = row[2].strip()         if len(row) > 2 else default_threat
-            confidence  = int(row[3].strip())    if len(row) > 3 and row[3].strip().isdigit() else default_confidence
-            tags_raw    = row[4].strip()          if len(row) > 4 else ""
-            notes       = row[5].strip()          if len(row) > 5 else ""
-            tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else []
+            second_col = row[1].strip() if len(row) > 1 else ""
+            if second_col.lower() in IOC_TYPES:
+                parsed_type = second_col.lower()
+                threat = row[2].strip() if len(row) > 2 else default_threat
+            else:
+                parsed_type = ""
+                threat = second_col or default_threat
+
+            confidence = (
+                int(row[3].strip())
+                if len(row) > 3 and row[3].strip().isdigit()
+                else default_confidence
+            )
+            tags_raw = row[4].strip() if len(row) > 4 else ""
+            notes = row[5].strip() if len(row) > 5 else ""
+            tags = [item.strip() for item in tags_raw.split(",") if item.strip()] if tags_raw else []
 
             try:
                 self.add_ioc(
-                    value=raw_val,
-                    ioc_type=ioc_type or "",
-                    threat_name=threat_name or default_threat,
+                    value=raw_value,
+                    ioc_type=parsed_type,
+                    threat_name=threat,
                     confidence=confidence,
                     source="csv_import",
                     tags=tags,
                     notes=notes,
                 )
                 imported += 1
-            except ValueError as e:
-                errors.append({"line": lineno, "value": raw_val, "error": str(e)})
+            except ValueError as exc:
                 skipped += 1
-            except Exception as e:
-                errors.append({"line": lineno, "value": raw_val, "error": str(e)})
+                errors.append({"line": lineno, "value": raw_value, "error": str(exc)})
+            except Exception as exc:
                 skipped += 1
+                errors.append({"line": lineno, "value": raw_value, "error": str(exc)})
 
         self.invalidate_cache()
-        logger.info("IOC import: %d imported, %d skipped, %d errors",
-                    imported, skipped, len(errors))
         return {"imported": imported, "skipped": skipped, "errors": errors[:20]}
 
-    # ── Export CSV ────────────────────────────────────────────────────────────
-
     def export_csv(self) -> bytes:
-        """Exporta todos os IOCs ativos como CSV."""
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM ioc_list WHERE tenant_id=? ORDER BY ioc_type, value",
-                (self.tenant_id,)
+                (self.tenant_id,),
             ).fetchall()
 
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["value", "type", "threat_name", "confidence",
-                          "tags", "notes", "source", "active",
-                          "hit_count", "created_at"])
-        for r in rows:
-            r = dict(r)
-            tags = ",".join(json.loads(r.get("tags", "[]")))
-            writer.writerow([
-                r["value_raw"], r["ioc_type"], r["threat_name"],
-                r["confidence"], tags, r.get("notes", ""),
-                r["source"], r["active"], r["hit_count"], r["created_at"]
-            ])
+        writer.writerow(
+            ["value", "type", "threat_name", "confidence", "tags", "notes", "source", "active", "hit_count", "created_at"]
+        )
+        for row in rows:
+            item = dict(row)
+            tags = item.get("tags", "[]")
+            if isinstance(tags, str):
+                tags = json.loads(tags or "[]")
+            writer.writerow(
+                [
+                    item["value_raw"],
+                    item["ioc_type"],
+                    item["threat_name"],
+                    item["confidence"],
+                    ",".join(tags),
+                    item.get("notes", ""),
+                    item["source"],
+                    item["active"],
+                    item["hit_count"],
+                    item["created_at"],
+                ]
+            )
         return buf.getvalue().encode("utf-8")
 
-    # ── List / Stats ──────────────────────────────────────────────────────────
+    def list_iocs(
+        self,
+        ioc_type: str = "",
+        active_only: bool = False,
+        limit: int = 500,
+        offset: int = 0,
+        page: Optional[int] = None,
+        per_page: Optional[int] = None,
+    ):
+        if per_page is not None:
+            page = max(1, int(page or 1))
+            limit = max(1, int(per_page))
+            offset = (page - 1) * limit
 
-    def list_iocs(self, ioc_type: str = "", active_only: bool = False,
-                  limit: int = 500, offset: int = 0) -> list[dict]:
         where = ["tenant_id=?"]
         params: list = [self.tenant_id]
         if ioc_type:
@@ -460,59 +481,69 @@ class IOCManager:
             params.append(ioc_type)
         if active_only:
             where.append("active=1")
-        params += [limit, offset]
+
         sql = (
             f"SELECT * FROM ioc_list WHERE {' AND '.join(where)} "
-            f"ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+            "ORDER BY updated_at DESC LIMIT ? OFFSET ?"
         )
+
         with self._conn() as conn:
-            rows = conn.execute(sql, params).fetchall()
-        result = []
-        for r in rows:
-            d = dict(r)
-            d["tags"] = json.loads(d.get("tags", "[]"))
-            result.append(d)
-        return result
+            rows = conn.execute(sql, params + [limit, offset]).fetchall()
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM ioc_list WHERE {' AND '.join(where)}",
+                params,
+            ).fetchone()[0]
+
+        items = [self._serialize_ioc(row) for row in rows]
+        if per_page is not None:
+            return {"items": items, "total": total, "page": page, "per_page": limit}
+        return items
 
     def count_iocs(self) -> dict:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT ioc_type, active, COUNT(*) as n "
-                "FROM ioc_list WHERE tenant_id=? "
-                "GROUP BY ioc_type, active",
-                (self.tenant_id,)
+                """
+                SELECT ioc_type, active, COUNT(*) AS n
+                FROM ioc_list
+                WHERE tenant_id=?
+                GROUP BY ioc_type, active
+                """,
+                (self.tenant_id,),
             ).fetchall()
+
         stats: dict = {"total": 0, "active": 0, "by_type": {}}
-        for r in rows:
-            t, active, n = r["ioc_type"], r["active"], r["n"]
-            if t not in stats["by_type"]:
-                stats["by_type"][t] = {"total": 0, "active": 0}
-            stats["by_type"][t]["total"] += n
-            stats["total"] += n
+        for row in rows:
+            ioc_type = row["ioc_type"]
+            active = row["active"]
+            count = row["n"]
+            stats["by_type"].setdefault(ioc_type, {"total": 0, "active": 0})
+            stats["by_type"][ioc_type]["total"] += count
+            stats["total"] += count
             if active:
-                stats["by_type"][t]["active"] += n
-                stats["active"] += n
+                stats["by_type"][ioc_type]["active"] += count
+                stats["active"] += count
         return stats
 
     def recent_hits(self, limit: int = 50) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT h.*, i.ioc_type, i.threat_name, i.confidence "
-                "FROM ioc_hits h "
-                "JOIN ioc_list i ON i.ioc_id = h.ioc_id "
-                "WHERE h.tenant_id=? "
-                "ORDER BY h.hit_at DESC LIMIT ?",
-                (self.tenant_id, limit)
+                """
+                SELECT h.*, i.ioc_type, i.threat_name, i.confidence
+                FROM ioc_hits h
+                JOIN ioc_list i ON i.ioc_id = h.ioc_id
+                WHERE h.tenant_id=?
+                ORDER BY h.hit_at DESC
+                LIMIT ?
+                """,
+                (self.tenant_id, limit),
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(row) for row in rows]
 
 
-# ── Singleton por tenant ──────────────────────────────────────────────────────
 _managers: dict[str, IOCManager] = {}
 
 
-def get_ioc_manager(db_path: str = "netguard_events.db",
-                    tenant_id: str = "default") -> IOCManager:
+def get_ioc_manager(db_path: str = "netguard_events.db", tenant_id: str = "default") -> IOCManager:
     key = f"{db_path}::{tenant_id}"
     if key not in _managers:
         _managers[key] = IOCManager(db_path=db_path, tenant_id=tenant_id)

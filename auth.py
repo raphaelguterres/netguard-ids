@@ -13,7 +13,6 @@ Acesso após ativar:
 
 import os
 import secrets
-import hashlib  # noqa: F401
 import logging
 import pathlib
 import sys

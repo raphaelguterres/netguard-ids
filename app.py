@@ -969,9 +969,35 @@ def _get_playbook_engine():
         raise RuntimeError("playbook engine unavailable")
     with _engine_singletons_lock:
         if _playbook_engine_singleton is None:
-            db_path = getattr(repo, "db_path", None) or str(pathlib.Path(__file__).parent / "netguard_soc.db")
-            _playbook_engine_singleton = get_playbook_engine(db_path)
+            _playbook_engine_singleton = get_playbook_engine(_get_engine_db_path())
         return _playbook_engine_singleton
+
+
+def _get_engine_db_path():
+    return getattr(repo, "db_path", None) or str(pathlib.Path(__file__).parent / "netguard_soc.db")
+
+
+def _get_ti_feed():
+    global _ti_feed_singleton, _ti_feed_scheduler_started
+    if not TI_AVAILABLE or get_ti_feed is None:
+        raise RuntimeError("threat intel feed unavailable")
+    with _engine_singletons_lock:
+        if _ti_feed_singleton is None:
+            _ti_feed_singleton = get_ti_feed(_get_engine_db_path())
+        if not _ti_feed_scheduler_started and hasattr(_ti_feed_singleton, "start_scheduler"):
+            _ti_feed_singleton.start_scheduler()
+            _ti_feed_scheduler_started = True
+        return _ti_feed_singleton
+
+
+def _get_forensics_engine():
+    global _forensics_engine_singleton
+    if not FORENSICS_AVAILABLE or get_forensics_engine is None:
+        raise RuntimeError("forensics engine unavailable")
+    with _engine_singletons_lock:
+        if _forensics_engine_singleton is None:
+            _forensics_engine_singleton = get_forensics_engine(_get_engine_db_path())
+        return _forensics_engine_singleton
 
 
 def _get_tenant_event_repo():
@@ -8269,6 +8295,235 @@ def _get_webhook_engine():
     tid = _resolve_tenant_id()
     return get_webhook_engine(db, tid)
 
+_PLAYBOOK_API_ALIASES = {
+    "malware_triage": "malware_detected",
+    "malware": "malware_detected",
+    "bruteforce": "brute_force",
+    "brute_force_attack": "brute_force",
+}
+
+
+def _normalize_playbook_api_key(value: str) -> str:
+    key = _sanitize_text(str(value or ""), max_len=80).lower().replace("-", "_").replace(" ", "_")
+    return _PLAYBOOK_API_ALIASES.get(key, key)
+
+
+@app.route("/api/playbooks/incidents", methods=["GET"])
+@auth
+@require_role("analyst", "admin")
+def playbooks_incidents_list():
+    if not PLAYBOOK_AVAILABLE:
+        return jsonify({"error": "Playbook Engine indisponível"}), 503
+
+    tenant_id = _resolve_tenant_id()
+    status = _sanitize_text(str(request.args.get("status", "")), max_len=30).lower()
+    limit = _safe_limit(request.args.get("limit", 50))
+    engine = _get_playbook_engine()
+    return jsonify({
+        "incidents": engine.list_incidents(tenant_id=tenant_id, status=status or None, limit=limit),
+        "stats": engine.stats(tenant_id=tenant_id),
+        "playbooks": engine.playbooks_list(),
+    })
+
+
+@app.route("/api/playbooks/incidents", methods=["POST"])
+@auth
+@csrf_protect
+@require_role("analyst", "admin")
+def playbooks_incidents_open():
+    if not PLAYBOOK_AVAILABLE:
+        return jsonify({"error": "Playbook Engine indisponível"}), 503
+
+    payload = request.get_json(silent=True) or {}
+    trigger_event = payload.get("trigger_event")
+    if not isinstance(trigger_event, dict):
+        trigger_event = {}
+
+    severity = _sanitize_text(
+        str(payload.get("severity", trigger_event.get("severity", "high"))),
+        max_len=20,
+    ).lower() or "high"
+    if severity not in _VALID_SEVERITY:
+        return jsonify({"error": "severity inválida"}), 400
+
+    trigger_event = dict(trigger_event)
+    trigger_event["severity"] = severity
+    playbook_key = _normalize_playbook_api_key(payload.get("playbook", ""))
+    if not playbook_key:
+        playbook_key = _get_playbook_engine().match_playbook(
+            str(trigger_event.get("threat_name", "")),
+            severity,
+            str(trigger_event.get("mitre_tactic", "")),
+        ) or ("generic_critical" if severity == "critical" else "")
+    if not playbook_key:
+        return jsonify({"error": "playbook obrigatório"}), 400
+
+    try:
+        incident = _get_playbook_engine().open_incident(
+            playbook_key,
+            trigger_event,
+            tenant_id=_resolve_tenant_id(),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc), "playbook": playbook_key}), 400
+
+    audit(
+        "PLAYBOOK_INCIDENT_OPEN",
+        ip=request.remote_addr or "-",
+        detail=f"playbook={playbook_key} incident={incident.get('incident_id', '')}",
+    )
+    return jsonify({"ok": True, "incident": incident}), 201
+
+
+@app.route("/api/ti/feeds", methods=["GET"])
+@auth
+@require_role("analyst", "admin")
+def ti_feeds_status():
+    if not TI_AVAILABLE:
+        return jsonify({"error": "Threat Intel Feed indisponível"}), 503
+    return jsonify({
+        "available": True,
+        "stats": _get_ti_feed().stats(tenant_id=_resolve_tenant_id()),
+    })
+
+
+@app.route("/api/ti/feeds/refresh_all", methods=["POST"])
+@auth
+@csrf_protect
+@require_role("analyst", "admin")
+def ti_feeds_refresh_all():
+    if not TI_AVAILABLE:
+        return jsonify({"error": "Threat Intel Feed indisponível"}), 503
+
+    payload = request.get_json(silent=True) or {}
+    wait_for_result = bool(payload.get("wait")) or str(request.args.get("wait", "")).lower() == "true"
+    feed = _get_ti_feed()
+
+    if wait_for_result:
+        results = feed.refresh_all()
+        audit("TI_REFRESH_ALL", ip=request.remote_addr or "-", detail="mode=sync")
+        return jsonify({"ok": True, "results": results})
+
+    def _refresh_async():
+        try:
+            feed.refresh_all()
+        except Exception:
+            logger.exception("Threat Intel refresh_all background job failed")
+
+    threading.Thread(
+        target=_refresh_async,
+        daemon=True,
+        name="ti-refresh-all",
+    ).start()
+    audit("TI_REFRESH_ALL", ip=request.remote_addr or "-", detail="mode=async")
+    return jsonify({"ok": True, "status": "refreshing"}), 202
+
+@app.route("/api/forensics/snapshots", methods=["GET"])
+@auth
+@require_role("analyst", "admin")
+def forensics_list_snapshots():
+    if not FORENSICS_AVAILABLE:
+        return jsonify({"error": "Forensics Engine indisponível"}), 503
+
+    tenant_id = _resolve_tenant_id()
+    limit = _safe_limit(request.args.get("limit", 50))
+    cache_key = f"forensics:{tenant_id}:{limit}"
+
+    def _compute():
+        engine = _get_forensics_engine()
+        return {
+            "available": True,
+            "snapshots": engine.list_snapshots(tenant_id=tenant_id, limit=limit),
+            "stats": engine.stats(tenant_id=tenant_id),
+        }
+
+    payload = _swr_cached_value(
+        _endpoint_swr_cache,
+        _endpoint_swr_lock,
+        cache_key,
+        _FORENSICS_CACHE_TTL,
+        _FORENSICS_STALE_TTL,
+        cache_key,
+        _compute,
+    )
+    return jsonify(payload)
+
+
+@app.route("/api/forensics/snapshots", methods=["POST"])
+@auth
+@csrf_protect
+@require_role("analyst", "admin")
+def forensics_capture_snapshot():
+    if not FORENSICS_AVAILABLE:
+        return jsonify({"error": "Forensics Engine indisponível"}), 503
+
+    data = request.get_json(force=True) or {}
+    severity = str(data.get("severity", "high")).strip().lower() or "high"
+    if severity not in _VALID_SEVERITY:
+        return jsonify({"error": "severity inválida"}), 400
+
+    tenant_id = _resolve_tenant_id()
+    trigger_type = _sanitize_text(str(data.get("trigger_type", "manual")), max_len=40) or "manual"
+    trigger_event = {
+        "hostname": _sanitize_text(str(data.get("hostname", "")), max_len=120),
+        "summary": _sanitize_text(str(data.get("summary", "")), max_len=400),
+        "source_ip": request.remote_addr or "",
+    }
+
+    snapshot_id = _get_forensics_engine().capture_async(
+        trigger_type=trigger_type,
+        trigger_event=trigger_event,
+        severity=severity,
+        tenant_id=tenant_id,
+    )
+    _cache_invalidate_prefixes(_endpoint_swr_cache, _endpoint_swr_lock, [f"forensics:{tenant_id}:"])
+    return jsonify({"ok": True, "snapshot_id": snapshot_id, "status": "capturing"}), 202
+
+
+@app.route("/api/forensics/snapshots/<snapshot_id>", methods=["GET"])
+@auth
+@require_role("analyst", "admin")
+def forensics_get_snapshot(snapshot_id):
+    if not FORENSICS_AVAILABLE:
+        return jsonify({"error": "Forensics Engine indisponível"}), 503
+
+    tenant_id, tenant_role = _resolve_tenant_with_role()
+    snapshot_id = _sanitize_text(snapshot_id, max_len=80)
+    if not snapshot_id:
+        return jsonify({"error": "snapshot_id inválido"}), 400
+
+    snap = _get_forensics_engine().get_snapshot(snapshot_id)
+    if not snap:
+        return jsonify({"error": "snapshot não encontrado"}), 404
+    if tenant_role != "admin" and snap.get("tenant_id") not in ("", tenant_id):
+        return jsonify({"error": "snapshot não encontrado"}), 404
+    return jsonify(snap)
+
+
+@app.route("/api/forensics/snapshots/<snapshot_id>", methods=["DELETE"])
+@auth
+@csrf_protect
+@require_role("analyst", "admin")
+def forensics_delete_snapshot(snapshot_id):
+    if not FORENSICS_AVAILABLE:
+        return jsonify({"error": "Forensics Engine indisponível"}), 503
+
+    tenant_id, tenant_role = _resolve_tenant_with_role()
+    snapshot_id = _sanitize_text(snapshot_id, max_len=80)
+    if not snapshot_id:
+        return jsonify({"error": "snapshot_id inválido"}), 400
+
+    snap = _get_forensics_engine().get_snapshot(snapshot_id)
+    if not snap:
+        return jsonify({"error": "snapshot não encontrado"}), 404
+    if tenant_role != "admin" and snap.get("tenant_id") not in ("", tenant_id):
+        return jsonify({"error": "snapshot não encontrado"}), 404
+
+    ok = _get_forensics_engine().delete_snapshot(snapshot_id)
+    _cache_invalidate_prefixes(_endpoint_swr_cache, _endpoint_swr_lock, [f"forensics:{tenant_id}:"])
+    return jsonify({"ok": bool(ok), "snapshot_id": snapshot_id})
+
+
 @app.route("/api/webhooks", methods=["GET"])
 @auth
 @require_role("analyst", "admin")
@@ -8473,7 +8728,17 @@ def iniciar_monitoramento():
         monitor_status["captura"] = f"indisponivel: {e}"
         logger.warning("Captura de pacotes indisponivel: %s", e)
 
-iniciar_monitoramento()
+
+def _should_autostart_monitoring() -> bool:
+    if os.environ.get("IDS_SKIP_MONITOR_AUTOSTART", "false").lower() == "true":
+        return False
+    return "pytest" not in sys.modules
+
+
+if _should_autostart_monitoring():
+    iniciar_monitoramento()
+else:
+    monitor_status["captura"] = "desativada"
 
 if __name__ == "__main__":
     host    = os.environ.get("IDS_HOST", "127.0.0.1")
