@@ -144,6 +144,7 @@ try:
         auth, AUTH_ENABLED, get_ssl_context, print_startup_info, HTTPS_PORT,
         verify_any_token, _extract_token, require_session, DASHBOARD_AUTH,
         csrf_protect, rotate_admin_token, _get_or_set_csrf_cookie,
+        ensure_safe_startup,
         totp_is_enabled, totp_verify, totp_generate_secret, totp_disable,
         totp_provisioning_uri, totp_get_secret,
     )
@@ -164,7 +165,8 @@ except Exception as _auth_err:
     DASHBOARD_AUTH  = False
     AUTH_MODULE_OK  = False
     def get_ssl_context(): return None
-    def print_startup_info(): pass
+    def print_startup_info(host="127.0.0.1"): pass
+    def ensure_safe_startup(host): return None
     def verify_any_token(token, repo=None): return {"valid": False, "type": None}
     def _extract_token(): return ""
     def rotate_admin_token(): raise RuntimeError("auth module indisponível")
@@ -8479,7 +8481,8 @@ if __name__ == "__main__":
     debug   = os.environ.get("IDS_DEBUG", "false").lower() == "true"
     ssl_ctx = get_ssl_context()
 
-    print_startup_info()
+    ensure_safe_startup(host)
+    print_startup_info(host=host)
 
     app.run(
         host=host,

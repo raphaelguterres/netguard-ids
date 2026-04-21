@@ -2,6 +2,7 @@ import os
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 from flask import Flask
 
@@ -128,6 +129,35 @@ class TestAuthCsrfFlow(unittest.TestCase):
                 sys.modules["app"] = orig_app
             else:
                 sys.modules.pop("app", None)
+
+
+class TestStartupGuards(unittest.TestCase):
+
+    def test_loopback_bind_eh_aceito_sem_auth(self):
+        auth.ensure_safe_startup("127.0.0.1", auth_enabled=False)
+        auth.ensure_safe_startup("localhost", auth_enabled=False)
+        auth.ensure_safe_startup("::1", auth_enabled=False)
+
+    def test_bind_publico_sem_auth_falha_fechado(self):
+        with self.assertRaises(RuntimeError):
+            auth.ensure_safe_startup("0.0.0.0", auth_enabled=False)
+
+        with self.assertRaises(RuntimeError):
+            auth.ensure_safe_startup("192.168.1.50", auth_enabled=False)
+
+    def test_bind_publico_com_auth_ligada_eh_permitido(self):
+        auth.ensure_safe_startup("0.0.0.0", auth_enabled=True)
+
+    def test_override_explicito_permite_bind_inseguro(self):
+        with patch.dict(os.environ, {"IDS_ALLOW_INSECURE_DEV": "true"}, clear=False):
+            auth.ensure_safe_startup("0.0.0.0", auth_enabled=False)
+
+    def test_is_loopback_bind_classifica_hosts_corretamente(self):
+        self.assertTrue(auth.is_loopback_bind("127.0.0.1"))
+        self.assertTrue(auth.is_loopback_bind("localhost"))
+        self.assertTrue(auth.is_loopback_bind("[::1]"))
+        self.assertFalse(auth.is_loopback_bind("0.0.0.0"))
+        self.assertFalse(auth.is_loopback_bind("example.com"))
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ import hashlib  # noqa: F401
 import logging
 import pathlib
 import sys
+import ipaddress
 from functools import wraps
 from datetime import datetime, timezone  # noqa: F401
 from flask import request, jsonify, redirect
@@ -161,6 +162,58 @@ def _resolve_repo():
         except Exception:
             pass
     return None
+
+
+def is_loopback_bind(host: str) -> bool:
+    """
+    Retorna True quando o host de bind representa apenas loopback local.
+
+    Trata nomes comuns (`localhost`) e IPv4/IPv6. Wildcards (`0.0.0.0`, `::`)
+    são considerados não-loopback porque expõem em todas as interfaces.
+    """
+    normalized = (host or "").strip().lower()
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+
+    if normalized in {"localhost", "127.0.0.1", "::1"}:
+        return True
+    if normalized in {"", "0.0.0.0", "::", "*"}:
+        return False
+
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def ensure_safe_startup(
+    host: str,
+    *,
+    auth_enabled: bool | None = None,
+    allow_insecure_dev: bool | None = None,
+) -> None:
+    """
+    Falha fechado quando alguém tenta subir a aplicação sem auth fora de loopback.
+
+    Mantém o fluxo rápido de desenvolvimento local (`127.0.0.1`/`localhost`) mas
+    evita exposição acidental em LAN/Internet. O bypass exige opt-in explícito
+    via `IDS_ALLOW_INSECURE_DEV=true`.
+    """
+    if auth_enabled is None:
+        auth_enabled = AUTH_ENABLED
+    if allow_insecure_dev is None:
+        allow_insecure_dev = (
+            os.environ.get("IDS_ALLOW_INSECURE_DEV", "false").lower() == "true"
+        )
+
+    if auth_enabled or is_loopback_bind(host) or allow_insecure_dev:
+        return
+
+    raise RuntimeError(
+        "Refusing to start NetGuard with IDS_AUTH=false on a non-loopback bind "
+        f"('{host}'). Set IDS_AUTH=true, bind IDS_HOST to 127.0.0.1/localhost, "
+        "or set IDS_ALLOW_INSECURE_DEV=true only for isolated labs."
+    )
 
 
 # ── Proteção de dashboard (sempre ativa, independente de IDS_AUTH) ─
@@ -470,7 +523,7 @@ def get_ssl_context():
     return None
 
 
-def print_startup_info():
+def print_startup_info(host: str = "127.0.0.1"):
     """Imprime informações de acesso no startup."""
     token = get_or_create_token() if AUTH_ENABLED else None
     https = HTTPS_ENABLED and CERT_FILE.exists()
@@ -487,6 +540,10 @@ def print_startup_info():
     else:
         print(f"  ⚠️  Auth desativada — qualquer pessoa na rede pode acessar")
         print(f"     Para ativar: $env:IDS_AUTH='true'")
+        if is_loopback_bind(host):
+            print(f"     Bind atual: {host} (somente loopback local)")
+        else:
+            print(f"     Bind atual: {host} (NÃO recomendado sem auth)")
     print("─" * 50 + "\n")
 
 

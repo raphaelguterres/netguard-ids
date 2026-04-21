@@ -20,8 +20,10 @@ Um token tenant **não consegue** acessar endpoints admin (decorator
 ### Kill switch de autenticação
 
 `IDS_AUTH=false` desativa **toda** a autenticação. Uso **somente em dev local**
-(ambiente isolado, sem rede pública). A UI exibe banner "DEV MODE" quando o
-modo está ativo — se o banner aparecer em prod, algo está errado.
+(ambiente isolado, sem rede pública). O bootstrap bloqueia bind fora de
+loopback quando `IDS_AUTH=false`, a menos que `IDS_ALLOW_INSECURE_DEV=true`
+seja definido explicitamente. A UI exibe banner "DEV MODE" quando o modo está
+ativo — se o banner aparecer em prod, algo está errado.
 
 ---
 
