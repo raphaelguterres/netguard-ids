@@ -30,6 +30,8 @@ sys.path.insert(0, ROOT)
 
 # Configuração mínima de ambiente para testes
 os.environ.setdefault("TOKEN_SIGNING_SECRET", "integration-test-key")
+os.environ.setdefault("IDS_AUTH", "false")
+os.environ.setdefault("IDS_DASHBOARD_AUTH", "false")
 os.environ.setdefault("IDS_DB_PATH",          tempfile.mktemp(suffix=".db"))
 os.environ.setdefault("IDS_AUDIT_LOG",        tempfile.mktemp(suffix=".log"))
 os.environ.setdefault("IDS_BF_DB",            tempfile.mktemp(suffix=".db"))

@@ -94,6 +94,7 @@ Deploy em 1 clique, sem gerenciar servidor. Ideal para começar.
    DATABASE_URL=postgresql://...   ← gerado automaticamente pelo plugin PostgreSQL do Railway
    IDS_DASHBOARD_AUTH=true
    HTTPS_ONLY=true
+   TOKEN_SIGNING_SECRET=<string aleatória de 64 chars>
    SECRET_KEY=<string aleatória de 64 chars>
    APP_URL=https://seu-app.railway.app
    ```
@@ -257,6 +258,7 @@ Marque cada item antes de colocar em produção:
 
 | Variável | Valor recomendado | Status |
 |----------|-------------------|--------|
+| `TOKEN_SIGNING_SECRET` | String aleatória de 64 chars: `python3 -c "import secrets; print(secrets.token_hex(32))"` | ☐ |
 | `SECRET_KEY` | String aleatória de 64 chars: `python3 -c "import secrets; print(secrets.token_hex(32))"` | ☐ |
 | `HTTPS_ONLY` | `true` | ☐ |
 | `IDS_DASHBOARD_AUTH` | `true` | ☐ |
@@ -417,6 +419,7 @@ rclone copy /backups/ s3:seu-bucket/netguard-backups/ --max-age 30d
 Execute cada item antes de divulgar o produto:
 
 **Configuração**
+- [ ] `TOKEN_SIGNING_SECRET` gerada aleatoriamente e distinta de `SECRET_KEY`
 - [ ] `SECRET_KEY` gerada aleatoriamente (nunca o valor padrão)
 - [ ] `HTTPS_ONLY=true` ativo
 - [ ] `IDS_DASHBOARD_AUTH=true` ativo
@@ -466,3 +469,29 @@ curl -X POST https://seu-dominio.com/trial \
      -H "Content-Type: application/json" \
      -d '{"name":"Cliente Teste","email":"cliente@empresa.com","plan":"pro"}'
 ```
+## Atualizações recentes de operação segura
+
+### Segredos obrigatórios
+
+- `TOKEN_SIGNING_SECRET` é obrigatório fora de dev/test.
+- O boot falha fechado se ele não estiver configurado.
+- Use valor distinto de `SECRET_KEY`.
+
+### Audit log
+
+- Há rotação embutida do audit log.
+- Variáveis novas/relevantes:
+  `IDS_AUDIT_LOG_ROTATE_WHEN`,
+  `IDS_AUDIT_LOG_ROTATE_INTERVAL`,
+  `IDS_AUDIT_LOG_RETENTION`
+
+### Rate limit admin
+
+- O rate limit admin agora usa SQLite compartilhado por host.
+- Variável relevante: `IDS_ADMIN_RL_DB`
+
+### Background jobs
+
+- `app.py` não inicia monitoramento/schedulers ao ser importado.
+- Em `python app.py`, os jobs podem autostartar conforme as flags.
+- Em WSGI/Gunicorn multi-worker, mantenha opt-in explícito para evitar side effects.

@@ -5,6 +5,7 @@ Um único processo. Sem simulador. Sem dados falsos.
 """
 
 import os, re, json, sys, time, logging, functools, pathlib, threading, subprocess, socket, ipaddress, secrets  # noqa: F401
+import logging.handlers
 from types import MethodType
 from platform_utils import (  # noqa: F401
     OS, IS_WINDOWS, IS_LINUX,
@@ -363,10 +364,87 @@ logger.info("Hostname detectado: %s", REAL_HOSTNAME)
 
 # ── Audit log (JSON estruturado) ──────────────────────────────────
 _audit_logger = logging.getLogger("netguard.audit")
-_audit_file   = os.environ.get("IDS_AUDIT_LOG", "netguard_audit.log")
+_audit_file = os.environ.get("IDS_AUDIT_LOG", "netguard_audit.log")
+
+
+def _safe_int_env(name: str, default: int, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(os.environ.get(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_audit_log_path() -> pathlib.Path:
+    return pathlib.Path(_audit_file).expanduser()
+
+
+def _iter_audit_log_paths() -> list[pathlib.Path]:
+    audit_path = _get_audit_log_path()
+    parent = audit_path.parent
+    if not parent.exists():
+        return [audit_path] if audit_path.exists() else []
+
+    prefix = f"{audit_path.name}."
+    candidates = [
+        path for path in parent.iterdir()
+        if path.is_file() and (path.name == audit_path.name or path.name.startswith(prefix))
+    ]
+    return sorted(
+        candidates,
+        key=lambda path: (0 if path.name != audit_path.name else 1, path.stat().st_mtime),
+    )
+
+
+def _iter_audit_entries():
+    for audit_path in _iter_audit_log_paths():
+        try:
+            with open(audit_path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if entry.get("event_type") and entry.get("event_type") != "audit":
+                        continue
+                    yield entry
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            logger.debug("Falha ao ler audit log %s: %s", audit_path, exc)
+
+
+_AUDIT_ROTATE_WHEN = (os.environ.get("IDS_AUDIT_LOG_ROTATE_WHEN", "midnight").strip() or "midnight")
+_AUDIT_ROTATE_INTERVAL = _safe_int_env("IDS_AUDIT_LOG_ROTATE_INTERVAL", 1)
+_AUDIT_RETENTION = _safe_int_env("IDS_AUDIT_LOG_RETENTION", 14)
+
 if not _audit_logger.handlers:
-    _ah = logging.FileHandler(_audit_file, encoding="utf-8")
-    _ah.setFormatter(JSONFormatter())   # mesmo formato JSON estruturado
+    _audit_path_obj = _get_audit_log_path()
+    try:
+        _audit_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    try:
+        _ah = logging.handlers.TimedRotatingFileHandler(
+            str(_audit_path_obj),
+            when=_AUDIT_ROTATE_WHEN,
+            interval=_AUDIT_ROTATE_INTERVAL,
+            backupCount=_AUDIT_RETENTION,
+            encoding="utf-8",
+            utc=True,
+        )
+    except (TypeError, ValueError):
+        _ah = logging.handlers.TimedRotatingFileHandler(
+            str(_audit_path_obj),
+            when="midnight",
+            interval=1,
+            backupCount=_AUDIT_RETENTION,
+            encoding="utf-8",
+            utc=True,
+        )
+    _ah.setFormatter(JSONFormatter())
     _audit_logger.addHandler(_ah)
     _audit_logger.setLevel(logging.INFO)
     _audit_logger.propagate = False
@@ -614,30 +692,16 @@ app.config["MAX_CONTENT_LENGTH"] = int(
 )
 
 # ── Security module ───────────────────────────────────────────────
-try:
-    from security import (
+from security import (
         hash_token, verify_token,
-        get_bf_guard,
+        get_bf_guard, get_admin_rate_guard,
         require_role,
         mask_sensitive, SensitiveDataFilter,
         validate_redirect_url, safe_filename, sanitize_csv_cell,
         SESSION_MAX_AGE_SECONDS,
         rotate_token,
     )
-    SECURITY_OK = True
-except Exception as _sec_err:
-    SECURITY_OK = False
-    print(f"[WARN] Security module: {_sec_err}")
-    # No-op fallbacks para não quebrar o app
-    def hash_token(t): return t          # noqa
-    def verify_token(t, h): return t == h  # noqa
-    def require_role(*r): return lambda f: f  # noqa
-    def mask_sensitive(t): return t      # noqa
-    def validate_redirect_url(u, **_): return u or "/"  # noqa
-    def safe_filename(f, d="download"): return os.path.basename(f) if f else d  # noqa
-    def sanitize_csv_cell(v): return v   # noqa
-    def get_bf_guard(**_): return None   # noqa
-    SESSION_MAX_AGE_SECONDS = 8 * 3600  # noqa
+SECURITY_OK = True
 
 # ── SensitiveDataFilter — instala em todos os handlers de logging ──
 if SECURITY_OK:
@@ -858,6 +922,47 @@ _geo_cache_lock    = threading.Lock()
 # Tracks which tenant bg-refresh jobs are in-flight
 _bg_running: set        = set()
 _bg_running_lock        = threading.Lock()
+_service_start_lock     = threading.Lock()
+_started_services: set[str] = set()
+
+
+def _env_bool(name: str):
+    raw = os.environ.get(name)
+    if raw is None:
+        return None
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _background_autostart_enabled(feature_env: str, legacy_disable_env: str | None = None) -> bool:
+    if legacy_disable_env and _env_bool(legacy_disable_env) is True:
+        return False
+
+    specific = _env_bool(feature_env)
+    if specific is not None:
+        return specific
+
+    global_setting = _env_bool("IDS_AUTOSTART_BACKGROUND")
+    if global_setting is not None:
+        return global_setting
+
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+    return __name__ == "__main__"
+
+
+def _start_service_once(service_name: str, starter) -> bool:
+    with _service_start_lock:
+        if service_name in _started_services:
+            return False
+        _started_services.add(service_name)
+
+    try:
+        starter()
+        return True
+    except Exception:
+        with _service_start_lock:
+            _started_services.discard(service_name)
+        raise
 
 def _ttl_cache_get(cache: dict, lock: threading.Lock, key: str, ttl: float):
     """Legacy helper — returns data only within fresh window."""
@@ -984,7 +1089,11 @@ def _get_ti_feed():
     with _engine_singletons_lock:
         if _ti_feed_singleton is None:
             _ti_feed_singleton = get_ti_feed(_get_engine_db_path())
-        if not _ti_feed_scheduler_started and hasattr(_ti_feed_singleton, "start_scheduler"):
+        if (
+            not _ti_feed_scheduler_started
+            and _background_autostart_enabled("IDS_AUTOSTART_TI_FEED_SCHEDULER")
+            and hasattr(_ti_feed_singleton, "start_scheduler")
+        ):
             _ti_feed_singleton.start_scheduler()
             _ti_feed_scheduler_started = True
         return _ti_feed_singleton
@@ -3599,7 +3708,6 @@ if SOC_IMPORT_OK:
             alert_callback = _soc_alert_live,
             host_id        = REAL_HOSTNAME,
         )
-        detection_engine.start()
         # Migrate legacy host_id='new' in DB
         try:
             detection_engine.storage._migrate(detection_engine.host_id)
@@ -5756,15 +5864,17 @@ def _admin_only(f):
 #   Lock global porque Flask dev server é multi-threaded (threading mode).
 #   Contenção é mínima — a seção crítica é ~10 linhas em memória.
 
-_admin_rl_state   = {}          # { ip: [t0, t1, ...] monotonic timestamps }
-_admin_rl_lock    = threading.Lock()
-_ADMIN_RL_LIMIT   = int(os.environ.get("IDS_ADMIN_RL_LIMIT",  "120"))  # req/janela/IP
-_ADMIN_RL_WINDOW  = int(os.environ.get("IDS_ADMIN_RL_WINDOW", "60"))   # segundos
+_ADMIN_RL_LIMIT = _safe_int_env("IDS_ADMIN_RL_LIMIT", 120)
+_ADMIN_RL_WINDOW = _safe_int_env("IDS_ADMIN_RL_WINDOW", 60)
+_ADMIN_RL_DB = os.environ.get(
+    "IDS_ADMIN_RL_DB",
+    os.environ.get("IDS_BF_DB", "netguard_security.db"),
+)
 # Stream é long-lived (SSE) — se incluir, consumiria o limite em 1 conexão.
 _ADMIN_RL_EXEMPT  = {"/api/admin/stream"}
 
 
-def _admin_rate_check(ip: str) -> bool:
+def _admin_rate_check(ip: str, request_path: str) -> tuple[bool, int]:
     """
     True se a request pode passar, False se estourou o limite.
     Sliding window: mantém lista de timestamps dentro de _ADMIN_RL_WINDOW,
@@ -5773,17 +5883,17 @@ def _admin_rate_check(ip: str) -> bool:
     Usa monotonic — time.time() pode voltar atrás se o sistema sincroniza
     NTP durante a janela e quebra a lógica de poda.
     """
-    now = time.monotonic()
-    cutoff = now - _ADMIN_RL_WINDOW
-    with _admin_rl_lock:
-        hits = _admin_rl_state.setdefault(ip, [])
-        # Poda janela: remove timestamps mais velhos que a janela
-        while hits and hits[0] < cutoff:
-            hits.pop(0)
-        if len(hits) >= _ADMIN_RL_LIMIT:
-            return False
-        hits.append(now)
-        return True
+    try:
+        allowed, _count, retry_after = get_admin_rate_guard(_ADMIN_RL_DB).check_and_record(
+            source_ip=ip,
+            request_path=request_path,
+            limit=_ADMIN_RL_LIMIT,
+            window_seconds=_ADMIN_RL_WINDOW,
+        )
+        return allowed, retry_after
+    except Exception as exc:
+        logger.warning("Admin rate limit backend indisponivel: %s", exc)
+        return True, 0
 
 
 @app.before_request
@@ -5803,7 +5913,8 @@ def _enforce_admin_rate_limit():
     if p in _ADMIN_RL_EXEMPT:
         return None
     ip = request.remote_addr or "-"
-    if not _admin_rate_check(ip):
+    allowed, retry_after = _admin_rate_check(ip, p)
+    if not allowed:
         try:
             audit("ADMIN_RATE_LIMITED", ip=ip, detail=f"path={p}")
         except Exception:
@@ -5814,7 +5925,7 @@ def _enforce_admin_rate_limit():
             "message": "Muitas requisições admin; aguarde alguns segundos.",
         })
         resp.status_code = 429
-        resp.headers["Retry-After"] = str(_ADMIN_RL_WINDOW)
+        resp.headers["Retry-After"] = str(max(1, retry_after or _ADMIN_RL_WINDOW))
         return resp
     return None
 
@@ -7744,7 +7855,6 @@ def admin_audit_log():
       - event_type ausente: mantém (compat com entradas legadas)
       - source_ip ou ip: tenta os dois (schema mudou entre versões)
     """
-    import json as _json
     # Clamp defensivo em [1, 1000]:
     #   - limit=0 ou negativo quebra o slice [-limit:] (retornava TUDO)
     #   - int(...) pode lançar ValueError se vier lixo na query string
@@ -7759,46 +7869,30 @@ def admin_audit_log():
     q_filter      = request.args.get("q", "").strip().lower()
 
     entries = []
-    audit_path = os.environ.get("IDS_AUDIT_LOG", "netguard_audit.log")
     try:
-        if os.path.exists(audit_path):
-            with open(audit_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        obj = _json.loads(line)
-                    except _json.JSONDecodeError:
-                        continue
+        for obj in _iter_audit_entries():
+            action_val = obj.get("msg", "")
+            ts_val = obj.get("ts", "")
+            actor_val = obj.get("actor", "—")
+            ip_val = obj.get("source_ip") or obj.get("ip") or "—"
+            detail_val = obj.get("detail", "")
 
-                    # Só linhas de audit
-                    if obj.get("event_type") and obj.get("event_type") != "audit":
-                        continue
+            if action_filter and action_val.upper() != action_filter:
+                continue
+            if since_filter and ts_val < since_filter:
+                continue
+            if q_filter:
+                hay = f"{actor_val} {ip_val} {detail_val}".lower()
+                if q_filter not in hay:
+                    continue
 
-                    action_val = obj.get("msg", "")
-                    ts_val     = obj.get("ts", "")
-                    actor_val  = obj.get("actor", "—")
-                    ip_val     = obj.get("source_ip") or obj.get("ip") or "—"
-                    detail_val = obj.get("detail", "")
-
-                    if action_filter and action_val.upper() != action_filter:
-                        continue
-                    if since_filter and ts_val < since_filter:
-                        continue
-                    if q_filter:
-                        hay = f"{actor_val} {ip_val} {detail_val}".lower()
-                        if q_filter not in hay:
-                            continue
-
-                    entries.append({
-                        "ts":     ts_val,
-                        "action": action_val,
-                        "actor":  actor_val,
-                        "ip":     ip_val,
-                        "detail": detail_val,
-                    })
-        # Retorna as mais recentes primeiro
+            entries.append({
+                "ts": ts_val,
+                "action": action_val,
+                "actor": actor_val,
+                "ip": ip_val,
+                "detail": detail_val,
+            })
         entries = list(reversed(entries[-limit:]))
     except Exception as exc:
         logger.error("admin_audit_log error: %s", exc)
@@ -7813,7 +7907,6 @@ def admin_security_stats():
     """
     Stats de segurança: tentativas bloqueadas hoje, MRR estimado.
     """
-    import json as _json
     from datetime import datetime, timezone
 
     today = datetime.now(timezone.utc).date().isoformat()
@@ -7821,17 +7914,10 @@ def admin_security_stats():
     mrr = 0
 
     # Conta LOGIN_BLOCKED no audit log de hoje
-    audit_path = os.environ.get("IDS_AUDIT_LOG", "netguard_audit.log")
     try:
-        if os.path.exists(audit_path):
-            with open(audit_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        obj = _json.loads(line)
-                        if obj.get("msg","") == "LOGIN_BLOCKED" and obj.get("ts","").startswith(today):
-                            blocked_today += 1
-                    except Exception:
-                        pass
+        for obj in _iter_audit_entries():
+            if obj.get("msg", "") == "LOGIN_BLOCKED" and obj.get("ts", "").startswith(today):
+                blocked_today += 1
     except Exception:
         pass
 
@@ -7885,18 +7971,18 @@ def _security_score_checks() -> list[dict]:
         if not auth_on else "",
     )
 
-    # ── 2. SECRET_KEY não é o padrão inseguro (15 pts) ────────────
+    # ── 2. TOKEN_SIGNING_SECRET forte e exclusivo (15 pts) ────────
     _dev_keys = {
         "netguard-insecure-dev-key-change-in-prod",
         "dev", "secret", "changeme", "insecure",
     }
-    secret_key = app.config.get("SECRET_KEY", "")
-    secret_ok = bool(secret_key) and secret_key not in _dev_keys and len(secret_key) >= 32
+    signing_secret = (os.environ.get("TOKEN_SIGNING_SECRET") or "").strip()
+    secret_ok = bool(signing_secret) and signing_secret not in _dev_keys and len(signing_secret) >= 32
     _check(
-        "secret_key", "SECRET_KEY Não-Padrão", "identity", 15,
+        "token_signing_secret", "TOKEN_SIGNING_SECRET Forte", "identity", 15,
         secret_ok,
-        f"OK ({len(secret_key)} chars)" if secret_ok else "Usando chave padrão insegura",
-        "Defina SECRET_KEY como string aleatória ≥32 chars em variável de ambiente."
+        f"OK ({len(signing_secret)} chars)" if secret_ok else "Ausente ou fraco",
+        "Defina TOKEN_SIGNING_SECRET com valor aleatório >=32 chars e distinto de SECRET_KEY."
         if not secret_ok else "",
     )
 
@@ -8715,47 +8801,62 @@ def dashboard():
 
 # ── Inicialização ──────────────────────────────────────────────────
 def iniciar_monitoramento():
-    threading.Thread(target=loop_monitor, kwargs={"intervalo": 30},
-                     daemon=True, name="ids-monitor").start()
-    try:
-        from packet_capture import PacketCapture, detectar_interface_ativa
-        interface = detectar_interface_ativa()
-        capture   = PacketCapture(callback=analisar, interface=interface)
-        capture.iniciar()
-        monitor_status["captura"] = f"ativa | interface={interface}"
-        logger.info("Captura de pacotes iniciada | interface=%s", interface)
-    except Exception as e:
-        monitor_status["captura"] = f"indisponivel: {e}"
-        logger.warning("Captura de pacotes indisponivel: %s", e)
+    def _start_monitoring():
+        threading.Thread(
+            target=loop_monitor,
+            kwargs={"intervalo": 30},
+            daemon=True,
+            name="ids-monitor",
+        ).start()
+        try:
+            from packet_capture import PacketCapture, detectar_interface_ativa
+            interface = detectar_interface_ativa()
+            capture = PacketCapture(callback=analisar, interface=interface)
+            capture.iniciar()
+            monitor_status["captura"] = f"ativa | interface={interface}"
+            logger.info("Captura de pacotes iniciada | interface=%s", interface)
+        except Exception as e:
+            monitor_status["captura"] = f"indisponivel: {e}"
+            logger.warning("Captura de pacotes indisponivel: %s", e)
+
+    _start_service_once("monitoring", _start_monitoring)
 
 
 def _should_autostart_monitoring() -> bool:
-    if os.environ.get("IDS_SKIP_MONITOR_AUTOSTART", "false").lower() == "true":
-        return False
-    return "pytest" not in sys.modules
+    return _background_autostart_enabled(
+        "IDS_AUTOSTART_MONITOR",
+        legacy_disable_env="IDS_SKIP_MONITOR_AUTOSTART",
+    )
 
 
-if _should_autostart_monitoring():
-    iniciar_monitoramento()
-else:
+if not _should_autostart_monitoring():
     monitor_status["captura"] = "desativada"
 
-if __name__ == "__main__":
-    host    = os.environ.get("IDS_HOST", "127.0.0.1")
-    port    = int(os.environ.get("IDS_PORT", 5000))
-    debug   = os.environ.get("IDS_DEBUG", "false").lower() == "true"
-    ssl_ctx = get_ssl_context()
 
-    ensure_safe_startup(host)
-    print_startup_info(host=host)
+def _start_soc_engine_background():
+    if detection_engine is None:
+        return
+    _start_service_once("soc-engine", detection_engine.start)
+    logger.info("SOC Engine background iniciado | host=%s", detection_engine.host_id)
 
-    app.run(
-        host=host,
-        port=port,
-        debug=debug,
-        ssl_context=ssl_ctx,
-        use_reloader=False,
-    )
+
+def start_background_services() -> None:
+    if _background_autostart_enabled("IDS_AUTOSTART_SOC_ENGINE"):
+        _start_soc_engine_background()
+    else:
+        logger.info("SOC Engine autostart desativado neste bootstrap")
+
+    if _should_autostart_monitoring():
+        iniciar_monitoramento()
+    else:
+        monitor_status["captura"] = "desativada"
+
+    if _background_autostart_enabled("IDS_AUTOSTART_TRIAL_SCHEDULER"):
+        _trial_expiry_scheduler()
+    else:
+        logger.info("Trial expiry scheduler autostart desativado neste bootstrap")
+
+
 
 
 # ── Trial expiry reminder scheduler ──────────────────────────────────────────
@@ -8804,8 +8905,31 @@ def _trial_expiry_scheduler() -> None:
                 logger.debug("Trial expiry scheduler erro: %s", _exc)
             _time.sleep(_CHECK_INTERVAL)
 
-    threading.Thread(target=_loop, daemon=True, name="trial-expiry-scheduler").start()
+    _start_service_once(
+        "trial-expiry-scheduler",
+        lambda: threading.Thread(
+            target=_loop,
+            daemon=True,
+            name="trial-expiry-scheduler",
+        ).start(),
+    )
     logger.info("Trial expiry scheduler iniciado (intervalo=1h, janela=1-25h)")
 
 
-_trial_expiry_scheduler()
+if __name__ == "__main__":
+    host = os.environ.get("IDS_HOST", "127.0.0.1")
+    port = int(os.environ.get("IDS_PORT", 5000))
+    debug = os.environ.get("IDS_DEBUG", "false").lower() == "true"
+    ssl_ctx = get_ssl_context()
+
+    ensure_safe_startup(host)
+    print_startup_info(host=host)
+    start_background_services()
+
+    app.run(
+        host=host,
+        port=port,
+        debug=debug,
+        ssl_context=ssl_ctx,
+        use_reloader=False,
+    )

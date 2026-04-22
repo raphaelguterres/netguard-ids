@@ -26,19 +26,23 @@ import logging
 import tempfile
 import threading
 import unittest
+import importlib
 from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-import security as security_module
 
 # Chave de teste isolada — nunca usar em produção
 os.environ.setdefault("TOKEN_SIGNING_SECRET", "test-signing-key-for-unit-tests-only")
+os.environ.setdefault("IDS_ENV", "test")
+import security as security_module
 
 from security import (
     hash_token,
     verify_token,
+    AdminRateLimitGuard,
     BruteForceGuard,
+    get_admin_rate_guard,
     get_bf_guard,
     require_role,
     mask_sensitive,
@@ -678,6 +682,74 @@ class TestGetBfGuard(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════
 # 12. SSRF GUARD — _validate_webhook_url
 # ══════════════════════════════════════════════════════════════════
+
+class TestAdminRateLimitGuard(unittest.TestCase):
+
+    def _reset_cache(self):
+        for guard in list(getattr(security_module, "_admin_rl_guards", {}).values()):
+            try:
+                guard.close()
+            except Exception:
+                pass
+        getattr(security_module, "_admin_rl_guards", {}).clear()
+
+    def setUp(self):
+        self._reset_cache()
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+
+    def tearDown(self):
+        self._reset_cache()
+        try:
+            os.unlink(self.tmp.name)
+        except OSError:
+            pass
+
+    def test_retorna_instancia_admin_rate_limit(self):
+        guard = get_admin_rate_guard(self.tmp.name)
+        self.assertIsInstance(guard, AdminRateLimitGuard)
+
+    def test_compartilha_mesma_instancia_por_caminho(self):
+        g1 = get_admin_rate_guard(self.tmp.name)
+        g2 = get_admin_rate_guard(self.tmp.name)
+        self.assertIs(g1, g2)
+
+    def test_bloqueia_quando_limite_e_excedido(self):
+        guard = get_admin_rate_guard(self.tmp.name)
+        allowed_1, _, _ = guard.check_and_record("1.2.3.4", "/api/admin/audit", limit=2, window_seconds=60)
+        allowed_2, _, _ = guard.check_and_record("1.2.3.4", "/api/admin/audit", limit=2, window_seconds=60)
+        allowed_3, _, retry_after = guard.check_and_record("1.2.3.4", "/api/admin/audit", limit=2, window_seconds=60)
+        self.assertTrue(allowed_1)
+        self.assertTrue(allowed_2)
+        self.assertFalse(allowed_3)
+        self.assertGreaterEqual(retry_after, 1)
+
+
+class TestSigningSecretBootstrap(unittest.TestCase):
+
+    def test_import_falha_sem_token_signing_secret_fora_de_dev(self):
+        original_module = sys.modules.pop("security", None)
+        try:
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "TOKEN_SIGNING_SECRET": "",
+                    "SECRET_KEY": "",
+                    "IDS_ENV": "production",
+                    "NETGUARD_ENV": "production",
+                    "FLASK_ENV": "production",
+                    "PYTEST_CURRENT_TEST": "",
+                },
+                clear=False,
+            ):
+                with self.assertRaises(RuntimeError):
+                    importlib.import_module("security")
+        finally:
+            sys.modules.pop("security", None)
+            if original_module is not None:
+                sys.modules["security"] = original_module
+                globals()["security_module"] = original_module
+
 
 class TestSSRFGuard(unittest.TestCase):
     """

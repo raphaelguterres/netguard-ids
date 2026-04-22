@@ -23,6 +23,10 @@ from unittest.mock import MagicMock, patch
 # ── path setup ────────────────────────────────────────────────────
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+os.environ.setdefault("IDS_AUTH", "false")
+os.environ.setdefault("IDS_DASHBOARD_AUTH", "false")
+os.environ.setdefault("IDS_ENV", "test")
+os.environ.setdefault("TOKEN_SIGNING_SECRET", "new-features-test-signing-key")
 
 
 # ══════════════════════════════════════════════════════════════════

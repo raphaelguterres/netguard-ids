@@ -33,10 +33,52 @@ logger = logging.getLogger("netguard.security")
 # ── Chave de assinatura dos tokens ───────────────────────────────
 # Lida em tempo de importação; usa SECRET_KEY do ambiente se disponível.
 # Nunca exponha ou logue esta chave.
-_SIGNING_KEY: bytes = os.environ.get(
-    "TOKEN_SIGNING_SECRET",
-    os.environ.get("SECRET_KEY", "netguard-insecure-dev-key-change-in-prod"),
-).encode()
+INSECURE_DEV_SIGNING_KEY = "netguard-insecure-dev-key-change-in-prod"
+_WEAK_SIGNING_SECRETS = {
+    INSECURE_DEV_SIGNING_KEY,
+    "dev",
+    "secret",
+    "changeme",
+    "insecure",
+}
+
+
+def _is_dev_or_test_runtime() -> bool:
+    for env_name in ("NETGUARD_ENV", "IDS_ENV", "FLASK_ENV"):
+        current = os.environ.get(env_name, "").strip().lower()
+        if current in {"dev", "development", "local", "test", "testing"}:
+            return True
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+def _load_signing_key() -> bytes:
+    explicit_secret = os.environ.get("TOKEN_SIGNING_SECRET", "").strip()
+    if explicit_secret:
+        if (
+            not _is_dev_or_test_runtime()
+            and explicit_secret.strip().lower() in _WEAK_SIGNING_SECRETS
+        ):
+            raise RuntimeError(
+                "TOKEN_SIGNING_SECRET usa um valor inseguro de desenvolvimento. "
+                "Configure um segredo exclusivo antes de iniciar em producao."
+            )
+        return explicit_secret.encode("utf-8")
+
+    if not _is_dev_or_test_runtime():
+        raise RuntimeError(
+            "TOKEN_SIGNING_SECRET e obrigatorio fora de desenvolvimento/testes. "
+            "Configure um segredo forte no ambiente antes de iniciar o NetGuard."
+        )
+
+    fallback_secret = os.environ.get("SECRET_KEY", "").strip() or INSECURE_DEV_SIGNING_KEY
+    logger.warning(
+        "TOKEN_SIGNING_SECRET ausente; usando fallback permitido apenas em dev/test. "
+        "Configure TOKEN_SIGNING_SECRET antes de expor a instancia."
+    )
+    return fallback_secret.encode("utf-8")
+
+
+_SIGNING_KEY: bytes = _load_signing_key()
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -255,6 +297,117 @@ class BruteForceGuard:
 # ══════════════════════════════════════════════════════════════════
 # 3. RBAC — Role-Based Access Control
 # ══════════════════════════════════════════════════════════════════
+
+_ADMIN_RL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS admin_rate_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_ip    TEXT NOT NULL,
+    request_path TEXT NOT NULL,
+    event_ts     REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_admin_rate_events_ip_ts
+    ON admin_rate_events(source_ip, event_ts);
+"""
+
+
+class AdminRateLimitGuard:
+    """
+    Rate limit persistido em SQLite para endpoints admin.
+
+    Compartilha estado entre workers do mesmo host sem depender da memoria
+    privada do processo.
+    """
+
+    def __init__(self, db_path: str = "netguard_security.db"):
+        self.db_path = db_path
+        self._local = threading.local()
+        self._init_db()
+
+    def _conn(self) -> sqlite3.Connection:
+        if not hasattr(self._local, "conn"):
+            conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=5)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.executescript(_ADMIN_RL_SCHEMA)
+            conn.commit()
+            self._local.conn = conn
+        return self._local.conn
+
+    def _init_db(self) -> None:
+        try:
+            self._conn()
+        except Exception as exc:
+            logger.error("[AdminRateLimitGuard] Falha ao inicializar DB: %s", exc)
+
+    def close(self) -> None:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            return
+        try:
+            conn.close()
+        except Exception:
+            pass
+        try:
+            del self._local.conn
+        except Exception:
+            pass
+
+    def check_and_record(
+        self,
+        source_ip: str,
+        request_path: str,
+        limit: int,
+        window_seconds: int,
+    ) -> tuple[bool, int, int]:
+        """
+        Retorna (allowed, current_count, retry_after_seconds).
+        """
+        source_ip = source_ip or "-"
+        request_path = request_path or "-"
+        limit = max(1, int(limit))
+        window_seconds = max(1, int(window_seconds))
+        now = time.time()
+        cutoff = now - window_seconds
+        conn = self._conn()
+
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "DELETE FROM admin_rate_events WHERE event_ts < ?",
+                (cutoff,),
+            )
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS total, MIN(event_ts) AS oldest
+                FROM admin_rate_events
+                WHERE source_ip = ? AND event_ts >= ?
+                """,
+                (source_ip, cutoff),
+            ).fetchone()
+            current_count = int(row["total"] or 0) if row else 0
+            oldest = float(row["oldest"]) if row and row["oldest"] else now
+
+            if current_count >= limit:
+                conn.commit()
+                retry_after = max(1, int(window_seconds - (now - oldest)))
+                return False, current_count, retry_after
+
+            conn.execute(
+                """
+                INSERT INTO admin_rate_events (source_ip, request_path, event_ts)
+                VALUES (?, ?, ?)
+                """,
+                (source_ip, request_path, now),
+            )
+            conn.commit()
+            return True, current_count + 1, 0
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+
 
 ROLES = {
     "admin":    {"level": 100, "label": "Administrador"},
@@ -574,6 +727,8 @@ def rotate_token(old_token: str, generate_fn) -> tuple[str, str]:
 
 _bf_guards: dict[str, BruteForceGuard] = {}
 _bf_lock = threading.Lock()
+_admin_rl_guards: dict[str, AdminRateLimitGuard] = {}
+_admin_rl_lock = threading.Lock()
 
 
 def get_bf_guard(db_path: str = "netguard_security.db") -> BruteForceGuard:
@@ -586,4 +741,17 @@ def get_bf_guard(db_path: str = "netguard_security.db") -> BruteForceGuard:
             if guard is None:
                 guard = BruteForceGuard(normalized)
                 _bf_guards[normalized] = guard
+    return guard
+
+
+def get_admin_rate_guard(db_path: str = "netguard_security.db") -> AdminRateLimitGuard:
+    """Retorna uma instância singleton do rate limit admin por caminho de banco."""
+    normalized = os.path.abspath(db_path or "netguard_security.db")
+    guard = _admin_rl_guards.get(normalized)
+    if guard is None:
+        with _admin_rl_lock:
+            guard = _admin_rl_guards.get(normalized)
+            if guard is None:
+                guard = AdminRateLimitGuard(normalized)
+                _admin_rl_guards[normalized] = guard
     return guard

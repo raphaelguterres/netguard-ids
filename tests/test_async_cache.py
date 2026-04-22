@@ -20,6 +20,8 @@ from unittest.mock import patch  # noqa: F401
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+os.environ.setdefault("IDS_ENV", "test")
+os.environ.setdefault("TOKEN_SIGNING_SECRET", "async-cache-test-signing-key")
 
 # Import only the cache helpers — extracted directly so we don't need Flask.
 # If app.py cannot be imported, we test equivalent logic inline.

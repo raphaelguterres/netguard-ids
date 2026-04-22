@@ -47,6 +47,15 @@ Dashboard: **http://localhost:5000** · [Full Docker Guide](DOCKER.md)
 
 ---
 
+## Production Notes
+
+- `TOKEN_SIGNING_SECRET` is now **mandatory** outside dev/test. The app fails closed if it is missing in production.
+- Admin rate limiting uses shared SQLite storage on the host (`IDS_ADMIN_RL_DB`) instead of per-process memory.
+- Audit logs rotate automatically via stdlib (`IDS_AUDIT_LOG_ROTATE_WHEN`, `IDS_AUDIT_LOG_ROTATE_INTERVAL`, `IDS_AUDIT_LOG_RETENTION`).
+- Background jobs no longer autostart on import. By default they start only on direct `python app.py`; WSGI/Gunicorn imports stay side-effect free unless you opt in deliberately.
+
+---
+
 ## What is NetGuard?
 
 NetGuard is a **host-centric detection and response** platform that runs locally and monitors your endpoints in real time. It ships a lightweight endpoint agent (`agent.py`, in progress), captures live process trees and network connections, correlates multi-event attack patterns, fires webhook alerts to Slack / Teams / Telegram, and displays everything in a professional dark-mode SOC dashboard — no cloud required, no vendor lock-in.

@@ -24,6 +24,8 @@ os.environ.setdefault("IDS_AUTH", "false")
 os.environ.setdefault("IDS_DASHBOARD_AUTH", "false")
 os.environ.setdefault("IDS_CSRF_DISABLED", "false")
 os.environ.setdefault("HTTPS_ONLY", "false")
+os.environ.setdefault("IDS_ENV", "test")
+os.environ.setdefault("TOKEN_SIGNING_SECRET", "api-endpoints-test-signing-key")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -570,12 +572,25 @@ class TestBackendSingletonsAndCaching(unittest.TestCase):
         self.app_mod._forensics_engine_singleton = None
 
     @patch("app.get_ti_feed")
-    def test_ti_feed_scheduler_starts_only_once(self, mock_get_ti_feed):
+    def test_ti_feed_scheduler_nao_autostarta_em_import_seguro(self, mock_get_ti_feed):
         feed = MagicMock()
         mock_get_ti_feed.return_value = feed
 
         first = self.app_mod._get_ti_feed()
         second = self.app_mod._get_ti_feed()
+
+        self.assertIs(first, second)
+        self.assertEqual(mock_get_ti_feed.call_count, 1)
+        self.assertEqual(feed.start_scheduler.call_count, 0)
+
+    @patch("app.get_ti_feed")
+    def test_ti_feed_scheduler_pode_ser_habilitado_explicitamente(self, mock_get_ti_feed):
+        feed = MagicMock()
+        mock_get_ti_feed.return_value = feed
+
+        with patch.dict(os.environ, {"IDS_AUTOSTART_TI_FEED_SCHEDULER": "true"}, clear=False):
+            first = self.app_mod._get_ti_feed()
+            second = self.app_mod._get_ti_feed()
 
         self.assertIs(first, second)
         self.assertEqual(mock_get_ti_feed.call_count, 1)

@@ -172,9 +172,9 @@ positivo. Exceção: `/api/admin/stream` (SSE long-lived) não conta.
 
 ### Limitações conhecidas
 
-- **In-memory, single-process** — ao virar multi-worker (gunicorn `-w N`)
-  cada worker tem seu contador, efetivo limite = N × limit. Quando migrar,
-  trocar por storage externo (Redis).
+- **Compartilhado por host, não por cluster** — o backend atual usa SQLite
+  (`IDS_ADMIN_RL_DB`) e funciona bem para múltiplos workers no mesmo host.
+  Em ambiente multi-node, migre para storage compartilhado externo.
 - **Por IP** — atacante com pool de IPs contorna. Contra quem já tem o
   token, rate limit é retardador, não bloqueador. A defesa primária é
   a rotação + audit log.
@@ -205,8 +205,8 @@ datetime). Retorna as 200 mais recentes por default (clamp em [1, 1000]).
 
 ### Retenção
 
-Sem rotação automática — configure `logrotate` externo em prod. O
-arquivo pode crescer indefinidamente se não for rotacionado.
+Há rotação automática embutida. Em produção, complemente com coleta
+centralizada/retention externa se precisar de retenção longa ou compliance.
 
 ---
 
@@ -223,13 +223,14 @@ de credencial.
 
 Antes de expor a instância em rede:
 
-- [ ] `IDS_AUTH=true` (ou não setado — default é true)
+- [ ] `IDS_AUTH=true` explicitamente em produção
 - [ ] `IDS_CSRF_DISABLED` **não** setado ou `false`
 - [ ] HTTPS via reverse proxy (nginx/Caddy/Cloudflare) — cookies exigem
       `Secure` em prod
 - [ ] Rotacionar token admin após deploy (o primeiro boot loga em stdout)
 - [ ] 2FA TOTP ativado no painel admin
-- [ ] `logrotate` configurado pra `netguard_audit.log`
+- [ ] Retenção do audit log validada (`IDS_AUDIT_LOG_RETENTION`) e/ou coletor externo configurado
+- [ ] Background jobs revisados: autostart só onde houver processo dedicado/controlado
 - [ ] `.netguard_token` e `.netguard_totp` fora do backup público
       (já estão no `.gitignore`, confira o destino do backup)
 - [ ] Banner "DEV MODE" **ausente** no painel admin
@@ -241,3 +242,40 @@ Antes de expor a instância em rede:
 Canal privado antes de abrir issue pública — detalhes no `README.md`.
 Incluir: versão (`git rev-parse HEAD`), passos mínimos de reprodução,
 impacto observado.
+
+---
+
+## 10. Atualizações recentes de hardening
+
+### TOKEN_SIGNING_SECRET (fail-closed)
+
+TOKEN_SIGNING_SECRET assina e verifica tokens persistidos no banco. O boot
+agora falha fechado fora de dev/test se essa variável não estiver
+configurada.
+
+- Produção: TOKEN_SIGNING_SECRET é obrigatório e deve ser exclusivo.
+- Dev/test: fallback só é aceito quando IDS_ENV/NETGUARD_ENV/FLASK_ENV
+  indicam ambiente de desenvolvimento/teste, ou em execução de testes.
+- Valores fracos/legados como netguard-insecure-dev-key-change-in-prod
+  não são aceitos em produção.
+- Gere com python -c "import secrets; print(secrets.token_hex(32))" e não
+  reutilize SECRET_KEY.
+
+### Rate limit admin
+
+- Implementação atual: SQLite compartilhado por host (IDS_ADMIN_RL_DB)
+- Compatível com múltiplos workers no mesmo host
+- Limitação remanescente: multi-node ainda pede backend compartilhado externo
+
+### Audit log
+
+- Rotação automática embutida via TimedRotatingFileHandler
+- Env vars: IDS_AUDIT_LOG_ROTATE_WHEN, IDS_AUDIT_LOG_ROTATE_INTERVAL,
+  IDS_AUDIT_LOG_RETENTION
+- /api/admin/audit e os stats de segurança leem o arquivo ativo e os rotacionados
+
+### Background jobs
+
+- Importar app.py não inicia mais monitoramento/schedulers por padrão
+- O autostart fica restrito ao python app.py, salvo opt-in explícito
+- Em WSGI/Gunicorn, mantenha os jobs desabilitados por padrão para evitar side effects
