@@ -1,497 +1,282 @@
-# NetGuard IDS — Guia de Deploy em Produção
+# NetGuard IDS - Production Deploy Guide
 
-> **Antes de começar:** certifique-se de que o `.env` está preenchido com base no `.env.example`.
-> Nunca commite o arquivo `.env` — ele já está no `.gitignore`.
+Use this guide when you want NetGuard running as a serious demo, portfolio environment, small SOC lab, or early SaaS deployment.
 
----
+## Production baseline
 
-## Índice
+Treat these items as mandatory before exposing the app outside localhost:
 
-1. [Opção A — Docker Compose (recomendado)](#opção-a--docker-compose-recomendado)
-2. [Opção B — Railway / Render (PaaS — 1 clique)](#opção-b--railway--render-paas)
-3. [Opção C — VPS manual (Ubuntu 22.04)](#opção-c--vps-manual-ubuntu-2204)
-4. [Nginx + HTTPS com Let's Encrypt](#nginx--https-com-lets-encrypt)
-5. [Variáveis de ambiente — checklist completo](#variáveis-de-ambiente--checklist-completo)
-6. [PostgreSQL em produção](#postgresql-em-produção)
-7. [E-mail transacional (SMTP)](#e-mail-transacional-smtp)
-8. [Health check & monitoramento](#health-check--monitoramento)
-9. [Backup do banco de dados](#backup-do-banco-de-dados)
-10. [Checklist de segurança pré-lançamento](#checklist-de-segurança-pré-lançamento)
+- `IDS_AUTH=true`
+- `IDS_DASHBOARD_AUTH=true`
+- strong `TOKEN_SIGNING_SECRET`
+- reverse proxy with TLS
+- PostgreSQL recommended for production
+- persistent admin rate-limit DB (`IDS_ADMIN_RL_DB`)
+- audit log rotation and retention configured
 
----
+Additional current-state notes:
 
-## Opção A — Docker Compose (recomendado)
+- the server already supports Agent + Server workflows
+- agents can enroll with an admin or tenant bootstrap token
+- agents can operate with an issued host key (`nga_...`)
+- the agent does not persist the issued host key automatically yet, so unattended execution must provide `--token` or `--agent-key`
 
-A forma mais rápida de subir o stack completo com PostgreSQL, Prometheus e Grafana.
+## Supported deployment shapes
 
-### Pré-requisitos
+### 1. Local lab or serious demo
 
-- Docker ≥ 24 e Docker Compose ≥ 2.20
-- Porta 80 e 443 liberadas no firewall
+- Flask app on one host
+- SQLite acceptable
+- reverse proxy optional
+- suitable for portfolio demos and internal testing
 
-### 1. Clone e configure
+### 2. Single-node production
+
+- Flask app behind Nginx
+- Gunicorn or equivalent WSGI server
+- PostgreSQL strongly recommended
+- persistent filesystem for logs and local buffers
+
+### 3. Early SaaS / MSSP-style node
+
+- same as single-node production
+- PostgreSQL required
+- explicit backup, metrics, and audit retention
+- shared-cache improvements are still future work, so stay single-node unless you are ready to extend the platform
+
+## Environment checklist
+
+Start from `.env.example`:
+
+```bash
+cp .env.example .env
+```
+
+Minimum production values:
+
+```dotenv
+IDS_ENV=production
+IDS_HOST=127.0.0.1
+IDS_PORT=5000
+IDS_AUTH=true
+IDS_DASHBOARD_AUTH=true
+HTTPS_ONLY=true
+TOKEN_SIGNING_SECRET=<64+ char random secret>
+SECRET_KEY=<separate random secret if used>
+APP_URL=https://your-domain.example
+DATABASE_URL=postgresql://user:pass@host:5432/netguard
+IDS_AUDIT_LOG=/var/log/netguard/audit.log
+IDS_AUDIT_LOG_ROTATE_WHEN=midnight
+IDS_AUDIT_LOG_ROTATE_INTERVAL=1
+IDS_AUDIT_LOG_RETENTION=14
+IDS_ADMIN_RL_DB=/var/lib/netguard/netguard_security.db
+IDS_CORS_ORIGINS=https://your-domain.example
+```
+
+Generate a signing secret:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+## Docker-based deploy
+
+Typical flow:
 
 ```bash
 git clone https://github.com/raphaelguterres/netguard-ids.git
 cd netguard-ids
 cp .env.example .env
-nano .env   # preencha os valores obrigatórios
-```
-
-### 2. Suba o stack
-
-```bash
 docker compose up -d
 ```
 
-Serviços iniciados:
-
-| Serviço      | Porta interna | Descrição                  |
-|--------------|---------------|----------------------------|
-| `app`        | 5000          | NetGuard IDS (Flask)       |
-| `postgres`   | 5432          | Banco de dados             |
-| `prometheus` | 9090          | Métricas                   |
-| `grafana`    | 3000          | Dashboards de observabilidade |
-| `nginx`      | 80 / 443      | Proxy reverso + TLS        |
-
-### 3. Verifique
+After startup, verify:
 
 ```bash
 docker compose ps
-curl http://localhost/api/health
+curl http://127.0.0.1/api/health
 ```
 
-### 4. Logs em tempo real
+Recommended for Docker production:
+
+- map persistent volumes for database, logs, and agent buffers
+- terminate TLS at Nginx or another reverse proxy
+- do not expose Flask directly on the internet
+
+## VPS / manual deploy
+
+### 1. System packages
 
 ```bash
-docker compose logs -f app        # NetGuard IDS
-docker compose logs -f postgres   # banco
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3-pip nginx certbot python3-certbot-nginx git
 ```
 
-### 5. Atualizar para nova versão
+### 2. Application setup
 
 ```bash
-git pull origin main
-docker compose build app
-docker compose up -d --no-deps app
-```
-
----
-
-## Opção B — Railway / Render (PaaS)
-
-Deploy em 1 clique, sem gerenciar servidor. Ideal para começar.
-
-### Railway
-
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/netguard-ids)
-
-1. Clique em "Deploy on Railway"
-2. Conecte sua conta GitHub e selecione o repositório `netguard-ids`
-3. Railway detecta o `Dockerfile` automaticamente
-4. Adicione as variáveis de ambiente em **Settings → Variables**:
-   ```
-   DATABASE_URL=postgresql://...   ← gerado automaticamente pelo plugin PostgreSQL do Railway
-   IDS_DASHBOARD_AUTH=true
-   HTTPS_ONLY=true
-   TOKEN_SIGNING_SECRET=<string aleatória de 64 chars>
-   SECRET_KEY=<string aleatória de 64 chars>
-   APP_URL=https://seu-app.railway.app
-   ```
-5. Clique em **Deploy**
-
-### Render
-
-1. New → Web Service → conecte o repositório
-2. Runtime: **Docker**
-3. Adicione as env vars (mesmas acima)
-4. Adicione um **PostgreSQL** database em New → PostgreSQL
-5. Copie a `DATABASE_URL` para as env vars do web service
-
-> **Dica:** ambos oferecem plano gratuito, mas recomenda-se o plano pago ($5-7/mês) para evitar sleep em inatividade.
-
----
-
-## Opção C — VPS manual (Ubuntu 22.04)
-
-Para quem prefere controle total sobre a infra.
-
-### 1. Prepare o servidor
-
-```bash
-# Atualize o sistema
-sudo apt update && sudo apt upgrade -y
-
-# Instale dependências
-sudo apt install -y python3.11 python3.11-venv python3-pip \
-                    nginx certbot python3-certbot-nginx git ufw
-
-# Configure o firewall
-sudo ufw allow 22/tcp    # SSH
-sudo ufw allow 80/tcp    # HTTP
-sudo ufw allow 443/tcp   # HTTPS
-sudo ufw enable
-```
-
-### 2. Clone e configure o projeto
-
-```bash
-sudo useradd -m -s /bin/bash netguard
-sudo su - netguard
-
 git clone https://github.com/raphaelguterres/netguard-ids.git
 cd netguard-ids
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-
 cp .env.example .env
-nano .env   # configure as variáveis obrigatórias
 ```
 
-### 3. Configure o serviço systemd
+### 3. Gunicorn example
 
 ```bash
-sudo tee /etc/systemd/system/netguard.service <<'EOF'
-[Unit]
-Description=NetGuard IDS
-After=network.target postgresql.service
-Wants=postgresql.service
-
-[Service]
-Type=simple
-User=netguard
-WorkingDirectory=/home/netguard/netguard-ids
-EnvironmentFile=/home/netguard/netguard-ids/.env
-ExecStart=/home/netguard/netguard-ids/.venv/bin/gunicorn \
-    --workers 4 \
-    --bind 127.0.0.1:5000 \
-    --timeout 120 \
-    --access-logfile /var/log/netguard/access.log \
-    --error-logfile /var/log/netguard/error.log \
-    app:app
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo mkdir -p /var/log/netguard
-sudo chown netguard: /var/log/netguard
-
-sudo systemctl daemon-reload
-sudo systemctl enable netguard
-sudo systemctl start netguard
-sudo systemctl status netguard
+.venv/bin/gunicorn \
+  --workers 4 \
+  --bind 127.0.0.1:5000 \
+  --timeout 120 \
+  app:app
 ```
 
----
+Important:
 
-## Nginx + HTTPS com Let's Encrypt
+- keep `IDS_HOST=127.0.0.1`
+- let Nginx expose the service publicly
+- do not run with `IDS_AUTH=false` on a public bind
 
-```bash
-# Crie o arquivo de configuração do Nginx
-sudo tee /etc/nginx/sites-available/netguard <<'EOF'
+## Nginx and TLS
+
+Recommended reverse proxy layout:
+
+```nginx
 server {
     listen 80;
-    server_name seu-dominio.com www.seu-dominio.com;
+    server_name your-domain.example;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name seu-dominio.com www.seu-dominio.com;
+    server_name your-domain.example;
 
-    ssl_certificate     /etc/letsencrypt/live/seu-dominio.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/seu-dominio.com/privkey.pem;
-    ssl_protocols       TLSv1.2 TLSv1.3;
-    ssl_ciphers         HIGH:!aNULL:!MD5;
-
-    # Segurança
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Frame-Options            DENY                                  always;
-    add_header X-Content-Type-Options     nosniff                               always;
-    add_header Referrer-Policy            strict-origin-when-cross-origin       always;
-
-    # SSE — desabilita buffering para stream funcionar
-    location /api/events/stream {
-        proxy_pass         http://127.0.0.1:5000;
-        proxy_buffering    off;
-        proxy_cache        off;
-        proxy_read_timeout 3600s;
-        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_set_header   Host              $host;
-    }
+    ssl_certificate     /etc/letsencrypt/live/your-domain.example/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.example/privkey.pem;
 
     location / {
-        proxy_pass         http://127.0.0.1:5000;
-        proxy_set_header   Host              $host;
-        proxy_set_header   X-Real-IP         $remote_addr;
-        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-        client_max_body_size 10M;
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
-EOF
-
-sudo ln -s /etc/nginx/sites-available/netguard /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
-
-# Gere o certificado TLS
-sudo certbot --nginx -d seu-dominio.com -d www.seu-dominio.com \
-     --non-interactive --agree-tos -m seu@email.com
-
-# Renovação automática (já vem configurada pelo certbot)
-sudo systemctl status certbot.timer
 ```
 
----
-
-## Variáveis de ambiente — checklist completo
-
-Marque cada item antes de colocar em produção:
-
-### Obrigatórias
-
-| Variável | Valor recomendado | Status |
-|----------|-------------------|--------|
-| `TOKEN_SIGNING_SECRET` | String aleatória de 64 chars: `python3 -c "import secrets; print(secrets.token_hex(32))"` | ☐ |
-| `SECRET_KEY` | String aleatória de 64 chars: `python3 -c "import secrets; print(secrets.token_hex(32))"` | ☐ |
-| `HTTPS_ONLY` | `true` | ☐ |
-| `IDS_DASHBOARD_AUTH` | `true` | ☐ |
-| `APP_URL` | `https://seu-dominio.com` | ☐ |
-| `DATABASE_URL` | `postgresql://user:pass@host:5432/netguard` | ☐ |
-| `CONTACT_EMAIL` | `contato@seu-dominio.com` | ☐ |
-
-### Recomendadas
-
-| Variável | Valor | Status |
-|----------|-------|--------|
-| `SMTP_HOST` | `smtp.resend.com` | ☐ |
-| `SMTP_USER` | `resend` | ☐ |
-| `SMTP_PASS` | Sua API Key do Resend | ☐ |
-| `SMTP_FROM` | `noreply@seu-dominio.com` | ☐ |
-| `IDS_CORS_ORIGINS` | `https://seu-dominio.com` | ☐ |
-| `IDS_AUDIT_LOG` | `/var/log/netguard/audit.log` | ☐ |
-| `TRIAL_DAYS` | `14` | ☐ |
-
-### Opcionais
-
-| Variável | Descrição |
-|----------|-----------|
-| `IDS_ABUSEIPDB_KEY` | Enriquecimento de IPs via AbuseIPDB |
-| `IDS_VIRUSTOTAL_KEY` | Análise de hashes via VirusTotal |
-| `IDS_AUTO_BLOCK` | `true` para bloqueio automático via iptables (Linux) |
-| `IDS_WHITELIST_IPS` | IPs confiáveis separados por vírgula |
-| `STRIPE_SECRET_KEY` | Para billing via Stripe |
-| `STRIPE_WEBHOOK_SECRET` | Para receber eventos do Stripe |
-
----
-
-## PostgreSQL em produção
-
-### Provedor recomendado: Supabase (gratuito até 500MB)
-
-1. Crie um projeto em [supabase.com](https://supabase.com)
-2. Vá em **Settings → Database**
-3. Copie a **Connection string (URI)**:
-   ```
-   postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres
-   ```
-4. Defina no `.env`:
-   ```
-   DATABASE_URL=postgresql://postgres:SENHA@db.xxxx.supabase.co:5432/postgres
-   ```
-
-O NetGuard IDS cria o schema automaticamente na primeira inicialização.
-
-### Alternativas
-
-| Provedor | Gratuito | Notas |
-|----------|----------|-------|
-| [Supabase](https://supabase.com) | 500MB | Recomendado |
-| [Railway](https://railway.app) | $5/mês | Integrado ao deploy |
-| [Render](https://render.com) | 90 dias | Plano free expira |
-| [Neon](https://neon.tech) | 3GB | Serverless PostgreSQL |
-
----
-
-## E-mail transacional (SMTP)
-
-### Resend (recomendado — gratuito até 3.000/mês)
-
-1. Crie conta em [resend.com](https://resend.com)
-2. Adicione e verifique seu domínio (SPF + DKIM automático)
-3. Gere uma API Key em **API Keys**
-4. Configure no `.env`:
-   ```
-   SMTP_HOST=smtp.resend.com
-   SMTP_PORT=587
-   SMTP_USER=resend
-   SMTP_PASS=re_SUA_API_KEY
-   SMTP_FROM=noreply@seu-dominio.com
-   ```
-
-### Teste antes de ir ao ar
+Then issue certificates:
 
 ```bash
-python3 - <<'EOF'
-from mailer import send_welcome
-send_welcome(
-    name    = "Teste Deploy",
-    email   = "seu@email.com",
-    token   = "ng_test123",
-    plan    = "pro",
-    app_url = "https://seu-dominio.com",
-)
-print("Se não levantou exceção, o e-mail foi enviado (ou logado em dry-run).")
-EOF
+sudo certbot --nginx -d your-domain.example
 ```
 
----
+## PostgreSQL guidance
 
-## Health check & monitoramento
+SQLite is still excellent for:
 
-### Endpoint de saúde
+- local desktop use
+- single-operator demos
+- tests
+
+Use PostgreSQL when you need:
+
+- production durability
+- cleaner operational backups
+- larger event volumes
+- stronger separation between app process and data
+
+The repositories already support PostgreSQL-ready behavior through:
+
+- `EventRepository`
+- `HostRepository`
+- `IncidentRepository`
+
+## Agent execution against the central server
+
+Bootstrap with admin or tenant token:
 
 ```bash
-curl https://seu-dominio.com/api/health
-# Esperado: {"status": "healthy", ...}
+python -m netguard_agent \
+  --hub https://your-domain.example \
+  --token YOUR_BOOTSTRAP_TOKEN \
+  --host-id endpoint-finance-01 \
+  --mode xdr
 ```
 
-Configure um monitor externo (UptimeRobot, Better Uptime, Freshping — todos gratuitos):
-
-- **URL:** `https://seu-dominio.com/api/health`
-- **Intervalo:** 1 minuto
-- **Alerta:** e-mail / Telegram quando status ≠ 200
-
-### Métricas Prometheus
-
-```
-https://seu-dominio.com/metrics
-```
-
-Recomenda-se proteger esse endpoint com IP allowlist no Nginx em produção:
-
-```nginx
-location /metrics {
-    allow 10.0.0.0/8;   # sua rede interna / Prometheus server
-    deny  all;
-    proxy_pass http://127.0.0.1:5000;
-}
-```
-
----
-
-## Backup do banco de dados
-
-### SQLite (modo padrão)
+Execution with a host key:
 
 ```bash
-# Backup diário — adicione ao cron
-0 3 * * * sqlite3 /home/netguard/netguard-ids/netguard_events.db \
-    ".backup /backups/netguard_$(date +\%Y\%m\%d).db"
+python -m netguard_agent \
+  --hub https://your-domain.example \
+  --agent-key nga_HOST_KEY \
+  --host-id endpoint-finance-01 \
+  --mode xdr
 ```
 
-### PostgreSQL
+Operational recommendation:
+
+- use bootstrap token for enrollment and controlled demos
+- use host key for already-approved hosts
+- keep the local event buffer on persistent disk
+
+## Background jobs and startup behavior
+
+NetGuard now avoids dangerous side effects on import.
+
+By default:
+
+- direct `python app.py` can autostart the intended background components
+- WSGI/Gunicorn imports do not autostart background jobs implicitly
+
+Review these flags when packaging:
+
+- `IDS_AUTOSTART_BACKGROUND`
+- `IDS_AUTOSTART_SOC_ENGINE`
+- `IDS_AUTOSTART_MONITOR`
+- `IDS_AUTOSTART_TRIAL_SCHEDULER`
+- `IDS_AUTOSTART_TI_FEED_SCHEDULER`
+
+## Logs, monitoring, and metrics
+
+Recommended production signals:
+
+- application logs from Gunicorn/Nginx
+- audit log from `IDS_AUDIT_LOG`
+- `/api/health`
+- `/metrics`
+
+Audit log controls:
+
+- `IDS_AUDIT_LOG_ROTATE_WHEN`
+- `IDS_AUDIT_LOG_ROTATE_INTERVAL`
+- `IDS_AUDIT_LOG_RETENTION`
+
+## Backup
+
+Minimum backup strategy:
+
+- PostgreSQL logical dump or managed snapshots
+- audit log retention and shipping if needed
+- `.env` stored in a secrets manager or encrypted backup
+
+Example PostgreSQL dump:
 
 ```bash
-# Dump comprimido
-pg_dump $DATABASE_URL | gzip > backup_$(date +%Y%m%d).sql.gz
-
-# Restore
-gunzip -c backup_20250101.sql.gz | psql $DATABASE_URL
+pg_dump "$DATABASE_URL" > netguard_backup.sql
 ```
 
-### Automatizar com rclone (enviar para S3/GCS/R2)
+## Pre-launch checklist
 
-```bash
-rclone copy /backups/ s3:seu-bucket/netguard-backups/ --max-age 30d
-```
-
----
-
-## Checklist de segurança pré-lançamento
-
-Execute cada item antes de divulgar o produto:
-
-**Configuração**
-- [ ] `TOKEN_SIGNING_SECRET` gerada aleatoriamente e distinta de `SECRET_KEY`
-- [ ] `SECRET_KEY` gerada aleatoriamente (nunca o valor padrão)
-- [ ] `HTTPS_ONLY=true` ativo
-- [ ] `IDS_DASHBOARD_AUTH=true` ativo
-- [ ] `DEBUG=false` (Flask não expõe traceback)
-- [ ] CORS restrito ao domínio (`IDS_CORS_ORIGINS=https://seu-dominio.com`)
-
-**Infraestrutura**
-- [ ] Certificado TLS válido (`certbot` ou Let's Encrypt via provedor)
-- [ ] Firewall ativo — somente portas 80, 443 e 22 abertas
-- [ ] SSH com autenticação por chave (senha desabilitada)
-- [ ] `/metrics` protegido por IP allowlist no Nginx
-
-**Dados**
-- [ ] PostgreSQL com senha forte (não use `postgres`/`postgres`)
-- [ ] Backup automático configurado e testado
-- [ ] Audit log ativo e gravando (`IDS_AUDIT_LOG`)
-
-**Monitoramento**
-- [ ] Health check externo configurado (UptimeRobot ou similar)
-- [ ] Alerta de downtime configurado (e-mail / Telegram)
-- [ ] Logs em `/var/log/netguard/` com rotação (`logrotate`)
-
-**E-mail**
-- [ ] SMTP configurado e testado com `python3 -c "from mailer import send_welcome; ..."`
-- [ ] SPF e DKIM do domínio configurados (evita spam)
-- [ ] `SMTP_FROM` usando domínio próprio (não Gmail pessoal)
-
----
-
-## Comandos úteis pós-deploy
-
-```bash
-# Reiniciar o serviço
-sudo systemctl restart netguard
-
-# Ver logs ao vivo
-sudo journalctl -u netguard -f
-
-# Testar a API
-curl -s https://seu-dominio.com/api/health | python3 -m json.tool
-
-# Ver tenants cadastrados (requer acesso ao banco)
-sqlite3 netguard_events.db "SELECT tenant_id, name, plan, created_at FROM tenants ORDER BY created_at DESC LIMIT 10;"
-
-# Criar tenant manualmente (sem passar pela UI)
-curl -X POST https://seu-dominio.com/trial \
-     -H "Content-Type: application/json" \
-     -d '{"name":"Cliente Teste","email":"cliente@empresa.com","plan":"pro"}'
-```
-## Atualizações recentes de operação segura
-
-### Segredos obrigatórios
-
-- `TOKEN_SIGNING_SECRET` é obrigatório fora de dev/test.
-- O boot falha fechado se ele não estiver configurado.
-- Use valor distinto de `SECRET_KEY`.
-
-### Audit log
-
-- Há rotação embutida do audit log.
-- Variáveis novas/relevantes:
-  `IDS_AUDIT_LOG_ROTATE_WHEN`,
-  `IDS_AUDIT_LOG_ROTATE_INTERVAL`,
-  `IDS_AUDIT_LOG_RETENTION`
-
-### Rate limit admin
-
-- O rate limit admin agora usa SQLite compartilhado por host.
-- Variável relevante: `IDS_ADMIN_RL_DB`
-
-### Background jobs
-
-- `app.py` não inicia monitoramento/schedulers ao ser importado.
-- Em `python app.py`, os jobs podem autostartar conforme as flags.
-- Em WSGI/Gunicorn multi-worker, mantenha opt-in explícito para evitar side effects.
+- auth enabled
+- dashboard auth enabled
+- strong signing secret configured
+- TLS active
+- PostgreSQL in use
+- audit log path writable
+- admin rate-limit DB persistent
+- reverse proxy health checks working
+- `/api/health` and `/metrics` reachable internally
+- at least one end-to-end enrollment test completed with `netguard_agent`

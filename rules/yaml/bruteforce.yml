@@ -1,0 +1,24 @@
+id: NG-YAML-AUTH-001
+title: Repeated Authentication Failures
+description: Multiple authentication failures from the same source within a short time window.
+severity: high
+event_types:
+  - authentication
+recommended_action: investigate_source_and_lock_account
+tags:
+  - authentication
+  - brute_force
+  - yaml
+mitre:
+  tactic: credential_access
+  technique: T1110
+detection:
+  all:
+    - field: auth_result
+      operator: equals
+      value: failure
+  aggregation:
+    event_type: authentication
+    group_by: auth_source_ip
+    count: 5
+    within_seconds: 300

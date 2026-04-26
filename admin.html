@@ -1465,6 +1465,126 @@ async function gvResetHosts(){
   }
 }
 
+// ─── World Map (lat/lon dots) ──────────────────────────────────────
+// Projecao Equirectangular simples: lon -180..180 -> 0..W, lat 90..-90 -> 0..H.
+// Sem D3, sem topojson. O "mapa" e um grid + linhas de referencia (equador,
+// tropicos, Greenwich) + paths simplificados das massas continentais. Tres
+// continentes desenhados como polygons aproximados — referencia espacial
+// suficiente pra reconhecer "onde no mundo o ponto esta", sem inflar HTML
+// com 200KB de geojson. Coordenadas vem direto do geo_ip.lookup() no backend.
+//
+// points: [{lat, lon, ip, count, flag, city, country, org, kind}]
+//   kind: 'attacker' (pinta vermelho), 'host' (verde por status), 'host-offline'.
+function gvProj(lon, lat, W, H){
+  const x = ((Number(lon)||0) + 180) / 360 * W;
+  const y = ((90 - (Number(lat)||0)) / 180) * H;
+  return [x, y];
+}
+// Polygons ultra-simplificados das massas continentais — coordenadas
+// (lon, lat) aproximadas pra dar referencia visual. Nao e cartografia,
+// e wireframe. Cada array fecha implicitamente.
+const GV_CONTINENTS = {
+  // America do Norte
+  na: [[-168,66],[-130,70],[-95,80],[-75,75],[-65,55],[-55,45],[-75,25],[-100,15],[-110,25],[-125,40],[-130,55],[-150,60],[-168,66]],
+  // America do Sul
+  sa: [[-82,12],[-72,12],[-60,5],[-50,-5],[-35,-8],[-40,-25],[-58,-35],[-75,-55],[-72,-45],[-78,-15],[-82,12]],
+  // Africa
+  af: [[-18,28],[10,38],[35,32],[44,12],[51,12],[50,-5],[40,-22],[18,-35],[10,-25],[-5,-5],[-15,15],[-18,28]],
+  // Europa
+  eu: [[-10,38],[5,43],[15,45],[30,40],[40,42],[55,55],[40,68],[15,72],[0,60],[-10,55],[-10,38]],
+  // Asia (incluindo subcontinente indiano + sudeste)
+  as: [[40,68],[80,75],[140,70],[160,55],[145,40],[130,30],[140,10],[110,5],[95,5],[80,8],[68,22],[55,28],[45,40],[40,42],[40,68]],
+  // Oceania (Australia)
+  oc: [[112,-12],[135,-12],[145,-18],[152,-25],[145,-40],[120,-35],[115,-22],[112,-12]],
+  // Groenlandia
+  gl: [[-55,60],[-30,60],[-20,75],[-30,82],[-55,80],[-55,60]]
+};
+function gvWorldPaths(W, H){
+  // Converte cada polygon (lon,lat -> px,py) e devolve <path d="...">
+  return Object.entries(GV_CONTINENTS).map(([k, pts]) => {
+    const d = pts.map(([lon, lat], i) => {
+      const [x, y] = gvProj(lon, lat, W, H);
+      return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ') + ' Z';
+    return `<path d="${d}" fill="var(--surface2)" stroke="var(--border)" stroke-width=".6" opacity=".75"/>`;
+  }).join('');
+}
+function gvRenderWorldMap(points){
+  const W = 720, H = 360;
+  // Grid 12 colunas x 6 linhas
+  const grid = [];
+  for (let i = 0; i <= 12; i++) {
+    const x = (W / 12) * i;
+    grid.push(`<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="var(--border)" stroke-width=".3" opacity=".4"/>`);
+  }
+  for (let i = 0; i <= 6; i++) {
+    const y = (H / 6) * i;
+    grid.push(`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="var(--border)" stroke-width=".3" opacity=".4"/>`);
+  }
+  // Linhas de referencia
+  const equatorY = H / 2;
+  const tropicCancerY  = H / 2 - (23.5 / 180) * H;
+  const tropicCapY     = H / 2 + (23.5 / 180) * H;
+  const greenwichX     = W / 2;
+  const refs = `
+    <line x1="0" y1="${equatorY}" x2="${W}" y2="${equatorY}" stroke="var(--muted)" stroke-width=".5" opacity=".5"/>
+    <line x1="0" y1="${tropicCancerY}" x2="${W}" y2="${tropicCancerY}" stroke="var(--muted)" stroke-width=".4" stroke-dasharray="3 3" opacity=".4"/>
+    <line x1="0" y1="${tropicCapY}" x2="${W}" y2="${tropicCapY}" stroke="var(--muted)" stroke-width=".4" stroke-dasharray="3 3" opacity=".4"/>
+    <line x1="${greenwichX}" y1="0" x2="${greenwichX}" y2="${H}" stroke="var(--muted)" stroke-width=".4" opacity=".5"/>
+  `;
+  // Filtra pontos sem coords reais (lat=0 e lon=0 = "null island", IP nao geolocalizavel)
+  const valid = (points || []).filter(p => (Number(p.lat)||0) !== 0 || (Number(p.lon)||0) !== 0);
+  // Agrupa por celula 8x8 px pra evitar dots empilhados em cima do mesmo data center
+  const cells = new Map();
+  for (const p of valid) {
+    const [px, py] = gvProj(p.lon, p.lat, W, H);
+    const key = Math.round(px / 8) + ',' + Math.round(py / 8);
+    if (!cells.has(key)) cells.set(key, { px, py, items: [] });
+    cells.get(key).items.push(p);
+  }
+  const dots = [];
+  for (const { px, py, items } of cells.values()) {
+    // Cor: se houver attacker, pinta vermelho; senao host segue status.
+    const hasAttacker = items.some(i => i.kind === 'attacker');
+    const allOffline = items.every(i => i.kind === 'host-offline');
+    const color = hasAttacker ? 'var(--red)'
+                : allOffline   ? 'var(--muted)'
+                                : 'var(--green)';
+    const total = items.reduce((s, i) => s + (Number(i.count)||1), 0);
+    // Raio cresce com log do total (3-12px)
+    const r = Math.min(12, Math.max(3, 3 + Math.log2(total + 1)));
+    const top = items.slice(0, 3).map(i =>
+      (i.flag || '🌐') + ' ' + (i.ip || i.host_id || '?') +
+      (i.city ? ' (' + i.city + ')' : '')
+    ).join('\n');
+    const more = items.length > 3 ? '\n+' + (items.length - 3) + ' mais' : '';
+    const title = top + more;
+    dots.push(
+      `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${r.toFixed(1)}" ` +
+      `fill="${color}" fill-opacity=".35" stroke="${color}" stroke-width="1.5">` +
+      `<title>${gvEsc(title)}</title></circle>`
+    );
+  }
+  const noDataNote = valid.length === 0
+    ? `<text x="${W/2}" y="${H/2 + 50}" text-anchor="middle" fill="var(--muted)" font-size="11" opacity=".7">Sem coordenadas para plotar (todos os IPs sao privados ou nao geolocalizaveis)</text>`
+    : '';
+  return `
+    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;background:var(--bg);border-radius:4px">
+      ${grid.join('')}
+      ${refs}
+      ${gvWorldPaths(W, H)}
+      ${dots.join('')}
+      ${noDataNote}
+    </svg>
+    <div style="display:flex;gap:14px;font-size:.7rem;color:var(--muted);margin-top:4px">
+      <span><span style="display:inline-block;width:10px;height:10px;background:var(--red);border-radius:50%;opacity:.5;border:1.5px solid var(--red);vertical-align:middle"></span> origem de ataque</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:var(--green);border-radius:50%;opacity:.5;border:1.5px solid var(--green);vertical-align:middle"></span> host online</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:var(--muted);border-radius:50%;opacity:.5;border:1.5px solid var(--muted);vertical-align:middle"></span> host offline</span>
+      <span style="margin-left:auto">${valid.length} ponto(s)</span>
+    </div>
+  `;
+}
+
 function gvRenderDrillDown(r){
   const tl = r.timeline || [];  // [{hour:"2026-04-20T13:00", total, critical, high, medium, low}, ...]
   const topRules = r.top_rules || [];
@@ -1576,6 +1696,37 @@ function gvRenderDrillDown(r){
     </tr>`;
   }).join('') : `<tr><td colspan="4" style="padding:10px;color:var(--muted)">Sem hosts gerenciados.</td></tr>`;
 
+  // Pontos para o map view: top_ips (attacker, vermelho) + hosts (host, verde/cinza)
+  const mapPoints = [];
+  for (const ip of topIPs) {
+    mapPoints.push({
+      kind: 'attacker',
+      ip:   ip.ip,
+      lat:  ip.lat,
+      lon:  ip.lon,
+      flag: ip.flag,
+      city: ip.city,
+      country: ip.country,
+      org:  ip.org,
+      count: ip.count
+    });
+  }
+  for (const h of hostsArr) {
+    mapPoints.push({
+      kind: h.status === 'offline' ? 'host-offline' : 'host',
+      ip:   h.last_ip || h.host_id,
+      host_id: h.display_name || h.host_id,
+      lat:  h.lat,
+      lon:  h.lon,
+      flag: h.flag,
+      city: h.city,
+      country: h.country,
+      org:  h.org,
+      count: 1
+    });
+  }
+  const worldMapHtml = gvRenderWorldMap(mapPoints);
+
   document.getElementById('gv-modal-body').innerHTML = `
     ${summaryCards}
     <div style="font-size:.75rem;color:var(--muted);margin-bottom:4px">Timeline por hora (últimas 24h)</div>
@@ -1586,6 +1737,12 @@ function gvRenderDrillDown(r){
         ${labels}
       </svg>
       ${legend}
+    </div>
+    <div style="font-size:.75rem;color:var(--muted);margin:14px 0 4px">
+      🗺️ Mapa global — origens de ataque vs. hosts gerenciados
+    </div>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px">
+      ${worldMapHtml}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px">
       <div>

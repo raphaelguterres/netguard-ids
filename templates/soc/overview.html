@@ -36,9 +36,9 @@
     <div class="soc-stat-foot">Cross-host risk trend.</div>
   </article>
   <article class="soc-card soc-stat-card">
-    <div class="soc-stat-label">Pipeline Health</div>
-    <div class="soc-stat-value">OK</div>
-    <div class="soc-stat-foot">Ingestion, detection, correlation, response.</div>
+    <div class="soc-stat-label">Active Agents</div>
+    <div class="soc-stat-value">{{ data.online_agents|default(0) }}</div>
+    <div class="soc-stat-foot">{{ data.offline_agents|default(0) }} offline, {{ data.registered_agents|default(0) }} registered in inventory.</div>
   </article>
   <article class="soc-card soc-stat-card">
     <div class="soc-stat-label">Open Incidents</div>
@@ -147,8 +147,8 @@
         <div class="soc-list-copy">Behavior rules, correlation, and response planning active.</div>
       </div>
       <div class="soc-list-item">
-        <div class="soc-list-top"><span class="soc-list-title">Tenant Isolation</span><span class="soc-pill"><span class="soc-pill-dot"></span>Ready</span></div>
-        <div class="soc-list-copy">UI structure is aligned for future multi-tenant SaaS views.</div>
+        <div class="soc-list-top"><span class="soc-list-title">Agent Coverage</span><span class="soc-pill"><span class="soc-pill-dot"></span>{{ data.registered_agents|default(0) }} enrolled</span></div>
+        <div class="soc-list-copy">{{ data.online_agents|default(0) }} sensors are online and sending telemetry for this tenant.</div>
       </div>
     </div>
   </article>

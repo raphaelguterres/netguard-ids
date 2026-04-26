@@ -510,6 +510,27 @@ class EventRepository:
         except Exception:
             return 0
 
+    def get_event(self, event_id: str, tenant_id: str = None) -> Optional[dict]:
+        """Retorna um evento especÃ­fico por ID."""
+        if not event_id:
+            return None
+        ph = self._placeholder()
+        tid = tenant_id or self.tenant_id
+        sql = f"SELECT * FROM events WHERE tenant_id = {ph} AND event_id = {ph} LIMIT 1"
+        params = [tid, event_id]
+        try:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(sql, params)
+                row = cur.fetchone()
+                cur.close()
+                return self._pg_row_to_dict(row) if row else None
+            row = self._conn().execute(sql, params).fetchone()
+            return self._sqlite_row_to_dict(row) if row else None
+        except Exception as exc:
+            logger.error("get_event error: %s", exc)
+            return None
+
     def stats(self, tenant_id: str = None) -> dict:
         ph  = self._placeholder()
         tid = tenant_id or self.tenant_id

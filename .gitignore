@@ -51,6 +51,11 @@ tenant-isolation-*/
 .ruff_cache/
 .tox/
 htmlcov/
+.tmp/
+.tmp_test_workspace/
+ci_tmp/
+ci_pytest_*/
+tests/_tmp_mitre_engine/
 
 # ========================
 # Backups e artefatos de agente/IDE

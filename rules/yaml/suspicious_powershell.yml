@@ -1,0 +1,28 @@
+id: NG-YAML-PS-001
+title: Suspicious PowerShell Encoded Command
+description: PowerShell execution with encoded command or download cradle tradecraft.
+severity: high
+event_types:
+  - process_execution
+  - script_execution
+recommended_action: investigate_and_review_command
+tags:
+  - powershell
+  - sigma_like
+  - yaml
+mitre:
+  tactic: execution
+  technique: T1059.001
+detection:
+  all:
+    - field: process_name
+      operator: equals
+      value: powershell.exe
+  any:
+    - field: command_line
+      operator: contains_any
+      value:
+        - -enc
+        - -encodedcommand
+        - downloadstring
+        - invoke-expression

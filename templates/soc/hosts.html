@@ -29,6 +29,7 @@
           <th>Last Seen</th>
           <th>Active Alerts</th>
           <th>Operating System</th>
+          <th>Agent</th>
           <th>Status</th>
         </tr>
       </thead>
@@ -41,12 +42,13 @@
             <td>{{ host.last_seen }}</td>
             <td>{{ host.active_alerts }}</td>
             <td>{{ host.operating_system }}</td>
+            <td>{{ host.agent_version|default("Pending enrollment") }}</td>
             <td class="soc-status-{{ host.status }}">{{ host.status|title }}</td>
           </tr>
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="6"><div class="soc-empty-state">Os hosts ainda nao apareceram no preview XDR. Envie eventos para `/api/xdr/events` ou rode o agente em modo `xdr`.</div></td>
+            <td colspan="7"><div class="soc-empty-state">Os hosts ainda nao apareceram no preview XDR. Envie eventos para `/api/xdr/events` ou rode o agente em modo `xdr`.</div></td>
           </tr>
         {% endif %}
       </tbody>

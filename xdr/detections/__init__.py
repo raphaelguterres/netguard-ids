@@ -17,6 +17,7 @@ from .process_rules import (
     UnusualParentChildRule,
 )
 from .state import BehavioralBaselineAdapter, HostBehaviorProfile, HostBehaviorStore
+from .yaml_rules import YamlRuleSet
 
 DEFAULT_RULES = (
     SuspiciousPowerShellRule(),
@@ -32,6 +33,7 @@ DEFAULT_RULES = (
     UnusualOutboundPortRule(),
     RareOutboundDestinationRule(),
     BeaconingRule(),
+    YamlRuleSet(),
 )
 
 __all__ = [
@@ -54,4 +56,5 @@ __all__ = [
     "UnusualOutboundPortRule",
     "UnusualParentChildRule",
     "BeaconingRule",
+    "YamlRuleSet",
 ]

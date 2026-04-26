@@ -1,243 +1,259 @@
-<div align="center">
+# NetGuard IDS
 
-```
-███╗   ██╗███████╗████████╗ ██████╗ ██╗   ██╗ █████╗ ██████╗ ██████╗
-████╗  ██║██╔════╝╚══██╔══╝██╔════╝ ██║   ██║██╔══██╗██╔══██╗██╔══██╗
-██╔██╗ ██║█████╗     ██║   ██║  ███╗██║   ██║███████║██████╔╝██║  ██║
-██║╚██╗██║██╔══╝     ██║   ██║   ██║██║   ██║██╔══██║██╔══██╗██║  ██║
-██║ ╚████║███████╗   ██║   ╚██████╔╝╚██████╔╝██║  ██║██║  ██║██████╔╝
-╚═╝  ╚═══╝╚══════╝   ╚═╝    ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝
-```
-
-**NetGuard IDS** — Host-centric detection and response platform built in Python,  
-with local-first telemetry, correlation engine, risk scoring and incident workflow.
+Host-centric detection and response platform built in Python, with a local-first SOC dashboard, XDR-style endpoint ingest, incident workflow, risk scoring, and a path from desktop demo to lightweight SaaS.
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://python.org)
-[![Architecture](https://img.shields.io/badge/Architecture-Host--Centric%20EDR-green)]()
 [![MITRE ATT&CK](https://img.shields.io/badge/MITRE-ATT%26CK%20Aligned-red)](https://attack.mitre.org)
 [![CI](https://github.com/raphaelguterres/netguard-ids/actions/workflows/tests.yml/badge.svg)](https://github.com/raphaelguterres/netguard-ids/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey)]()
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](DOCKER.md)
 
-</div>
+## What NetGuard is now
 
----
+NetGuard is no longer only a local IDS dashboard. The project now has the foundation of a lightweight EDR/SIEM:
+
+- Flask server with REST API and SOC dashboard
+- Modular endpoint agent (`netguard_agent/`) with legacy and XDR transport modes
+- Host enrollment and inventory registry
+- Structured endpoint event ingest (`/api/agent/events` and `/api/xdr/events`)
+- RBAC-aware auth model (`admin`, `analyst`, `viewer`)
+- Incident lifecycle API with status, severity, assignment, and comments
+- SQLite-first storage for local/demo, with repositories written to be PostgreSQL-ready
+- Sigma-like YAML rules loaded from `rules/yaml/`
+
+The project still runs locally with the current app entrypoint, but it is now organized to support a more professional Agent + Server model.
 
 ## Quick Start
 
-**Windows (PowerShell):**
-```powershell
-irm https://raw.githubusercontent.com/raphaelguterres/netguard-ids/main/install.ps1 | iex
-```
+### 1. Local server
 
-**Linux / macOS:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/raphaelguterres/netguard-ids/main/install.sh | bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python app.py
 ```
 
-**Docker:**
+Open:
+
+- Dashboard: `http://127.0.0.1:5000`
+- Demo flow: `http://127.0.0.1:5000/demo`
+- Health check: `http://127.0.0.1:5000/api/health`
+
+### 2. Run the modular endpoint agent
+
+Use an admin token from `.netguard_token` or a tenant token (`ng_...`) as the bootstrap credential:
+
 ```bash
-docker run -d --name netguard --network host \
-  --cap-add NET_ADMIN --cap-add NET_RAW \
-  -v netguard_data:/data -p 5000:5000 \
-  ghcr.io/raphaelguterres/netguard-ids:latest
+python -m netguard_agent \
+  --hub http://127.0.0.1:5000 \
+  --token YOUR_BOOTSTRAP_TOKEN \
+  --host-id lab-win-01 \
+  --mode xdr
 ```
 
-Dashboard: **http://localhost:5000** · [Full Docker Guide](DOCKER.md)
+You can also reuse an issued host key:
 
----
+```bash
+python -m netguard_agent \
+  --hub http://127.0.0.1:5000 \
+  --agent-key nga_ISSUED_HOST_KEY \
+  --host-id lab-win-01 \
+  --mode xdr
+```
 
-## Production Notes
+## Operating Modes
 
-- `TOKEN_SIGNING_SECRET` is now **mandatory** outside dev/test. The app fails closed if it is missing in production.
-- Admin rate limiting uses shared SQLite storage on the host (`IDS_ADMIN_RL_DB`) instead of per-process memory.
-- Audit logs rotate automatically via stdlib (`IDS_AUDIT_LOG_ROTATE_WHEN`, `IDS_AUDIT_LOG_ROTATE_INTERVAL`, `IDS_AUDIT_LOG_RETENTION`).
-- Background jobs no longer autostart on import. By default they start only on direct `python app.py`; WSGI/Gunicorn imports stay side-effect free unless you opt in deliberately.
+| Mode | Storage | Auth posture | Typical use |
+|------|---------|--------------|-------------|
+| Local dev | SQLite | `IDS_AUTH=false` on loopback only | Fast desktop iteration |
+| Demo / preview | SQLite | Token or preview flow | Portfolio demos and customer preview |
+| Production | PostgreSQL recommended | `IDS_AUTH=true`, dashboard auth, reverse proxy/TLS | VPS, cloud, small SaaS deployment |
 
----
+Important hardening already enforced:
 
-## What is NetGuard?
-
-NetGuard is a **host-centric detection and response** platform that runs locally and monitors your endpoints in real time. It ships a lightweight endpoint agent (`agent.py`, in progress), captures live process trees and network connections, correlates multi-event attack patterns, fires webhook alerts to Slack / Teams / Telegram, and displays everything in a professional dark-mode SOC dashboard — no cloud required, no vendor lock-in.
-
-Architecturally it implements the same primitives used by **CrowdStrike Falcon**, **Elastic EDR** and **Wazuh** — behavioral scoring per host, MITRE ATT&CK kill-chain correlation, ML-based anomaly detection — at a fraction of the cost.
-
-**Core philosophy:** every alert, risk score and incident is anchored to a specific host. The dashboard is host-first, not alert-first.
-
----
+- `TOKEN_SIGNING_SECRET` is mandatory outside `dev/test`
+- Startup fails closed if `IDS_AUTH=false` is exposed outside loopback unless explicitly bypassed
+- Admin rate limiting uses shared SQLite storage per host
+- Audit logs rotate and retain automatically
+- Background jobs do not autostart on import in WSGI/Gunicorn mode
 
 ## Architecture
 
-```
-Endpoint Telemetry
-├── Process tree (psutil / agent.py)
-├── Network connections (netstat / psutil)
-├── Open ports (platform_utils)
-├── Windows Event Log (win32evtlog)
-└── Web request payloads (OWASP CRS)
-        │
-        ▼
-  Detection Pipeline
-  ┌──────────────────────────────────────────────────────────┐
-  │  normalize → enrich → run_rules → classify_severity      │
-  │  → persist → correlate → score_host → dispatch_webhooks  │
-  └──────────────────────────────────────────────────────────┘
-        │
-        ├─▶  SOC Engine          (12 behavioral rules, MITRE-aligned)
-        ├─▶  Correlation Engine  (5 multi-event patterns)
-        ├─▶  Risk Engine         (0–100 host score, updated in real time)
-        ├─▶  Kill Chain          (MITRE ATT&CK tactic/technique tracker)
-        ├─▶  EDR Sentinel        (process behavioral scoring, auto-response)
-        ├─▶  Incident Engine     (auto-groups related alerts into incidents)
-        ├─▶  IOC Manager         (IP / domain / hash blacklists + hit tracking)
-        ├─▶  ML Anomaly          (Isolation Forest, 10-feature hourly windows)
-        ├─▶  Webhook Engine      (Slack / Teams / Discord / Telegram / WhatsApp)
-        ├─▶  Fail2Ban            (auto-block on threshold breach)
-        └─▶  SQLite Storage      (WAL mode, multi-tenant, local-first)
+See the full architecture note in [NETGUARD_AGENT_SERVER_ARCHITECTURE.md](NETGUARD_AGENT_SERVER_ARCHITECTURE.md).
 
-Lightweight endpoint agent (in progress — agent.py):
-        ├─▶  Reports heartbeat, process list and open connections to server
-        └─▶  Enables multi-host visibility from a single dashboard
+High-level flow:
+
+```text
+netguard_agent / external producers
+        |
+        +--> POST /api/agent/register
+        +--> POST /api/agent/heartbeat
+        +--> POST /api/agent/events
+        +--> POST /api/xdr/events
+                    |
+                    v
+             XDR pipeline
+     normalize -> detect -> correlate
+        -> score host -> persist events
+        -> create response actions
+        -> feed incidents / SOC views
+                    |
+                    v
+     repositories (SQLite local, PostgreSQL-ready)
+        - EventRepository
+        - HostRepository
+        - IncidentRepository
+                    |
+                    v
+      SOC dashboard + incidents + reporting APIs
 ```
 
----
+Core building blocks:
 
-## Feature Matrix
+- `netguard_agent/`: modular endpoint collector and transport runtime
+- `server/agent_service.py`: host enrollment and agent auth rules
+- `storage/event_repository.py`: event/tenant storage abstraction
+- `storage/host_repository.py`: enrolled host registry and API key validation
+- `storage/incident_repository.py`: incident lifecycle persistence
+- `engine/incident_engine.py`: incident business logic
+- `rules/yaml_loader.py`: Sigma-like YAML rule loading and validation
+- `xdr/`: endpoint schema, detections, pipeline, and agent-side transport helpers
 
-| Feature | Free | Pro | Enterprise |
-|---------|:----:|:---:|:----------:|
-| Real-time SOC dashboard | ✓ | ✓ | ✓ |
-| Host-centric view (risk, timeline, MITRE) | ✓ | ✓ | ✓ |
-| IDS detection (22 rules) | ✓ | ✓ | ✓ |
-| Correlation engine (5 patterns) | ✓ | ✓ | ✓ |
-| Kill Chain / MITRE ATT&CK | ✓ | ✓ | ✓ |
-| EDR Sentinel (process scoring) | ✓ | ✓ | ✓ |
-| Incident auto-grouping | ✓ | ✓ | ✓ |
-| GeoIP world map | ✓ | ✓ | ✓ |
-| Fail2Ban auto-block | ✓ | ✓ | ✓ |
-| Webhook alerts (Slack/Teams/Telegram…) | ✓ | ✓ | ✓ |
-| IOC Manager | — | ✓ | ✓ |
-| Custom detection rules | — | ✓ | ✓ |
-| ML Anomaly Detection | — | ✓ | ✓ |
-| Risk Score (per-host 0–100) | — | ✓ | ✓ |
-| Compliance PDF (SOC2/PCI/HIPAA) | — | — | ✓ |
-| Multi-tenant / MSSP mode | — | — | ✓ |
-| Time-limited trial tokens | — | — | ✓ |
-| Lightweight endpoint agent (in progress) | — | ✓ | ✓ |
+## Authentication and Authorization
 
----
+NetGuard now supports multiple access models:
 
-## Detection Rules
+- Admin token from `.netguard_token`
+- Tenant tokens (`ng_...`) stored in the repository
+- Host API keys (`nga_...`) for enrolled agents
 
-### SOC Engine (12 Rules)
+RBAC is enforced across sensitive flows:
 
-| Rule | Type | Severity | Trigger |
-|------|------|----------|---------|
-| R1 | process_unknown | MEDIUM | Process not in baseline |
-| R2 | process_high_cpu | HIGH | CPU > 80% for 30s |
-| R3 | port_opened | HIGH | Well-known port opened by suspicious process |
-| R4 | network_spike | HIGH | 50+ connections in 10s |
-| R5 | network_scan | HIGH | 20+ unique IPs in 30s |
-| R6 | process_external_conn | MEDIUM | Unknown process with external connection |
-| R7 | port_new_listen | MEDIUM | New port in LISTEN state |
-| R8 | ip_new_external | LOW | External IP never seen before |
-| R9 | behavior_deviation | MEDIUM | z-score > 2.5 deviation from baseline |
-| R10 | web_sqli | HIGH | SQL Injection pattern match |
-| R11 | web_xss | HIGH | XSS pattern match |
-| R12 | web_suspicious_ua | MEDIUM | Scanner/tool User-Agent detected |
+- `admin`: full platform access
+- `analyst`: operational access to incidents, hosts, and agent enrollment
+- `viewer`: read-oriented access, no host enrollment or incident mutation
 
-### Correlation Engine (5 Patterns)
+Sensitive actions emit audit entries, and incident changes are timeline-backed.
 
-| Rule | Pattern | MITRE |
-|------|---------|-------|
-| COR-1 | Unknown process + high CPU + external connection | T1059 — Execution |
-| COR-2 | Multiple new IPs + port scan + suspicious DNS | T1595 — Reconnaissance |
-| COR-3 | Periodic connections to same external IP (low CV) | T1071.001 — C2 |
-| COR-4 | Process accessing 3+ internal IPs in 5 minutes | T1021 — Lateral Movement |
-| COR-5 | 5+ auth attempts from same IP in 2 minutes | T1110 — Brute Force |
+## Detection and Rule Model
 
----
+The project now supports two complementary rule layers:
 
-## Webhook Alerts
+- Built-in behavioral/XDR detections in `xdr/detections/`
+- Folder-backed YAML rules in `rules/yaml/`
 
-Configure real-time alerts with no restart required.
+Included YAML examples:
 
-| Channel | Type |
-|---------|------|
-| 🟩 Slack | `slack` |
-| 🔵 Microsoft Teams | `teams` |
-| 🎮 Discord | `discord` |
-| 📱 Telegram | `telegram` |
-| 💬 WhatsApp (Z-API / Twilio) | `whatsapp` |
-| 🌐 Generic HTTP POST | `generic` |
+- `rules/yaml/suspicious_powershell.yml`
+- `rules/yaml/bruteforce.yml`
+- `rules/yaml/port_scan.yml`
+
+These rules support:
+
+- field matching (`equals`, `contains`, `regex`, numeric comparisons)
+- `all` / `any` matching blocks
+- simple aggregation windows (`count`, `within_seconds`, `group_by`, `distinct_field`)
+
+## Main Endpoints
+
+### Agent and ingest
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/agent/register` | `POST` | Enroll a host and issue a host API key |
+| `/api/agent/heartbeat` | `POST` | Update host liveness, version, and metadata |
+| `/api/agent/events` | `POST` | Ingest agent events using host key or token |
+| `/api/xdr/events` | `POST` | Generic structured endpoint event ingest |
+| `/api/agent/status` | `GET` | Agent inventory status view |
+
+### Incidents and SOC
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/incidents` | `GET` | List incidents and summary stats |
+| `/api/incidents` | `POST` | Create incident manually or from `event_id` |
+| `/api/incidents/<id>` | `GET` | Incident details and timeline |
+| `/api/incidents/<id>/status` | `PATCH` | Update status (`open`, `investigating`, `resolved`, etc.) |
+| `/api/incidents/<id>/severity` | `PATCH` | Update severity |
+| `/api/incidents/<id>/comments` | `POST` | Add analyst comment |
+| `/api/incidents/<id>/assign` | `POST` | Assign an owner |
+| `/soc-preview` | `GET` | Public preview of the SOC experience |
+| `/soc/incidents` | `GET` | Authenticated incidents queue |
+
+### Platform
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/health` | `GET` | Health and subsystem status |
+| `/api/hosts` | `GET` | Host-centric inventory, risk, and telemetry summary |
+| `/metrics` | `GET` | Prometheus metrics |
+| `/demo` | `GET` | Demo bootstrap flow |
+| `/trial/<token>` | `GET` | Trial access flow |
+
+## Storage Strategy
+
+NetGuard keeps SQLite as the default local/demo backend, but the storage layer is now structured so production can move to PostgreSQL without rewriting business logic.
+
+Current repository abstractions:
+
+- `EventRepository`: events, tenants, onboarding artifacts
+- `HostRepository`: managed hosts, API key hashes, heartbeat metadata
+- `IncidentRepository`: incidents and incident timeline records
+
+This makes it easier to:
+
+- keep desktop demos frictionless
+- move SaaS or VPS installs to PostgreSQL
+- write tests against business logic without coupling every feature to `app.py`
+
+## Testing
+
+Run the focused regression suite for the new architecture:
 
 ```bash
-# Register a Slack webhook (min severity: high)
-curl -X POST http://localhost:5000/api/webhooks \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Slack SOC","type":"slack","url":"https://hooks.slack.com/...","min_severity":"high"}'
-
-# Fire a test alert immediately
-curl -X POST http://localhost:5000/api/webhooks/1/test
+python -m pytest \
+  tests/test_agent.py \
+  tests/test_agent_xdr.py \
+  tests/test_xdr_pipeline.py \
+  tests/test_agent_server.py \
+  tests/test_incident_engine.py \
+  tests/test_incidents_api.py \
+  tests/test_yaml_rules.py \
+  tests/test_api_endpoints.py \
+  tests/test_integration.py \
+  tests/test_security.py -q
 ```
 
----
+The new coverage adds checks for:
 
-## Trial Token System
+- agent registration, heartbeat, and event ingest
+- agent RBAC enforcement
+- incident engine lifecycle and grouped EDR alerts
+- incident API create/update/comment flows
+- YAML rule loading and aggregation behavior
 
-Share a time-limited, branded demo with potential clients — unique URL, live countdown, isolated demo data.
+## Production and Ops Docs
 
-```bash
-# Create a 72-hour trial for a prospect
-curl -X POST http://localhost:5000/api/admin/trials \
-  -H "Content-Type: application/json" \
-  -d '{"email":"cto@acme.com","name":"Alice","company":"Acme Corp","duration_h":72}'
+- [DEPLOY.md](DEPLOY.md): deployment patterns and production checklist
+- [SECURITY.md](SECURITY.md): hardening notes and security posture
+- [NETGUARD_AGENT_SERVER_ARCHITECTURE.md](NETGUARD_AGENT_SERVER_ARCHITECTURE.md): Agent + Server architecture
+- [DOCKER.md](DOCKER.md): containerized execution
 
-# Returns trial URL → send to client via email or WhatsApp
-# { "trial_url": "http://your-server/trial/ng_trial_..." }
-```
+## Realistic Roadmap
 
-When the trial expires, the client sees an upgrade CTA page automatically.
-
----
-
-## API Reference
-
-50+ REST endpoints at `http://localhost:5000`.
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/health` | Server health + subsystem status |
-| `GET /api/hosts` | All hosts — risk, MITRE, last heartbeat |
-| `GET /api/hosts/<host>/timeline` | Per-host event timeline |
-| `GET /api/detections` | IDS detections |
-| `GET /api/soc/events` | SOC Engine events |
-| `GET /api/risk/hosts` | Host risk scores (0–100) |
-| `GET /api/killchain/incidents` | Kill chain incidents |
-| `GET /api/ioc` | IOC blacklist |
-| `POST /api/ioc/check` | Check IP/domain/hash against IOC list |
-| `GET /api/ml/anomaly/status` | ML anomaly engine status |
-| `GET /api/webhooks` | Configured webhooks |
-| `POST /api/webhooks/<id>/test` | Fire test alert |
-| `POST /api/admin/trials` | Create client trial token |
-| `GET /api/admin/trials` | List all trials + access stats |
-| `GET /metrics` | Prometheus metrics |
-| `GET /demo` | Instant demo (no login) |
-| `GET /trial/<token>` | Time-limited client trial |
-
----
-
-## Roadmap
-
-- [ ] Multi-host agent (`agent.py`) — heartbeat, process list, network telemetry
-- [ ] Host detail page — per-host process tree, connection timeline, MITRE heatmap
-- [ ] YARA rule scanning on running processes
-- [ ] Sigma rule hot-reload from directory
-- [ ] Postgres backend option (alongside SQLite)
-- [ ] REST API token scoping per tenant
-
----
+- [x] Agent + Server foundation with host enrollment and structured endpoint ingest
+- [x] Incident API with severity, status, assignment, and comments
+- [x] YAML rule loader with bundled examples
+- [x] Repository abstraction for hosts and incidents
+- [ ] Database migrations for production upgrades
+- [ ] Persistent host-key storage/rotation workflow for unattended agents
+- [ ] Agent packaging as service/daemon for Windows and Linux
+- [ ] Response actions executed by the endpoint agent, not only suggested by the server
+- [ ] Redis/shared cache options for multi-node production topologies
+- [ ] Tenant-scoped API tokens with narrower operational scopes
 
 ## License
 
-MIT © 2024 Raphael Guterres
+MIT © Raphael Guterres

@@ -1,0 +1,24 @@
+id: NG-YAML-NET-001
+title: Outbound Port Scan Pattern
+description: A single host reaches many unique external addresses in a short interval.
+severity: high
+event_types:
+  - network_connection
+recommended_action: isolate_host_and_review_network_activity
+tags:
+  - reconnaissance
+  - port_scan
+  - yaml
+mitre:
+  tactic: reconnaissance
+  technique: T1595
+detection:
+  all:
+    - field: network_direction
+      operator: equals
+      value: outbound
+  aggregation:
+    event_type: network_connection
+    distinct_field: network_dst_ip
+    count: 15
+    within_seconds: 120
