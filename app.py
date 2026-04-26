@@ -350,6 +350,15 @@ def _get_real_hostname() -> str:
             return hn
     except Exception:
         pass
+
+    registered_map: dict = {}
+    try:
+        for host in _get_host_registry(tid).list_hosts(limit=300):
+            host_id = str(host.get("host_id") or "").strip()
+            if host_id:
+                registered_map[host_id] = host
+    except Exception:
+        pass
     try:
         import socket
         hn = socket.gethostname()
@@ -676,14 +685,25 @@ def _resolve_tenant_with_role() -> tuple[str, str]:
 # ── App ───────────────────────────────────────────────────────────
 app = Flask(__name__)
 
-# ── ProxyFix — ngrok / reverse proxy ─────────────────────────────
-# Faz request.host_url usar o host real do ngrok em vez de 127.0.0.1
-# Necessário para gerar links de trial com URL pública correta.
-try:
-    from werkzeug.middleware.proxy_fix import ProxyFix
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
-except ImportError:
-    pass  # werkzeug sempre presente com Flask, mas por segurança
+# ── ProxyFix — ngrok / reverse proxy (OPT-IN) ─────────────────────
+# Faz request.host_url usar o host real do proxy (ngrok, nginx, ALB) em vez
+# de 127.0.0.1. Necessário para gerar links de trial com URL pública correta.
+#
+# IMPORTANTE: aplicar ProxyFix sem proxy real à frente é FALHA DE SEGURANÇA.
+# Werkzeug reescreve request.remote_addr a partir de X-Forwarded-For — qualquer
+# cliente direto pode injetar o header e bypassar o rate limit em /api/admin/*
+# (verificado em pentest 2026-04-25, finding HIGH).
+#
+# Por isso o ProxyFix é OPT-IN: só ativa quando IDS_TRUST_PROXY=true.
+# Em dev local (default) fica desligado e request.remote_addr reflete o peer
+# TCP real (untrusted X-Forwarded-For é descartado).
+if os.environ.get("IDS_TRUST_PROXY", "false").lower() == "true":
+    try:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+        logger.info("ProxyFix habilitado (IDS_TRUST_PROXY=true) — confiando em X-Forwarded-* do proxy upstream")
+    except ImportError:
+        pass  # werkzeug sempre presente com Flask, mas por segurança
 
 # ── Limites globais de request ────────────────────────────────────
 # Previne DoS por upload de payload gigante (padrão Flask: 16 MB)
@@ -847,8 +867,15 @@ def _get_ids(tid: str = None) -> "IDSEngine":
 
 # ── Event Repository (multi-tenant storage) ───────────────────────
 from storage.event_repository import EventRepository
+from storage.host_repository import HostRepository
+from server import AgentAuthContext, AgentService
+
 repo = EventRepository()
 app._repo = repo
+host_registry = HostRepository(db_path=getattr(repo, "db_path", None))
+agent_service = AgentService(host_registry, repo)
+app._host_registry = host_registry
+app._agent_service = agent_service
 
 # ── Auth ──────────────────────────────────────────────────────────
 # Nota: auth() importado de auth.py (token-based) tem prioridade.
@@ -1064,6 +1091,80 @@ def _current_request_tenant_id():
     except Exception:
         tenant_id = None
     return tenant_id or _resolve_tenant_id() or "default"
+
+
+def _get_host_registry(tenant_id: str | None = None) -> HostRepository:
+    return HostRepository(
+        db_path=getattr(repo, "db_path", None),
+        tenant_id=tenant_id or _current_request_tenant_id(),
+    )
+
+
+def _get_agent_service() -> AgentService:
+    return AgentService(_get_host_registry("default"), repo)
+
+
+def _extract_agent_key() -> str:
+    explicit = (
+        request.headers.get("X-NetGuard-Agent-Key", "").strip()
+        or request.headers.get("X-Agent-Key", "").strip()
+    )
+    if explicit:
+        return explicit
+    auth_header = request.headers.get("Authorization", "").strip()
+    if auth_header.lower().startswith("agent "):
+        return auth_header[6:].strip()
+    return ""
+
+
+def _set_request_tenant_context(tenant_id: str, role: str = "analyst") -> None:
+    try:
+        from flask import g
+
+        g.tenant_id = tenant_id
+        g.tenant_role = role
+    except Exception:
+        pass
+    _request_ctx.tenant_id = tenant_id
+
+
+def _authenticate_agent_request(
+    *,
+    allow_agent_key: bool = True,
+    require_management: bool = False,
+) -> AgentAuthContext:
+    service = _get_agent_service()
+    agent_key = _extract_agent_key()
+    if allow_agent_key and agent_key:
+        host = service.verify_agent_key(agent_key)
+        if host:
+            return AgentAuthContext(
+                tenant_id=str(host.get("tenant_id") or "default"),
+                role="agent",
+                auth_type="agent",
+                host_id=str(host.get("host_id") or ""),
+            )
+
+    token = _extract_token()
+    result = verify_any_token(token, repo)
+    if result.get("valid"):
+        if result.get("type") == "admin":
+            return AgentAuthContext(
+                tenant_id="admin",
+                role="admin",
+                auth_type="admin",
+            )
+        tenant = result.get("tenant") or {}
+        auth_ctx = AgentAuthContext(
+            tenant_id=str(tenant.get("tenant_id") or "default"),
+            role=str(tenant.get("role") or "viewer"),
+            auth_type="tenant",
+        )
+        if require_management and not auth_ctx.can_manage_hosts:
+            raise PermissionError("insufficient_role")
+        return auth_ctx
+
+    raise PermissionError("unauthorized")
 
 
 def _get_playbook_engine():
@@ -1370,9 +1471,11 @@ def _format_soc_last_seen(dt_obj):
 def _build_soc_preview_context():
     tenant_id = _resolve_tenant_id()
     summary = _build_xdr_summary_payload(query_limit=300, recent_limit=60, host_limit=50)
+    registered_hosts = _get_host_registry(tenant_id).list_hosts(limit=200)
 
     host_rows: dict[str, dict] = {
         item["host_id"]: {
+            "host_id": item["host_id"],
             "host_name": item["host_id"],
             "risk_score": item["risk_score"],
             "risk_level": item["risk_level"],
@@ -1382,9 +1485,48 @@ def _build_soc_preview_context():
             "active_alerts": 0,
             "operating_system": "Unknown",
             "status": "offline",
+            "agent_version": "",
+            "agent_enrolled": False,
         }
         for item in summary["host_risks"]
     }
+
+    for registered in registered_hosts:
+        host_id = str(registered.get("host_id") or "").strip()
+        if not host_id:
+            continue
+        host = host_rows.setdefault(
+            host_id,
+            {
+                "host_id": host_id,
+                "host_name": str(registered.get("display_name") or host_id),
+                "risk_score": 0,
+                "risk_level": "info",
+                "highest_severity": "info",
+                "last_seen_ts": None,
+                "last_seen": "unknown",
+                "active_alerts": 0,
+                "operating_system": "Unknown",
+                "status": "enrolled",
+                "agent_version": "",
+                "agent_enrolled": False,
+            },
+        )
+        host["host_name"] = str(registered.get("display_name") or host_id)
+        host["host_id"] = host_id
+        host["agent_enrolled"] = True
+        host["agent_version"] = str(registered.get("agent_version") or "")
+        registered_platform = str(registered.get("platform") or "").strip()
+        if registered_platform:
+            host["operating_system"] = registered_platform.title()
+        registered_status = str(registered.get("status") or "").strip().lower()
+        if registered_status:
+            host["status"] = registered_status
+        last_seen_raw = str(registered.get("last_seen") or "").strip()
+        last_seen_dt = _parse_soc_timestamp(last_seen_raw)
+        if last_seen_dt and (host["last_seen_ts"] is None or last_seen_dt > host["last_seen_ts"]):
+            host["last_seen_ts"] = last_seen_dt
+            host["last_seen"] = _format_soc_last_seen(last_seen_dt)
 
     alert_rows = []
     for event_dict in summary["recent_events"]:
@@ -1395,6 +1537,7 @@ def _build_soc_preview_context():
         host = host_rows.setdefault(
             host_id,
             {
+                "host_id": host_id,
                 "host_name": host_id,
                 "risk_score": _xdr_extract_risk_score(event_dict) or _XDR_RISK_FALLBACK_BY_SEVERITY.get(str(event_dict.get("severity", "low")).lower(), 20),
                 "risk_level": _xdr_risk_level(_xdr_extract_risk_score(event_dict) or _XDR_RISK_FALLBACK_BY_SEVERITY.get(str(event_dict.get("severity", "low")).lower(), 20)),
@@ -1404,6 +1547,8 @@ def _build_soc_preview_context():
                 "active_alerts": 0,
                 "operating_system": "Unknown",
                 "status": "offline",
+                "agent_version": "",
+                "agent_enrolled": False,
             },
         )
 
@@ -1453,9 +1598,15 @@ def _build_soc_preview_context():
         "open": sum(1 for item in incident_rows if item.get("status") == "open"),
         "in_progress": sum(1 for item in incident_rows if item.get("status") == "in_progress"),
     }
+    online_agents = sum(1 for item in host_list if item.get("status") == "online")
+    enrolled_agents = sum(1 for item in host_list if item.get("agent_enrolled"))
+    offline_agents = sum(1 for item in host_list if item.get("status") == "offline")
 
     overview = {
         "monitored_hosts": len(host_list),
+        "registered_agents": enrolled_agents,
+        "online_agents": online_agents,
+        "offline_agents": offline_agents,
         "active_alerts": len(alert_rows),
         "critical_alerts": severity_counts["critical"],
         "open_incidents": incident_counts["open"],
@@ -1478,6 +1629,11 @@ def _build_soc_preview_context():
         "alerts": alert_rows[:50],
         "incidents": incident_rows[:50],
         "xdr_summary": summary,
+        "agent_status_counts": {
+            "online": online_agents,
+            "offline": offline_agents,
+            "enrolled": enrolled_agents,
+        },
     }
 
 
@@ -2140,14 +2296,19 @@ def _build_soc_host_detail_context(host_id: str, context: dict | None = None):
         }
     _, tenant_role = _resolve_tenant_with_role()
     can_update_incidents = (not AUTH_ENABLED) or tenant_role in {"analyst", "admin"}
+    registered_host = _get_host_registry().get_host(host_id)
 
     host_metadata = [
         ("Tenant", context["tenant_name"]),
         ("Operating System", selected_host.get("operating_system", "Unknown")),
         ("Status", str(selected_host.get("status", "offline")).title()),
-        ("Sensor", "NetGuard Agent / XDR Pipeline"),
+        ("Sensor", "NetGuard Agent / XDR Pipeline" if registered_host else "XDR Pipeline"),
         ("Risk Score", f"{selected_host.get('risk_score', 0)}/100"),
     ]
+    if registered_host and registered_host.get("agent_version"):
+        host_metadata.append(("Agent Version", str(registered_host.get("agent_version"))))
+    if registered_host and registered_host.get("last_ip"):
+        host_metadata.append(("Last Source IP", str(registered_host.get("last_ip"))))
 
     latest_user = next((item["username"] for item in host_events if item.get("username")), "")
     if latest_user:
@@ -4027,29 +4188,18 @@ def yara_stats():
 
 # ── Agent Push API ────────────────────────────────────────────────
 
-@app.route("/api/xdr/events", methods=["POST"])
-@auth
-def xdr_events_ingest():
-    """Recebe eventos estruturados de endpoint para o pipeline EDR/XDR."""
-    try:
-        payload = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify({"error": "invalid_json"}), 400
-
+def _process_xdr_ingest_payload(payload):
     batch = payload.get("events") if isinstance(payload, dict) else payload
     if isinstance(batch, list) and len(batch) > 500:
-        return jsonify({"error": "batch_too_large", "max_events": 500}), 400
+        raise ValueError("batch_too_large")
 
     try:
         outcomes = _get_xdr_pipeline().process_payload(payload)
     except ValueError as exc:
-        return jsonify({"error": "invalid_event", "detail": str(exc)}), 400
+        raise ValueError(str(exc)) from exc
     except Exception:
         logger.exception("XDR ingest failed | tenant=%s", _resolve_tenant_id())
-        return jsonify({
-            "error": "xdr_ingest_failed",
-            "request_id": getattr(_request_ctx, "request_id", ""),
-        }), 500
+        raise RuntimeError("xdr_ingest_failed")
 
     saved = _persist_xdr_outcomes(outcomes)
     host_states = {}
@@ -4076,7 +4226,7 @@ def xdr_events_ingest():
         "XDR ingest | tenant=%s | events=%d | detections=%d | correlations=%d | saved=%d",
         tenant_id, len(outcomes), detections, correlations, saved,
     )
-    return jsonify({
+    return {
         "ok": True,
         "tenant_id": tenant_id,
         "processed": len(outcomes),
@@ -4087,7 +4237,29 @@ def xdr_events_ingest():
         "detection_records": detection_records[:50],
         "correlation_records": correlation_records[:25],
         "hosts": list(host_states.values()),
-    })
+    }
+
+
+@app.route("/api/xdr/events", methods=["POST"])
+@auth
+def xdr_events_ingest():
+    """Recebe eventos estruturados de endpoint para o pipeline EDR/XDR."""
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"error": "invalid_json"}), 400
+    try:
+        result = _process_xdr_ingest_payload(payload)
+        return jsonify(result)
+    except ValueError as exc:
+        if str(exc) == "batch_too_large":
+            return jsonify({"error": "batch_too_large", "max_events": 500}), 400
+        return jsonify({"error": "invalid_event", "detail": str(exc)}), 400
+    except RuntimeError:
+        return jsonify({
+            "error": "xdr_ingest_failed",
+            "request_id": getattr(_request_ctx, "request_id", ""),
+        }), 500
 
 
 @app.route("/api/xdr/summary", methods=["GET"])
@@ -4156,6 +4328,293 @@ def xdr_summary():
                         "host_risks": [], "recent_events": [],
                         "total_hosts_at_risk": 0,
                         "pipeline_stats": {"hosts_tracked": 0, "critical": 0, "high": 0, "medium": 0, "low": 0}}), 500
+
+
+def _ensure_agent_writer(auth_ctx: AgentAuthContext) -> None:
+    if auth_ctx.auth_type == "tenant" and not auth_ctx.can_manage_hosts:
+        raise PermissionError("insufficient_role")
+
+
+def _agent_snapshot_summary(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    if "snapshot_summary" in payload and isinstance(payload["snapshot_summary"], dict):
+        return dict(payload["snapshot_summary"])
+    return {
+        "process_count": len(payload.get("processes") or []),
+        "connection_count": len(payload.get("connections") or []),
+        "listen_port_count": len(payload.get("ports") or []),
+        "system": payload.get("system") or {},
+    }
+
+
+def _normalize_agent_event_payload(payload: dict, host_id: str, platform_name: str) -> dict:
+    batch = payload.get("events") if isinstance(payload, dict) else payload
+    normalized_events = []
+    for item in batch or []:
+        if not isinstance(item, dict):
+            continue
+        event = dict(item)
+        event.setdefault("host_id", host_id)
+        event.setdefault("source", "agent")
+        if platform_name and not event.get("platform"):
+            event["platform"] = platform_name
+        normalized_events.append(event)
+    return {"events": normalized_events}
+
+
+@app.route("/api/agent/register", methods=["POST"])
+def agent_register():
+    """Registers a host and returns a one-time API key for the professional agent."""
+    try:
+        auth_ctx = _authenticate_agent_request(
+            allow_agent_key=False,
+            require_management=True,
+        )
+        data = request.get_json(force=True) or {}
+        host_id = _sanitize_text(str(data.get("host_id") or ""), max_len=128)
+        if not host_id:
+            return jsonify({"error": "host_id obrigatorio"}), 400
+        tenant_override = _sanitize_text(str(data.get("tenant_id") or ""), max_len=128)
+        host, api_key = _get_agent_service().register_host(
+            auth_ctx=auth_ctx,
+            host_id=host_id,
+            display_name=_sanitize_text(str(data.get("display_name") or host_id), max_len=128),
+            platform=_sanitize_text(str(data.get("platform") or ""), max_len=64).lower(),
+            agent_version=_sanitize_text(str(data.get("agent_version") or ""), max_len=64),
+            metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
+            tags=data.get("tags") if isinstance(data.get("tags"), list) else [],
+            tenant_id=tenant_override or None,
+        )
+        _set_request_tenant_context(str(host.get("tenant_id") or auth_ctx.tenant_id), "analyst")
+        audit(
+            "AGENT_REGISTERED",
+            actor=host_id,
+            ip=request.remote_addr or "-",
+            detail=f"tenant={host.get('tenant_id')} prefix={api_key[:16]}",
+        )
+        return jsonify({"ok": True, "host": host, "api_key": api_key}), 201
+    except PermissionError as exc:
+        if str(exc) == "unauthorized":
+            return jsonify({"error": "Unauthorized"}), 401
+        return jsonify({"error": "Permissao insuficiente"}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/agent/heartbeat", methods=["POST"])
+def agent_heartbeat():
+    """Heartbeat endpoint protected by host API key or tenant/admin token."""
+    try:
+        auth_ctx = _authenticate_agent_request()
+        _ensure_agent_writer(auth_ctx)
+        data = request.get_json(force=True) or {}
+        host_id = _sanitize_text(str(data.get("host_id") or auth_ctx.host_id or ""), max_len=128)
+        if not host_id:
+            return jsonify({"error": "host_id obrigatorio"}), 400
+        platform_name = _sanitize_text(str(data.get("platform") or ""), max_len=64).lower()
+        host = _get_agent_service().record_heartbeat(
+            auth_ctx=auth_ctx,
+            host_id=host_id,
+            display_name=_sanitize_text(str(data.get("display_name") or ""), max_len=128),
+            platform=platform_name,
+            agent_version=_sanitize_text(str(data.get("agent_version") or ""), max_len=64),
+            source_ip=request.remote_addr or "",
+            metadata={
+                "snapshot_summary": _agent_snapshot_summary(data),
+                **(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}),
+            },
+        )
+        _set_request_tenant_context(str(host.get("tenant_id") or auth_ctx.tenant_id), "analyst")
+        return jsonify({"ok": True, "host": host})
+    except PermissionError as exc:
+        if str(exc) == "unauthorized":
+            return jsonify({"error": "Unauthorized"}), 401
+        return jsonify({"error": "Permissao insuficiente"}), 403
+    except Exception as exc:
+        logger.error("Agent heartbeat error: %s", exc)
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/agent/events", methods=["POST"])
+def agent_events_ingest():
+    """Structured endpoint events from the modular agent transport."""
+    try:
+        auth_ctx = _authenticate_agent_request()
+        _ensure_agent_writer(auth_ctx)
+        data = request.get_json(force=True) or {}
+        host_id = _sanitize_text(str(data.get("host_id") or auth_ctx.host_id or ""), max_len=128)
+        if not host_id:
+            return jsonify({"error": "host_id obrigatorio"}), 400
+        platform_name = _sanitize_text(str(data.get("platform") or ""), max_len=64).lower()
+        host = _get_agent_service().record_heartbeat(
+            auth_ctx=auth_ctx,
+            host_id=host_id,
+            display_name=_sanitize_text(str(data.get("display_name") or ""), max_len=128),
+            platform=platform_name,
+            agent_version=_sanitize_text(str(data.get("agent_version") or ""), max_len=64),
+            source_ip=request.remote_addr or "",
+            metadata={
+                "snapshot_summary": _agent_snapshot_summary(data),
+                **(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}),
+            },
+            mark_event=True,
+        )
+        _set_request_tenant_context(str(host.get("tenant_id") or auth_ctx.tenant_id), "analyst")
+        payload = _normalize_agent_event_payload(data, host_id, platform_name)
+        result = _process_xdr_ingest_payload(payload)
+        result["host"] = host
+        return jsonify(result)
+    except PermissionError as exc:
+        if str(exc) == "unauthorized":
+            return jsonify({"error": "Unauthorized"}), 401
+        return jsonify({"error": "Permissao insuficiente"}), 403
+    except ValueError as exc:
+        if str(exc) == "batch_too_large":
+            return jsonify({"error": "batch_too_large", "max_events": 500}), 400
+        return jsonify({"error": "invalid_event", "detail": str(exc)}), 400
+    except RuntimeError:
+        return jsonify({
+            "error": "xdr_ingest_failed",
+            "request_id": getattr(_request_ctx, "request_id", ""),
+        }), 500
+    except Exception as exc:
+        logger.error("Agent events ingest error: %s", exc)
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/agent/push-legacy-shadow", methods=["POST"])
+@auth
+def agent_push_v2():
+    """Compatibility path for legacy snapshot agents with host registry updates."""
+    try:
+        data = request.get_json(force=True) or {}
+        host_id = data.get("host_id", "unknown")
+        procs = data.get("processes", [])
+        conns = data.get("connections", [])
+        ports = data.get("ports", [])
+
+        tenant_id, tenant_role = _resolve_tenant_with_role()
+        auth_ctx = AgentAuthContext(
+            tenant_id=tenant_id,
+            role=tenant_role,
+            auth_type="admin" if tenant_role == "admin" else "tenant",
+        )
+        _ensure_agent_writer(auth_ctx)
+        host = _get_agent_service().record_heartbeat(
+            auth_ctx=auth_ctx,
+            host_id=_sanitize_text(str(host_id), max_len=128) or "unknown",
+            display_name=_sanitize_text(str(host_id), max_len=128) or "unknown",
+            platform=_sanitize_text(str(data.get("platform") or ""), max_len=64).lower(),
+            agent_version=_sanitize_text(str(data.get("agent_v") or ""), max_len=64),
+            source_ip=request.remote_addr or "",
+            metadata={"snapshot_summary": _agent_snapshot_summary(data)},
+        )
+
+        if DE_AVAILABLE and detection_engine:
+            try:
+                events = detection_engine.analyze(
+                    processes=procs,
+                    ports=ports,
+                    connections=conns,
+                )
+                if events and RISK_AVAILABLE and risk_engine:
+                    for item in events:
+                        event_data = item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                        event_data["host_id"] = host_id
+                        risk_engine.ingest_event(event_data)
+            except Exception:
+                pass
+
+        if ML_AVAILABLE and _ml_baseline:
+            try:
+                _ml_baseline.add_sample(
+                    {"processes": procs, "connections": conns, "ports": ports}
+                )
+            except Exception:
+                pass
+
+        return jsonify(
+            {
+                "status": "ok",
+                "host_id": host_id,
+                "host": host,
+                "received": {
+                    "processes": len(procs),
+                    "connections": len(conns),
+                    "ports": len(ports),
+                },
+            }
+        )
+    except PermissionError:
+        return jsonify({"error": "Permissao insuficiente"}), 403
+    except Exception as exc:
+        logger.error("Agent push error: %s", exc)
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/agent/status-legacy-shadow")
+@auth
+def agent_status_v2():
+    """Lists enrolled hosts enriched with XDR risk information."""
+    tenant_id = _resolve_tenant_id()
+    registered_hosts = _get_host_registry(tenant_id).list_hosts(limit=300)
+    risk_map = {
+        item["host_id"]: item
+        for item in _build_xdr_summary_payload(
+            query_limit=300,
+            recent_limit=60,
+            host_limit=300,
+        ).get("host_risks", [])
+    }
+
+    agents = []
+    seen_host_ids = set()
+    for host in registered_hosts:
+        host_id = str(host.get("host_id") or "")
+        seen_host_ids.add(host_id)
+        risk_meta = risk_map.get(host_id, {})
+        host["risk_score"] = int(risk_meta.get("risk_score") or 0)
+        host["risk_level"] = str(risk_meta.get("risk_level") or "info")
+        agents.append(host)
+
+    for host_id, risk_meta in risk_map.items():
+        if host_id in seen_host_ids:
+            continue
+        agents.append(
+            {
+                "tenant_id": tenant_id,
+                "host_id": host_id,
+                "display_name": host_id,
+                "platform": "",
+                "agent_version": "",
+                "status": "unknown",
+                "last_seen": None,
+                "last_seen_age_seconds": None,
+                "risk_score": int(risk_meta.get("risk_score") or 0),
+                "risk_level": str(risk_meta.get("risk_level") or "info"),
+                "metadata": {},
+                "tags": [],
+            }
+        )
+
+    agents.sort(
+        key=lambda item: (
+            int(item.get("risk_score") or 0),
+            1 if item.get("status") == "online" else 0,
+            str(item.get("host_id") or ""),
+        ),
+        reverse=True,
+    )
+    return jsonify(
+        {
+            "agents": agents,
+            "total": len(agents),
+            "online": sum(1 for item in agents if item.get("status") == "online"),
+            "offline": sum(1 for item in agents if item.get("status") == "offline"),
+            "enrolled": sum(1 for item in agents if item.get("status") == "enrolled"),
+        }
+    )
 
 
 @app.route("/api/agent/push", methods=["POST"])
@@ -6856,6 +7315,86 @@ def edr_scan_now():
     return jsonify({"ok": True, "result": result})
 
 # ── Incident endpoints ────────────────────────────────────────────
+@app.route("/api/incidents", methods=["POST"])
+@auth
+@require_session
+@require_role("analyst", "admin")
+@csrf_protect
+def incidents_create():
+    if not INCIDENT_AVAILABLE:
+        return jsonify({"error": "Incident Engine indisponivel"}), 503
+    data = request.get_json(force=True) or {}
+    event_id = _sanitize_text(str(data.get("event_id") or ""), max_len=128)
+    event_ids = data.get("event_ids") if isinstance(data.get("event_ids"), list) else []
+    tenant_repo = _get_tenant_event_repo()
+    event_record = tenant_repo.get_event(event_id) if event_id else None
+    if event_id and not event_record:
+        return jsonify({"error": "Evento nao encontrado"}), 404
+    if event_id and event_id not in event_ids:
+        event_ids = [event_id, *event_ids]
+
+    details = (event_record or {}).get("details") or {}
+    if not isinstance(details, dict):
+        details = {}
+    title = _sanitize_text(
+        str(
+            data.get("title")
+            or (event_record or {}).get("rule_name")
+            or (event_record or {}).get("event_type")
+            or "Manual incident"
+        ),
+        max_len=240,
+    )
+    if not title:
+        return jsonify({"error": "title obrigatorio"}), 400
+
+    severity = _sanitize_text(
+        str(data.get("severity") or (event_record or {}).get("severity") or "medium"),
+        max_len=16,
+    ).lower()
+    if severity not in _VALID_SEVERITY:
+        return jsonify({"error": f"severity invalido: {severity}"}), 400
+
+    incident = _get_incidents().open_incident(
+        title=title,
+        severity=severity,
+        source=_sanitize_text(
+            str(data.get("source") or (event_record or {}).get("source") or "manual"),
+            max_len=64,
+        ),
+        source_ip=_sanitize_text(
+            str(data.get("source_ip") or details.get("source_ip") or ""),
+            max_len=128,
+        ),
+        host_id=_sanitize_text(
+            str(data.get("host_id") or (event_record or {}).get("host_id") or ""),
+            max_len=128,
+        ),
+        summary=_sanitize_text(
+            str(data.get("summary") or details.get("summary") or details.get("description") or ""),
+            max_len=2000,
+        ),
+        event_ids=event_ids,
+        tags=data.get("tags") if isinstance(data.get("tags"), list) else [],
+        mitre_tactic=_sanitize_text(
+            str(data.get("mitre_tactic") or details.get("tactic") or ""),
+            max_len=120,
+        ),
+        mitre_tech=_sanitize_text(
+            str(data.get("mitre_tech") or details.get("technique") or ""),
+            max_len=120,
+        ),
+        actor="analyst",
+        initial_comment=_sanitize_text(str(data.get("comment") or ""), max_len=2000),
+    )
+    audit(
+        "INCIDENT_CREATED",
+        ip=request.remote_addr or "-",
+        detail=f"iid={incident.get('id')} host={incident.get('host_id','')}",
+    )
+    return jsonify({"ok": True, "incident": incident}), 201
+
+
 @app.route("/api/incidents")
 @auth
 @require_session
@@ -6921,6 +7460,30 @@ def incidents_update_status(iid):
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
+
+@app.route("/api/incidents/<int:iid>/severity", methods=["PATCH"])
+@auth
+@require_session
+@require_role("analyst", "admin")
+@csrf_protect
+def incidents_update_severity(iid):
+    if not INCIDENT_AVAILABLE:
+        return jsonify({"error": "Incident Engine indisponivel"}), 503
+    if iid < 1:
+        return jsonify({"error": "ID invalido"}), 400
+    data = request.get_json(force=True) or {}
+    severity = _sanitize_text(str(data.get("severity", "")), max_len=16).lower()
+    note = _sanitize_text(str(data.get("note", "")), max_len=2000)
+    if severity not in _VALID_SEVERITY:
+        return jsonify({"error": f"severity invalido: {severity}"}), 400
+    try:
+        inc = _get_incidents().update_severity(iid, severity, actor="analyst", note=note)
+        audit("INCIDENT_SEVERITY", ip=request.remote_addr or "-",
+              detail=f"iid={iid} severity={severity}")
+        return jsonify({"ok": True, "incident": inc})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
 @app.route("/api/incidents/<int:iid>/note", methods=["POST"])
 @auth
 @require_session
@@ -6938,6 +7501,16 @@ def incidents_add_note(iid):
         return jsonify({"error": "Nota vazia"}), 400
     inc = _get_incidents().add_note(iid, note, actor="analyst")
     return jsonify({"ok": True, "incident": inc})
+
+
+@app.route("/api/incidents/<int:iid>/comments", methods=["POST"])
+@auth
+@require_session
+@require_role("analyst", "admin")
+@csrf_protect
+@limiter.limit("30 per minute")
+def incidents_add_comment(iid):
+    return incidents_add_note(iid)
 
 @app.route("/api/incidents/<int:iid>/assign", methods=["POST"])
 @auth
@@ -7024,7 +7597,7 @@ def hosts_overview():
         pass
 
     # 5. Monta lista de hosts unificada
-    all_host_ids = set(risk_data) | set(events_by_host) | set(devices_map)
+    all_host_ids = set(risk_data) | set(events_by_host) | set(devices_map) | set(registered_map)
     if not all_host_ids:
         # fallback: hostname local
         import socket as _sock
@@ -7036,6 +7609,7 @@ def hosts_overview():
         devic = devices_map.get(hid, {})
         evts  = events_by_host.get(hid, [])
         incid = incidents_by_host.get(hid, [])
+        reg   = registered_map.get(hid, {})
 
         # Severidade mais alta nos últimos eventos
         sev_order = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
@@ -7051,10 +7625,12 @@ def hosts_overview():
 
         hosts.append({
             "host_id":          hid,
-            "hostname":         devic.get("hostname") or hid,
+            "hostname":         reg.get("display_name") or devic.get("hostname") or hid,
             "ip":               devic.get("ip") or risk.get("ip","—"),
-            "os":               devic.get("os","—"),
-            "last_seen":        devic.get("last_seen") or (evts[0].get("timestamp") if evts else None),
+            "os":               reg.get("platform") or devic.get("os","—"),
+            "last_seen":        reg.get("last_seen") or devic.get("last_seen") or (evts[0].get("timestamp") if evts else None),
+            "agent_status":     reg.get("status", "unknown"),
+            "agent_version":    reg.get("agent_version", ""),
             "risk_score":       risk.get("score", 0),
             "risk_level":       risk.get("level","unknown"),
             "event_count_24h":  len(evts),
@@ -7266,6 +7842,62 @@ def admin_tenant_drilldown(tenant_id):
     top_ips   = [{"ip": k, "count": v}
                  for k, v in sorted(ip_counts.items(),   key=lambda x: x[1], reverse=True)[:5]]
 
+    # Enriquecimento geo — usa geo_ip (GeoLite2 se disponível, prefix DB
+    # como fallback). É no read path: nada é persistido, então rotação de
+    # GeoLite2 reflete na próxima request sem migração.
+    try:
+        from geo_ip import lookup as _geo_lookup
+        for row in top_ips:
+            try:
+                g = _geo_lookup(row["ip"]) or {}
+                row["country"] = g.get("country") or "??"
+                row["city"]    = g.get("city")    or "Unknown"
+                row["flag"]    = g.get("flag")    or "🌐"
+                row["org"]     = g.get("org")     or ""
+                row["geo_src"] = g.get("source")  or "unknown"
+            except Exception:
+                # Lookup falhou pra esse IP — continua sem geo, não trava
+                # o drill-down inteiro.
+                row["flag"] = "🌐"
+    except ImportError:
+        # geo_ip indisponível — drill-down volta sem flags, comportamento
+        # antigo preservado.
+        pass
+
+    # Hosts gerenciados do tenant + geo. Resposta a "para cada máquina
+    # aberta, reconhecendo onde está abrindo" — pega last_ip do agente.
+    hosts_geo: list[dict] = []
+    try:
+        from geo_ip import lookup as _geo_lookup_h
+        for h in (_get_host_registry(tenant_id).list_hosts(limit=200) or []):
+            last_ip = (h.get("last_ip") or "").strip()
+            entry = {
+                "host_id":      h.get("host_id"),
+                "display_name": h.get("display_name") or h.get("host_id"),
+                "platform":     h.get("platform") or "",
+                "status":       h.get("status") or "enrolled",
+                "last_ip":      last_ip,
+                "last_seen":    h.get("last_seen"),
+                "country":      "",
+                "city":         "",
+                "flag":         "",
+                "org":          "",
+            }
+            if last_ip:
+                try:
+                    g = _geo_lookup_h(last_ip) or {}
+                    entry["country"] = g.get("country") or ""
+                    entry["city"]    = g.get("city")    or ""
+                    entry["flag"]    = g.get("flag")    or ""
+                    entry["org"]     = g.get("org")     or ""
+                    entry["private"] = bool(g.get("private"))
+                except Exception:
+                    pass
+            hosts_geo.append(entry)
+    except Exception as _exc:
+        # Repo de hosts pode falhar (DB indisponível, etc) — log e segue.
+        logger.debug("drilldown hosts_geo fallback: %s", _exc)
+
     try:
         t = repo.get_tenant_by_id(tenant_id)
         name = t.get("name", tenant_id) if t else tenant_id
@@ -7279,14 +7911,35 @@ def admin_tenant_drilldown(tenant_id):
         "timeline":  buckets,
         "top_rules": top_rules,
         "top_ips":   top_ips,
+        "hosts":     hosts_geo,
         "summary": {
             "total_24h":    sum(b["total"]    for b in buckets),
             "critical_24h": sev_totals["critical"],
             "high_24h":     sev_totals["high"],
             "medium_24h":   sev_totals["medium"],
             "low_24h":      sev_totals["low"],
+            "host_count":   len(hosts_geo),
         },
     })
+
+
+@app.route("/api/admin/geolite2/status")
+@_admin_only
+def admin_geolite2_status():
+    """
+    Diagnóstico: indica se os DBs GeoLite2 estão carregados.
+    Útil pra confirmar deploy antes de cobrar geo no drill-down.
+    """
+    try:
+        from geo_ip import geolite2_status
+        return jsonify(geolite2_status())
+    except ImportError:
+        return jsonify({"error": "geo_ip module not found",
+                        "city_loaded": False, "asn_loaded": False}), 500
+    except Exception as exc:
+        logger.error("geolite2_status error: %s", exc)
+        return jsonify({"error": str(exc),
+                        "city_loaded": False, "asn_loaded": False}), 500
 
 
 @app.route("/api/admin/stream")
@@ -7645,8 +8298,18 @@ def admin_tenants_list():
             # O repositório já retorna apenas prefixos seguros; reforçamos aqui.
             td.pop("token_hash", None)
             td["token"] = td.get("token_prefix") or td.get("token", "")
-            td["host_count"] = len(_ids_engines.get(td.get("tenant_id", ""), {__class__: None}).__dict__) \
-                if td.get("tenant_id") in _ids_engines else 0
+            # host_count vem do registry (managed_hosts) — autoritativo por tenant.
+            # ANTES era `len(_ids_engines.get(...).__dict__)` com `{__class__: None}`
+            # como default, que só funcionaria dentro de uma classe (closure de
+            # __class__) e quebrava com NameError em escopo de função quando o
+            # tenant tinha engine ativa. Pentest 2026-04-25 derrubou /api/admin/tenants
+            # depois de uma ingestão; trocamos para a contagem real do registry.
+            tid_val = td.get("tenant_id", "") or ""
+            try:
+                td["host_count"] = host_registry.count_hosts(tenant_id=tid_val) if tid_val else 0
+            except Exception as _exc:
+                logger.debug("host_count fallback (%s): %s", tid_val, _exc)
+                td["host_count"] = 0
             tenants.append(td)
         return jsonify({"tenants": tenants, "total": len(tenants)})
     except Exception as exc:
@@ -7714,6 +8377,52 @@ def admin_rotate_tenant_token(tid):
               detail=f"by=admin new_prefix={new_token[:8]}")
         return jsonify({"ok": True, "new_token": new_token})
     except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/admin/tenants/<tid>/hosts/reset", methods=["POST"])
+@auth
+@require_role("admin")
+@csrf_protect
+def admin_tenant_hosts_reset(tid):
+    """
+    Zera o registro de hosts (managed_hosts) de um tenant — ação admin.
+
+    Por que esse endpoint existe:
+        Operador admin precisa "limpar" os dispositivos conectados de um
+        tenant — útil para reset de demo, recuperação após vazamento de
+        token de agente (hosts forjados se acumulam no registry), ou
+        atendimento de pedido do próprio cliente. Eventos históricos NÃO
+        são tocados — continuam disponíveis para auditoria/forense.
+
+    Segurança:
+        - @require_role("admin"): só admin executa
+        - @csrf_protect: double-submit cookie/header obrigatório
+        - Valida que o tenant existe antes de deletar (404 senão)
+        - Audit log HOSTS_RESET com actor, ip, count
+
+    Retorno:
+        200 {"ok": true, "deleted_hosts": N}
+        404 {"error": "tenant não encontrado"}
+        500 {"error": "..."} em falha de DB
+
+    Path inclui /reset (não :reset) por compatibilidade com o roteador
+    Flask — algumas versões e proxies não tratam ":" em segmento de URL
+    como esperado.
+    """
+    try:
+        # Valida existência (evita zerar ghosts de tids inexistentes)
+        existing = repo.get_tenant_by_id(tid) if hasattr(repo, "get_tenant_by_id") else None
+        if not existing:
+            return jsonify({"error": "tenant não encontrado", "tenant_id": tid}), 404
+
+        deleted = host_registry.delete_hosts_for_tenant(tenant_id=tid)
+        audit("HOSTS_RESET", actor=tid, ip=request.remote_addr or "-",
+              detail=f"deleted_hosts={deleted}")
+        _notify("HOSTS_RESET", tenant_id=tid, deleted_hosts=deleted)
+        return jsonify({"ok": True, "deleted_hosts": deleted, "tenant_id": tid})
+    except Exception as exc:
+        logger.error("admin_tenant_hosts_reset error tid=%s: %s", tid, exc)
         return jsonify({"error": str(exc)}), 500
 
 
