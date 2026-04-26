@@ -1,9 +1,34 @@
 """
-NetGuard GeoIP — Base local sem API externa.
-Lookup por prefixo de IP com fallback em múltiplas granularidades.
-Cobre os principais ranges de IPs vistos em redes brasileiras.
+NetGuard GeoIP — geolocalização de IP, sem chamada externa.
+
+Estratégia em 2 camadas (a primeira que responder ganha):
+
+    1) MaxMind GeoLite2 (.mmdb) via `maxminddb` — cobertura mundial real,
+       resolução por cidade/país/ASN. Caminho via env IDS_GEOLITE2_DB
+       (default: ./geolite2/GeoLite2-City.mmdb). ASN opcional via
+       IDS_GEOLITE2_ASN_DB (default: ./geolite2/GeoLite2-ASN.mmdb).
+       O carregamento é lazy: se a lib ou o arquivo não estiverem
+       disponíveis, a camada simplesmente não responde — sem barulho.
+
+    2) Prefix DB embutida (GEO_DB abaixo) — cobre cloud providers,
+       scanners conhecidos e blocos de ISP brasileiros/asiáticos.
+       É melhor que nada quando o mmdb não está presente, e ainda
+       complementa o mmdb com a coluna `org` (algo que o GeoLite2-City
+       sozinho não traz; ASN traz mas precisa de DB extra).
+
+Por que duas camadas em vez de só GeoLite2:
+    GeoLite2-City não conhece a rede que o IP pertence (org/ASN). A
+    prefix DB tem uma coluna `org` curada — útil pra reconhecer "Cloudflare"
+    ou "⚠ Censys Scanner" sem baixar o GeoLite2-ASN.mmdb. Quando o ASN
+    db ESTÁ disponível, ele entra como fonte primária de `org`.
+
+Interface pública (estável):
+    lookup(ip)        -> dict com {country, city, lat, lon, flag, org, private, ip}
+    lookup_many(ips)  -> [dict, ...]
 """
 
+import os
+import threading
 from typing import Dict, Optional  # noqa: F401
 
 # ── Base de dados embutida ────────────────────────────────────────
@@ -134,10 +159,164 @@ _PRIVATES = ["10.","172.16.","172.17.","172.18.","172.19.","172.20.",
 
 _cache: dict = {}
 
+
+# ── GeoLite2 (MaxMind .mmdb) — lazy, opcional ─────────────────────
+# Os Reader objects do maxminddb são thread-safe pra leitura, mas a
+# inicialização não é. Guardamos com um lock e usamos sentinels pra
+# diferenciar "ainda não tentei" de "tentei e não tem".
+_GEO_LOCK = threading.Lock()
+_GEO_INIT_DONE = False
+_GEO_CITY_READER = None   # type: Optional[object]
+_GEO_ASN_READER = None    # type: Optional[object]
+
+
+def _geolite2_path(env_var: str, default_rel: str) -> str:
+    """Resolve caminho do .mmdb. Aceita absoluto ou relativo ao cwd do app."""
+    p = os.environ.get(env_var, "").strip()
+    if p:
+        return p
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(here, default_rel)
+
+
+def _geolite2_init() -> None:
+    """
+    Carrega os readers uma vez. Silencioso em falha — se faltar a lib
+    ou o .mmdb, simplesmente seguimos sem GeoLite2 e caímos pro prefix DB.
+    """
+    global _GEO_INIT_DONE, _GEO_CITY_READER, _GEO_ASN_READER
+    if _GEO_INIT_DONE:
+        return
+    with _GEO_LOCK:
+        if _GEO_INIT_DONE:
+            return
+        try:
+            import maxminddb  # type: ignore
+        except Exception:
+            _GEO_INIT_DONE = True
+            return
+        # Placeholder files (read README) ficam <1KB; mmdb real começa em
+        # >5MB pro ASN e >50MB pro City. Esse threshold barato evita um
+        # open() que ia explodir ruidosamente.
+        _MIN_MMDB_SIZE = 65536  # 64KB — pega placeholders sem falso positivo
+
+        city_path = _geolite2_path("IDS_GEOLITE2_DB", "geolite2/GeoLite2-City.mmdb")
+        if os.path.isfile(city_path) and os.path.getsize(city_path) >= _MIN_MMDB_SIZE:
+            try:
+                _GEO_CITY_READER = maxminddb.open_database(city_path)  # type: ignore
+            except Exception:
+                _GEO_CITY_READER = None
+        asn_path = _geolite2_path("IDS_GEOLITE2_ASN_DB", "geolite2/GeoLite2-ASN.mmdb")
+        if os.path.isfile(asn_path) and os.path.getsize(asn_path) >= _MIN_MMDB_SIZE:
+            try:
+                _GEO_ASN_READER = maxminddb.open_database(asn_path)  # type: ignore
+            except Exception:
+                _GEO_ASN_READER = None
+        _GEO_INIT_DONE = True
+
+
+def geolite2_status() -> dict:
+    """
+    Diagnóstico para healthcheck/admin: indica se cada DB GeoLite2 está
+    carregado. Não exige reload — só reporta o estado pós-init.
+    """
+    _geolite2_init()
+    return {
+        "city_loaded": _GEO_CITY_READER is not None,
+        "asn_loaded":  _GEO_ASN_READER  is not None,
+        "city_path":   _geolite2_path("IDS_GEOLITE2_DB",     "geolite2/GeoLite2-City.mmdb"),
+        "asn_path":    _geolite2_path("IDS_GEOLITE2_ASN_DB", "geolite2/GeoLite2-ASN.mmdb"),
+    }
+
+
+def _flag_for_country(code: str) -> str:
+    """
+    Converte ISO-2 (BR, US, ...) em emoji da bandeira via Regional Indicator
+    Symbols (U+1F1E6..U+1F1FF). Cai pro globo 🌐 se a entrada for inválida.
+    """
+    if not code or len(code) != 2 or not code.isalpha():
+        return "🌐"
+    base = 0x1F1E6
+    a = ord(code[0].upper()) - ord("A")
+    b = ord(code[1].upper()) - ord("A")
+    if a < 0 or a > 25 or b < 0 or b > 25:
+        return "🌐"
+    return chr(base + a) + chr(base + b)
+
+
+def _lookup_geolite2(ip: str) -> Optional[dict]:
+    """
+    Tenta GeoLite2-City + GeoLite2-ASN. Retorna None se não houver match
+    ou se a camada estiver indisponível. Não usa cache (o caller já guarda).
+    """
+    _geolite2_init()
+    if _GEO_CITY_READER is None and _GEO_ASN_READER is None:
+        return None
+
+    country_code = ""
+    city_name = ""
+    lat = 0.0
+    lon = 0.0
+    org = ""
+
+    if _GEO_CITY_READER is not None:
+        try:
+            rec = _GEO_CITY_READER.get(ip)  # type: ignore[attr-defined]
+        except Exception:
+            rec = None
+        if isinstance(rec, dict):
+            # MaxMind aninha por idiomas; pegamos pt-BR > en > primeira chave.
+            country_code = (
+                ((rec.get("country") or {}).get("iso_code"))
+                or ((rec.get("registered_country") or {}).get("iso_code"))
+                or ""
+            )
+            city_names = (rec.get("city") or {}).get("names") or {}
+            city_name = (
+                city_names.get("pt-BR")
+                or city_names.get("en")
+                or (next(iter(city_names.values())) if city_names else "")
+                or ""
+            )
+            loc = rec.get("location") or {}
+            lat = float(loc.get("latitude")  or 0.0)
+            lon = float(loc.get("longitude") or 0.0)
+
+    if _GEO_ASN_READER is not None:
+        try:
+            rec = _GEO_ASN_READER.get(ip)  # type: ignore[attr-defined]
+        except Exception:
+            rec = None
+        if isinstance(rec, dict):
+            org = rec.get("autonomous_system_organization") or ""
+
+    if not (country_code or city_name or org):
+        # Reader carregado mas sem registro pra esse IP — devolve None
+        # pra permitir cair no prefix DB.
+        return None
+
+    return {
+        "country": country_code or "??",
+        "city":    city_name or "Unknown",
+        "lat":     lat,
+        "lon":     lon,
+        "flag":    _flag_for_country(country_code) if country_code else "🌐",
+        "org":     org or "Unknown",
+        "ip":      ip,
+        "private": False,
+        "source":  "geolite2",
+    }
+
+
 def lookup(ip: str) -> dict:
     """
     Retorna informações geográficas para um IP.
-    Usa lookup por prefixo, do mais específico ao menos específico.
+
+    Ordem de consulta:
+        1. cache em memória
+        2. GeoLite2-City/ASN (.mmdb), se disponíveis
+        3. Prefix DB embutida (mais específico primeiro)
+        4. Fallback "Unknown"
     """
     if not ip or ip == "unknown":
         return _unknown()
@@ -145,21 +324,40 @@ def lookup(ip: str) -> dict:
     if ip in _cache:
         return _cache[ip]
 
-    # IP privado
+    # IP privado/loopback — atalho
     if any(ip.startswith(p) for p in _privates_check()):
         r = {"country":"LAN","city":"Rede Local","lat":0,"lon":0,
-             "flag":"🏠","org":"Rede Privada","private":True}
+             "flag":"🏠","org":"Rede Privada","private":True,"ip":ip,
+             "source":"private"}
         _cache[ip] = r
         return r
 
-    # Lookup por prefixo (mais específico primeiro)
+    # 1) GeoLite2 (mmdb) — autoritativo quando presente
+    g = _lookup_geolite2(ip)
+    if g is not None:
+        # Se ASN db trouxe org genérica mas a prefix DB tem algo mais
+        # informativo (ex: "⚠ Censys Scanner"), prefere o curado.
+        for prefix in _SORTED_PREFIXES:
+            if ip.startswith(prefix):
+                curated_org = GEO_DB[prefix].get("org") or ""
+                if curated_org and (
+                    not g.get("org")
+                    or g["org"] in ("Unknown", "")
+                    or curated_org.startswith("⚠")
+                ):
+                    g["org"] = curated_org
+                break
+        _cache[ip] = g
+        return g
+
+    # 2) Prefix DB — mais específico primeiro
     for prefix in _SORTED_PREFIXES:
         if ip.startswith(prefix):
-            r = {**GEO_DB[prefix], "ip": ip, "private": False}
+            r = {**GEO_DB[prefix], "ip": ip, "private": False, "source": "prefix"}
             _cache[ip] = r
             return r
 
-    # Fallback genérico
+    # 3) Fallback genérico
     r = _unknown(ip)
     _cache[ip] = r
     return r
@@ -169,7 +367,8 @@ def _privates_check():
 
 def _unknown(ip=""):
     return {"country":"??","city":"Unknown","lat":0,"lon":0,
-            "flag":"🌐","org":"Unknown","ip":ip,"private":False}
+            "flag":"🌐","org":"Unknown","ip":ip,"private":False,
+            "source":"unknown"}
 
 def lookup_many(ips: list) -> list:
     """Lookup em lote."""
