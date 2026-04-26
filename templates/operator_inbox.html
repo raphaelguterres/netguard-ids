@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NetGuard — Operator Inbox</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:#0d1117; --s1:#161b22; --s2:#21262d; --border:#30363d;
+      --txt:#e6edf3; --txt2:#8b949e; --txt3:#6e7681;
+      --blue:#58a6ff; --green:#3fb950; --orange:#f0883e; --red:#f85149; --yellow:#e3b341;
+    }
+    body { font-family:'Segoe UI', system-ui, sans-serif; background:var(--bg); color:var(--txt); min-height:100vh; }
+    a { color:var(--blue); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+
+    header { display:flex; align-items:center; justify-content:space-between; padding:1rem 2rem; border-bottom:1px solid var(--border); background:rgba(13,17,23,.97); position:sticky; top:0; z-index:100; }
+    .logo { display:flex; align-items:center; gap:.6rem; font-weight:700; color:var(--blue); }
+    .badge-admin { background:rgba(248,81,73,.15); color:var(--red); border:1px solid rgba(248,81,73,.3); padding:.2rem .6rem; border-radius:999px; font-size:.7rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+
+    .container { max-width:1400px; margin:0 auto; padding:2rem; }
+    h1 { font-size:1.4rem; font-weight:700; margin-bottom:.3rem; }
+    .subtitle { color:var(--txt2); font-size:.9rem; margin-bottom:1.5rem; }
+
+    .toolbar { display:flex; gap:1rem; align-items:center; margin-bottom:1.5rem; }
+    .toolbar input, .toolbar select { background:var(--s2); border:1px solid var(--border); color:var(--txt); padding:.4rem .7rem; border-radius:6px; font-size:.85rem; }
+    .toolbar button { background:var(--s2); border:1px solid var(--border); color:var(--txt); padding:.45rem .9rem; border-radius:6px; cursor:pointer; font-size:.85rem; }
+    .toolbar button:hover { border-color:var(--blue); color:var(--blue); }
+
+    .panel { background:var(--s1); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    .loading { padding:3rem 2rem; text-align:center; color:var(--txt2); }
+    .empty { padding:3rem 2rem; text-align:center; color:var(--txt3); font-style:italic; }
+
+    table { width:100%; border-collapse:collapse; font-size:.88rem; }
+    thead th { background:var(--s2); color:var(--txt2); font-weight:600; text-align:left; padding:.7rem 1rem; font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--border); }
+    tbody td { padding:.85rem 1rem; border-bottom:1px solid var(--border); vertical-align:middle; }
+    tbody tr:hover { background:rgba(88,166,255,.04); cursor:pointer; }
+    tbody tr:last-child td { border-bottom:none; }
+
+    .score-cell { font-size:1.3rem; font-weight:700; font-variant-numeric:tabular-nums; }
+    .band-critical { color:var(--red); }
+    .band-high     { color:var(--orange); }
+    .band-medium   { color:var(--yellow); }
+    .band-low      { color:var(--blue); }
+
+    .urgency-pill { display:inline-block; padding:.18rem .55rem; border-radius:999px; font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+    .urgency-pill.band-critical { background:rgba(248,81,73,.15);  border:1px solid rgba(248,81,73,.4); }
+    .urgency-pill.band-high     { background:rgba(240,136,62,.15); border:1px solid rgba(240,136,62,.4); }
+    .urgency-pill.band-medium   { background:rgba(227,179,65,.15); border:1px solid rgba(227,179,65,.4); }
+    .urgency-pill.band-low      { background:rgba(88,166,255,.12); border:1px solid rgba(88,166,255,.4); }
+
+    .muted { color:var(--txt2); font-size:.78rem; }
+    .action-cell { color:var(--txt); font-weight:500; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7v6c0 5 4 9 10 11 6-2 10-6 10-11V7l-10-5z"/></svg>
+      NetGuard
+      <span class="badge-admin">Inbox</span>
+    </div>
+    <div><a href="/admin">&laquo; God View</a></div>
+  </header>
+
+  <main class="container">
+    <h1>Operator Inbox</h1>
+    <p class="subtitle">Hosts ranqueados por urgência — aja na ordem listada.</p>
+
+    <div class="toolbar">
+      <input type="text" id="tenant-filter" placeholder="Filtrar por tenant_id (opcional)…" style="min-width:280px;" />
+      <select id="limit-filter">
+        <option value="10">Top 10</option>
+        <option value="20" selected>Top 20</option>
+        <option value="50">Top 50</option>
+        <option value="100">Top 100</option>
+      </select>
+      <button onclick="reload()">Atualizar</button>
+      <span id="meta" class="muted"></span>
+    </div>
+
+    <div class="panel">
+      <div id="loading" class="loading">Carregando…</div>
+      <div id="content" style="display:none;"></div>
+    </div>
+  </main>
+
+  <script>
+    function esc(s) {
+      if (s === null || s === undefined) return "";
+      return String(s).replace(/[&<>"']/g, c => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+      })[c]);
+    }
+    function fmtTime(iso) {
+      if (!iso) return "—";
+      try {
+        const d = new Date(iso);
+        if (isNaN(d)) return iso;
+        return d.toLocaleString("pt-BR", { dateStyle:"short", timeStyle:"short" });
+      } catch { return iso; }
+    }
+    function bandFor(score) {
+      if (score >= 80) return "critical";
+      if (score >= 60) return "high";
+      if (score >= 30) return "medium";
+      if (score > 0)   return "low";
+      return "low";
+    }
+
+    function reload() {
+      const tf = document.getElementById("tenant-filter").value.trim();
+      const lim = document.getElementById("limit-filter").value;
+      let url = "/api/admin/inbox?limit=" + encodeURIComponent(lim);
+      if (tf) url += "&tenant=" + encodeURIComponent(tf);
+
+      document.getElementById("loading").style.display = "block";
+      document.getElementById("content").style.display = "none";
+      document.getElementById("meta").textContent = "";
+
+      fetch(url, { credentials: "same-origin" })
+        .then(r => r.json())
+        .then(render)
+        .catch(err => {
+          document.getElementById("loading").textContent = "Erro: " + err;
+        });
+    }
+
+    function render(data) {
+      document.getElementById("loading").style.display = "none";
+      const c = document.getElementById("content");
+      c.style.display = "block";
+
+      const items = data.items || [];
+      document.getElementById("meta").textContent =
+        items.length + " hosts • atualizado " + fmtTime(data.generated_at);
+
+      if (!items.length) {
+        c.innerHTML = '<div class="empty">Inbox vazia — nenhum host com risco aberto. ✅</div>';
+        return;
+      }
+
+      const rows = items.map(it => {
+        const band = it.risk_band || bandFor(it.risk_score);
+        const url = "/admin/host/" + encodeURIComponent(it.tenant_id) + "/" + encodeURIComponent(it.host_id);
+        return (
+          '<tr onclick="window.location=\'' + url + '\'">' +
+            '<td class="score-cell band-' + esc(band) + '">' + esc(it.risk_score) + "</td>" +
+            '<td><span class="urgency-pill band-' + esc(it.urgency || band) + '">' + esc(it.urgency || band) + "</span></td>" +
+            '<td><strong>' + esc(it.display_name) + "</strong>" +
+              '<div class="muted">' + esc(it.host_id) + " · " + esc(it.platform || "—") + "</div></td>" +
+            '<td>' + esc(it.tenant_name) + '<div class="muted">' + esc(it.tenant_id) + "</div></td>" +
+            '<td class="action-cell">' + esc(it.next_action) + "</td>" +
+            '<td class="muted">' + esc(it.last_ip || "—") +
+              '<div>' + esc(fmtTime(it.last_seen)) + "</div></td>" +
+          "</tr>"
+        );
+      }).join("");
+
+      c.innerHTML =
+        '<table>' +
+          '<thead><tr>' +
+            '<th>Score</th><th>Urgência</th><th>Host</th><th>Tenant</th>' +
+            '<th>Próxima Ação</th><th>IP / Last Seen</th>' +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>';
+    }
+
+    document.getElementById("tenant-filter").addEventListener("keydown", e => {
+      if (e.key === "Enter") reload();
+    });
+    document.getElementById("limit-filter").addEventListener("change", reload);
+
+    reload();
+  </script>
+</body>
+</html>

@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NetGuard — Host Triage</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:     #0d1117; --s1: #161b22; --s2: #21262d; --s3: #2d333b;
+      --border: #30363d; --txt: #e6edf3; --txt2: #8b949e; --txt3: #6e7681;
+      --blue:   #58a6ff; --blue2: #1f6feb; --green: #3fb950; --green2: #238636;
+      --orange: #f0883e; --red: #f85149; --purple: #bc8cff; --yellow: #e3b341;
+    }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--txt); min-height: 100vh; }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    header { display:flex; align-items:center; justify-content:space-between; padding:1rem 2rem; border-bottom:1px solid var(--border); background:rgba(13,17,23,.97); position:sticky; top:0; z-index:100; }
+    .logo { display:flex; align-items:center; gap:.6rem; font-size:1rem; font-weight:700; color:var(--blue); }
+    .badge-admin { background:rgba(248,81,73,.15); color:var(--red); border:1px solid rgba(248,81,73,.3); padding:.2rem .6rem; border-radius:999px; font-size:.7rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+    .crumbs { color: var(--txt2); font-size: .82rem; }
+    .crumbs a { color: var(--txt2); }
+    .crumbs a:hover { color: var(--blue); }
+
+    .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+    .loading { padding: 4rem 2rem; text-align: center; color: var(--txt2); }
+    .error-card { background: rgba(248,81,73,.08); border: 1px solid rgba(248,81,73,.4); border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; }
+    .error-card h3 { color: var(--red); margin-bottom: .5rem; }
+
+    /* Posture (top hero) */
+    .posture { background: var(--s1); border: 1px solid var(--border); border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .posture-row { display: flex; align-items: center; justify-content: space-between; gap: 2rem; flex-wrap: wrap; }
+    .posture h1 { font-size: 1.5rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: .6rem; }
+    .posture-meta { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: .8rem; color: var(--txt2); font-size: .85rem; }
+    .posture-meta span strong { color: var(--txt); font-weight: 600; }
+
+    .status-pill { display: inline-block; padding: .2rem .6rem; border-radius: 999px; font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .status-online   { background: rgba(63,185,80,.15);  color: var(--green);  border: 1px solid rgba(63,185,80,.4); }
+    .status-offline  { background: rgba(248,81,73,.15);  color: var(--red);    border: 1px solid rgba(248,81,73,.4); }
+    .status-enrolled { background: rgba(88,166,255,.12); color: var(--blue);   border: 1px solid rgba(88,166,255,.35); }
+
+    /* Two-column grid: risk + next-action */
+    .triage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+    @media (max-width: 900px) { .triage-grid { grid-template-columns: 1fr; } }
+
+    .panel { background: var(--s1); border: 1px solid var(--border); border-radius: 10px; padding: 1.5rem; }
+    .panel h2 { font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--txt2); margin-bottom: 1rem; }
+
+    /* Risk score */
+    .risk-row { display: flex; align-items: center; gap: 1.5rem; }
+    .risk-score-big { font-size: 4rem; font-weight: 700; line-height: 1; }
+    .band-critical { color: var(--red); }
+    .band-high     { color: var(--orange); }
+    .band-medium   { color: var(--yellow); }
+    .band-low      { color: var(--blue); }
+    .band-none     { color: var(--green); }
+    .band-pill { display: inline-block; padding: .25rem .7rem; border-radius: 999px; font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+    .band-pill.band-critical { background: rgba(248,81,73,.15);  border: 1px solid rgba(248,81,73,.4); }
+    .band-pill.band-high     { background: rgba(240,136,62,.15); border: 1px solid rgba(240,136,62,.4); }
+    .band-pill.band-medium   { background: rgba(227,179,65,.15); border: 1px solid rgba(227,179,65,.4); }
+    .band-pill.band-low      { background: rgba(88,166,255,.12); border: 1px solid rgba(88,166,255,.4); }
+    .band-pill.band-none     { background: rgba(63,185,80,.15);  border: 1px solid rgba(63,185,80,.4); }
+
+    .risk-breakdown { margin-top: 1.2rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+    .breakdown-item { display: flex; justify-content: space-between; padding: .45rem 0; font-size: .87rem; color: var(--txt); border-bottom: 1px dashed rgba(48,54,61,.5); }
+    .breakdown-item:last-child { border-bottom: none; }
+    .breakdown-points { color: var(--txt2); font-variant-numeric: tabular-nums; font-weight: 600; }
+
+    /* Next action */
+    .action-card .urgency-pill { float: right; }
+    .action-card .action-text { font-size: 1.15rem; font-weight: 600; line-height: 1.4; margin: .4rem 0 .8rem; }
+    .action-card .rationale { color: var(--txt2); font-size: .88rem; line-height: 1.5; }
+
+    /* Timeline */
+    .timeline-empty { text-align: center; padding: 2rem; color: var(--txt3); font-style: italic; }
+    .event-row { display: grid; grid-template-columns: 110px 80px 1fr 100px; gap: 1rem; padding: .7rem .5rem; border-bottom: 1px solid var(--border); align-items: center; font-size: .85rem; }
+    .event-row:last-child { border-bottom: none; }
+    .event-time { color: var(--txt2); font-variant-numeric: tabular-nums; font-size: .78rem; }
+    .sev-pill { display: inline-block; padding: .15rem .5rem; border-radius: 4px; font-size: .68rem; font-weight: 700; letter-spacing: .04em; text-align: center; min-width: 60px; }
+    .sev-CRITICAL { background: rgba(248,81,73,.15);  color: var(--red);    border: 1px solid rgba(248,81,73,.4); }
+    .sev-HIGH     { background: rgba(240,136,62,.15); color: var(--orange); border: 1px solid rgba(240,136,62,.4); }
+    .sev-MEDIUM   { background: rgba(227,179,65,.15); color: var(--yellow); border: 1px solid rgba(227,179,65,.4); }
+    .sev-LOW      { background: rgba(88,166,255,.12); color: var(--blue);   border: 1px solid rgba(88,166,255,.4); }
+    .event-source { color: var(--txt3); font-family: 'Monaco', monospace; font-size: .78rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7v6c0 5 4 9 10 11 6-2 10-6 10-11V7l-10-5z"/></svg>
+      NetGuard
+      <span class="badge-admin">God View</span>
+    </div>
+    <div class="crumbs">
+      <a href="/admin">God View</a> &raquo;
+      <a id="crumb-tenant" href="#">Tenant</a> &raquo;
+      <span id="crumb-host">Host</span>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="loading" class="loading">Carregando triagem do host…</div>
+    <div id="error" style="display:none;"></div>
+    <div id="content" style="display:none;">
+
+      <!-- Posture -->
+      <section class="posture">
+        <div class="posture-row">
+          <div>
+            <h1>
+              <span id="host-name">—</span>
+              <span id="host-status" class="status-pill">—</span>
+            </h1>
+            <div class="posture-meta">
+              <span><strong id="host-platform">—</strong></span>
+              <span>IP: <strong id="host-ip">—</strong></span>
+              <span id="host-geo"></span>
+              <span>Último check-in: <strong id="host-lastseen">—</strong></span>
+              <span>Agente: <strong id="host-agent">—</strong></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Risk + Next Action -->
+      <div class="triage-grid">
+        <section class="panel">
+          <h2>Risk Score</h2>
+          <div class="risk-row">
+            <div id="risk-score" class="risk-score-big">0</div>
+            <div>
+              <span id="risk-band" class="band-pill">—</span>
+              <div style="margin-top:.4rem; color:var(--txt2); font-size:.8rem;">
+                <span id="events-count">0</span> evento(s) nas últimas 24h
+              </div>
+            </div>
+          </div>
+          <div class="risk-breakdown" id="risk-breakdown"></div>
+        </section>
+
+        <section class="panel action-card">
+          <h2>Próxima Ação <span id="urgency-pill" class="band-pill urgency-pill">—</span></h2>
+          <div id="action-text" class="action-text">—</div>
+          <div id="action-rationale" class="rationale">—</div>
+        </section>
+      </div>
+
+      <!-- Timeline -->
+      <section class="panel">
+        <h2>Timeline (últimas 24h, top 50 eventos)</h2>
+        <div id="timeline"></div>
+      </section>
+
+    </div>
+  </main>
+
+  <script>
+    (function() {
+      // Path: /admin/host/<tenant_id>/<host_id>
+      const parts = location.pathname.split("/").filter(Boolean);
+      const tenantId = decodeURIComponent(parts[2] || "");
+      const hostId   = decodeURIComponent(parts[3] || "");
+      if (!tenantId || !hostId) {
+        renderError("URL inválida — esperado /admin/host/&lt;tenant_id&gt;/&lt;host_id&gt;");
+        return;
+      }
+      document.getElementById("crumb-tenant").href = "/admin#tenant=" + encodeURIComponent(tenantId);
+      document.getElementById("crumb-tenant").textContent = tenantId;
+      document.getElementById("crumb-host").textContent = hostId;
+
+      function esc(s) {
+        if (s === null || s === undefined) return "—";
+        return String(s).replace(/[&<>"']/g, c => ({
+          "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+        })[c]);
+      }
+
+      function fmtTime(iso) {
+        if (!iso) return "—";
+        try {
+          const d = new Date(iso);
+          if (isNaN(d)) return iso;
+          return d.toLocaleString("pt-BR", { dateStyle:"short", timeStyle:"medium" });
+        } catch { return iso; }
+      }
+
+      function renderError(msg) {
+        document.getElementById("loading").style.display = "none";
+        const el = document.getElementById("error");
+        el.style.display = "block";
+        el.innerHTML = '<div class="error-card"><h3>Erro</h3><p>' + esc(msg) + "</p></div>";
+      }
+
+      function urgencyBand(u) {
+        return ({"critical":"band-critical","high":"band-high","medium":"band-medium","low":"band-low","none":"band-none"})[u] || "band-low";
+      }
+
+      fetch("/api/admin/tenant/" + encodeURIComponent(tenantId) + "/host/" + encodeURIComponent(hostId), {
+        credentials: "same-origin",
+      })
+        .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, body: j })))
+        .then(({ ok, status, body }) => {
+          if (!ok) {
+            renderError((body && body.error) ? body.error + " (HTTP " + status + ")" : "HTTP " + status);
+            return;
+          }
+          render(body);
+        })
+        .catch(err => renderError(String(err)));
+
+      function render(data) {
+        document.getElementById("loading").style.display = "none";
+        document.getElementById("content").style.display = "block";
+
+        const host = data.host || {};
+        const geo  = data.geo  || {};
+        const risk = data.risk || { score: 0, band: "none", breakdown: [] };
+        const next = data.next_action || { action: "—", rationale: "—", urgency: "none" };
+
+        document.getElementById("host-name").textContent = host.display_name || host.host_id || "(sem nome)";
+        const stEl = document.getElementById("host-status");
+        const st = host.status || "enrolled";
+        stEl.textContent = st;
+        stEl.className = "status-pill status-" + st;
+
+        document.getElementById("host-platform").textContent = host.platform || "—";
+        document.getElementById("host-ip").textContent = host.last_ip || "—";
+        document.getElementById("host-lastseen").textContent = fmtTime(host.last_seen);
+        document.getElementById("host-agent").textContent = host.agent_version || "—";
+
+        const geoBits = [];
+        if (geo.flag)    geoBits.push(geo.flag);
+        if (geo.city)    geoBits.push(geo.city);
+        if (geo.country) geoBits.push(geo.country);
+        if (geo.org)     geoBits.push("(" + geo.org + ")");
+        document.getElementById("host-geo").textContent = geoBits.length ? geoBits.join(" ") : "";
+
+        document.getElementById("events-count").textContent = data.events_24h_count || 0;
+
+        const scoreEl = document.getElementById("risk-score");
+        scoreEl.textContent = risk.score;
+        scoreEl.className = "risk-score-big band-" + risk.band;
+
+        const bandEl = document.getElementById("risk-band");
+        bandEl.textContent = risk.band;
+        bandEl.className = "band-pill band-" + risk.band;
+
+        const bdEl = document.getElementById("risk-breakdown");
+        if (risk.breakdown && risk.breakdown.length) {
+          bdEl.innerHTML = risk.breakdown.map(b => (
+            '<div class="breakdown-item"><span>' + esc(b.factor) + '</span><span class="breakdown-points">+' + b.points + "</span></div>"
+          )).join("");
+        } else {
+          bdEl.innerHTML = '<div style="color:var(--txt3); font-style:italic; padding:.5rem 0;">Nenhum fator de risco detectado.</div>';
+        }
+
+        document.getElementById("action-text").textContent = next.action;
+        document.getElementById("action-rationale").textContent = next.rationale;
+        const upEl = document.getElementById("urgency-pill");
+        upEl.textContent = next.urgency;
+        upEl.className = "band-pill urgency-pill " + urgencyBand(next.urgency);
+
+        const tEl = document.getElementById("timeline");
+        const tl = data.timeline || [];
+        if (!tl.length) {
+          tEl.innerHTML = '<div class="timeline-empty">Sem eventos nas últimas 24h.</div>';
+        } else {
+          tEl.innerHTML = tl.map(e => (
+            '<div class="event-row">' +
+              '<span class="event-time">' + esc(fmtTime(e.timestamp)) + "</span>" +
+              '<span class="sev-pill sev-' + esc(e.severity) + '">' + esc(e.severity || "—") + "</span>" +
+              '<span>' + esc(e.summary || e.rule_name || "—") + "</span>" +
+              '<span class="event-source">' + esc(e.source || "") + "</span>" +
+            "</div>"
+          )).join("");
+        }
+      }
+    })();
+  </script>
+</body>
+</html>

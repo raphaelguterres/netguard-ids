@@ -6259,6 +6259,55 @@ def admin_panel():
     return resp
 
 
+# ─────────────────────────────────────────────────────────────────────
+# T14 — Host Triage View + Operator Inbox (rotas HTML)
+# ─────────────────────────────────────────────────────────────────────
+
+@app.route("/admin/host/<tenant_id>/<host_id>")
+@_admin_only
+def admin_host_triage_page(tenant_id, host_id):
+    """
+    Tela de triagem do host. Renderiza o template host_triage.html;
+    o JS embutido faz o fetch de /api/admin/tenant/<tid>/host/<hid>
+    e popula a UI.
+
+    URL é o deep-link permanente — pode vir de:
+      - click em IP/host no drill-down (admin.html)
+      - click no map view (T10)
+      - link de email/Slack ("ver triagem deste host")
+      - linha da Inbox
+
+    Auth: @_admin_only (mesma postura do /admin).
+    """
+    from flask import render_template
+    resp = make_response(render_template("host_triage.html"))
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    _set_no_cache_headers(resp)
+    try:
+        _get_or_set_csrf_cookie(resp)
+    except Exception:
+        pass
+    return resp
+
+
+@app.route("/admin/inbox")
+@_admin_only
+def admin_inbox_page():
+    """
+    Operator Inbox — lista cross-tenant de hosts ranqueados por urgência.
+    Renderiza operator_inbox.html; JS chama /api/admin/inbox.
+    """
+    from flask import render_template
+    resp = make_response(render_template("operator_inbox.html"))
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    _set_no_cache_headers(resp)
+    try:
+        _get_or_set_csrf_cookie(resp)
+    except Exception:
+        pass
+    return resp
+
+
 @app.route("/demo/reset", methods=["POST"])
 def demo_reset():
     """Recria os dados de demo do zero (útil para apresentações)."""
@@ -7758,6 +7807,445 @@ def admin_tenant_drilldown(tenant_id):
             "low_24h":      sev_totals["low"],
             "host_count":   len(hosts_geo),
         },
+    })
+
+
+# ═════════════════════════════════════════════════════════════════════
+# T14 — Host Triage View (HTV)
+# ═════════════════════════════════════════════════════════════════════
+# Tela de triagem por host: chega num host (via drill-down, map, deep-link
+# de email) e o sistema diz POR QUÊ ele precisa de atenção e O QUE FAZER
+# em seguida. Substitui o fluxo de "olha o painel, descobre sozinho".
+#
+# Componentes:
+#   _host_risk_score      → score 0-100 + breakdown explicável
+#   _host_next_action     → próxima ação recomendada (regra determinista)
+#   _host_inbox_ranking   → ranqueia hosts pra Inbox (todos os tenants p/ admin)
+#   /api/admin/tenant/<tid>/host/<hid>  → JSON pra tela de triage
+#   /api/admin/inbox                     → JSON pra Inbox
+#   /admin/host/<tid>/<hid>              → HTML da tela de triage
+#   /admin/inbox                         → HTML da Inbox
+# ═════════════════════════════════════════════════════════════════════
+
+def _host_risk_score(events_24h: list, host: dict) -> dict:
+    """
+    Calcula risk score do host (0-100) + breakdown explicável.
+
+    Por que regra determinista (não ML):
+        Operador SOC precisa AUDITAR a decisão. "Modelo disse 78" não passa
+        em revisão de incidente. Aqui cada ponto tem origem rastreável e
+        o breakdown é parte do retorno.
+
+    Pesos (escolhidos pra que CRITICAL > offline > HIGH > stale, e não
+    deixar 1 LOW eclipsar 1 CRITICAL):
+      - CRITICAL: +20 pts cada, cap +60 (3 já saturam)
+      - HIGH:     +10 pts cada, cap +40
+      - MEDIUM:   +3 pts cada,  cap +15
+      - LOW:      +1 pt cada,   cap +5
+      - Sem check-in >24h: +20  (host offline = não monitorado = risco)
+      - Sem check-in 1-24h: +10
+      - (Geo "país de risco" intencionalmente FORA — opinião política sem
+         dado, geraria viés. Reintroduzimos quando tivermos threat intel.)
+
+    Bands:
+      80-100 critical | 60-79 high | 30-59 medium | 1-29 low | 0 none
+    """
+    from datetime import datetime, timezone as _tz
+
+    sev = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    for e in events_24h:
+        s = (e.get("severity") or "").upper()
+        if s in sev:
+            sev[s] += 1
+
+    breakdown = []
+    score = 0
+
+    if sev["CRITICAL"]:
+        pts = min(sev["CRITICAL"] * 20, 60)
+        score += pts
+        breakdown.append({
+            "factor": f"{sev['CRITICAL']} alerta(s) CRITICAL nas últimas 24h",
+            "points": pts,
+        })
+    if sev["HIGH"]:
+        pts = min(sev["HIGH"] * 10, 40)
+        score += pts
+        breakdown.append({
+            "factor": f"{sev['HIGH']} alerta(s) HIGH nas últimas 24h",
+            "points": pts,
+        })
+    if sev["MEDIUM"]:
+        pts = min(sev["MEDIUM"] * 3, 15)
+        score += pts
+        breakdown.append({
+            "factor": f"{sev['MEDIUM']} alerta(s) MEDIUM nas últimas 24h",
+            "points": pts,
+        })
+    if sev["LOW"]:
+        pts = min(sev["LOW"], 5)
+        score += pts
+        breakdown.append({
+            "factor": f"{sev['LOW']} alerta(s) LOW nas últimas 24h",
+            "points": pts,
+        })
+
+    # Recência do check-in
+    last_seen = host.get("last_seen")
+    if last_seen:
+        try:
+            s = str(last_seen).replace("Z", "").split(".")[0]
+            ls = datetime.fromisoformat(s)
+            if ls.tzinfo is None:
+                ls = ls.replace(tzinfo=_tz.utc)
+            age_h = (datetime.now(_tz.utc) - ls).total_seconds() / 3600.0
+            if age_h > 24:
+                score += 20
+                breakdown.append({
+                    "factor": f"Sem check-in há {int(age_h)}h (host offline)",
+                    "points": 20,
+                })
+            elif age_h > 1:
+                score += 10
+                breakdown.append({
+                    "factor": f"Sem check-in há {int(age_h)}h",
+                    "points": 10,
+                })
+        except Exception:
+            # Timestamp malformado — não inflar nem suprimir score, só ignora
+            pass
+
+    score = min(score, 100)
+
+    if score >= 80:
+        band = "critical"
+    elif score >= 60:
+        band = "high"
+    elif score >= 30:
+        band = "medium"
+    elif score > 0:
+        band = "low"
+    else:
+        band = "none"
+
+    return {"score": score, "band": band, "breakdown": breakdown}
+
+
+def _host_next_action(events_24h: list, host: dict) -> dict:
+    """
+    Gera próxima ação recomendada (determinista, auditável).
+
+    Ordem de prioridade (primeira que casar vence):
+      1. CRITICAL na última 1h → bloquear IP de origem
+      2. HIGH em 24h           → investigar regra que está disparando
+      3. Offline >24h          → verificar agente
+      4. MEDIUM ≥10/24h        → revisar baseline (provável ruído)
+      5. Saudável              → nenhuma ação
+
+    Retorna {action, rationale, urgency}, urgency em
+    critical/high/medium/low/none — alimenta o badge na UI.
+    """
+    from datetime import datetime, timedelta, timezone as _tz
+    now = datetime.now(_tz.utc)
+    one_hour_ago = now - timedelta(hours=1)
+
+    crit_recent = []
+    high_24h = []
+    sev_count = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+
+    for e in events_24h:
+        sev = (e.get("severity") or "").upper()
+        if sev in sev_count:
+            sev_count[sev] += 1
+        if sev == "CRITICAL":
+            try:
+                ts = str(e.get("timestamp") or "").replace("Z", "").split(".")[0]
+                dt = datetime.fromisoformat(ts) if "T" in ts else None
+                if dt:
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=_tz.utc)
+                    if dt >= one_hour_ago:
+                        crit_recent.append(e)
+            except Exception:
+                pass
+        if sev == "HIGH":
+            high_24h.append(e)
+
+    # Regra 1 — CRITICAL ativo (1h)
+    if crit_recent:
+        first = crit_recent[0]
+        rule = first.get("rule_name") or first.get("rule_id") or "regra desconhecida"
+        src = first.get("source") or first.get("source_ip") or ""
+        if src:
+            return {
+                "action":    f"Bloquear IP {src} imediatamente",
+                "rationale": f"{len(crit_recent)} alerta(s) CRITICAL nos últimos 60min — regra: {rule}",
+                "urgency":   "critical",
+            }
+        return {
+            "action":    f"Investigar alerta CRITICAL — {rule}",
+            "rationale": f"{len(crit_recent)} alerta(s) CRITICAL nos últimos 60min sem source IP claro",
+            "urgency":   "critical",
+        }
+
+    # Regra 2 — HIGH em 24h
+    if high_24h:
+        first = high_24h[0]
+        rule = first.get("rule_name") or first.get("rule_id") or "regra desconhecida"
+        return {
+            "action":    f"Investigar regra: {rule}",
+            "rationale": f"{len(high_24h)} alerta(s) HIGH nas últimas 24h — host pode estar comprometido",
+            "urgency":   "high",
+        }
+
+    # Regra 3 — Offline >24h
+    last_seen = host.get("last_seen")
+    if last_seen:
+        try:
+            s = str(last_seen).replace("Z", "").split(".")[0]
+            ls = datetime.fromisoformat(s)
+            if ls.tzinfo is None:
+                ls = ls.replace(tzinfo=_tz.utc)
+            age_h = (now - ls).total_seconds() / 3600.0
+            if age_h > 24:
+                return {
+                    "action":    "Verificar agente do host",
+                    "rationale": f"Sem check-in há {int(age_h)}h — agente pode estar offline ou comprometido",
+                    "urgency":   "medium",
+                }
+        except Exception:
+            pass
+
+    # Regra 4 — MEDIUM acumulando
+    if sev_count["MEDIUM"] >= 10:
+        return {
+            "action":    "Revisar baseline de alertas MEDIUM",
+            "rationale": f"{sev_count['MEDIUM']} alertas MEDIUM em 24h — baseline pode estar gerando ruído",
+            "urgency":   "low",
+        }
+
+    # Regra 5 — saudável
+    return {
+        "action":    "Nenhuma ação necessária",
+        "rationale": "Host sem alertas significativos nas últimas 24h",
+        "urgency":   "none",
+    }
+
+
+@app.route("/api/admin/tenant/<tenant_id>/host/<host_id>")
+@_admin_only
+def admin_tenant_host_triage(tenant_id, host_id):
+    """
+    T14 — Host Triage View API.
+
+    Retorna em UMA chamada tudo que o operador precisa pra triar um host:
+      - postura: identidade do host (display_name, platform, status, agent_version, last_ip, last_seen, tags)
+      - geo: enrichment do last_ip via geo_ip.lookup
+      - risk: score 0-100 + band + breakdown explicável (de _host_risk_score)
+      - next_action: ação recomendada + rationale + urgency (de _host_next_action)
+      - timeline: últimos 50 eventos do host (24h)
+
+    Validações:
+      - 404 se tenant_id inexistente (mesmo padrão de F5)
+      - 404 se host_id não pertence ao tenant (cross-tenant leak prevention)
+
+    Auth: @_admin_only — operador admin acessa qualquer tenant.
+    """
+    from datetime import datetime, timedelta, timezone as _tz
+
+    # Tenant existe?
+    try:
+        t = repo.get_tenant_by_id(tenant_id)
+    except Exception:
+        t = None
+    if not t:
+        return jsonify({"error": "tenant não encontrado", "tenant_id": tenant_id}), 404
+    tenant_name = (t.get("name") if isinstance(t, dict) else None) or tenant_id
+
+    # Host existe NESSE tenant? (get_host com tenant_id é o gate cross-tenant)
+    try:
+        host = _get_host_registry(tenant_id).get_host(host_id, tenant_id=tenant_id)
+    except Exception as exc:
+        logger.warning("host_triage get_host falhou tid=%s hid=%s: %s",
+                       tenant_id, host_id, exc)
+        host = None
+    if not host:
+        return jsonify({
+            "error":     "host não encontrado",
+            "tenant_id": tenant_id,
+            "host_id":   host_id,
+        }), 404
+
+    # Geo do last_ip (read-path, não cacheia — geo_ip já tem fallback robusto)
+    geo = {"country": "", "city": "", "flag": "", "org": "",
+           "lat": 0.0, "lon": 0.0, "private": False}
+    last_ip = (host.get("last_ip") or "").strip()
+    if last_ip:
+        try:
+            from geo_ip import lookup as _geo_lookup
+            g = _geo_lookup(last_ip) or {}
+            geo = {
+                "country": g.get("country") or "",
+                "city":    g.get("city")    or "",
+                "flag":    g.get("flag")    or "",
+                "org":     g.get("org")     or "",
+                "lat":     float(g.get("lat") or 0.0),
+                "lon":     float(g.get("lon") or 0.0),
+                "private": bool(g.get("private")),
+            }
+        except Exception:
+            # Lookup falhou — segue sem geo, não trava a tela inteira
+            pass
+
+    # Eventos 24h (cap 200; risk + next_action operam sobre essa janela)
+    since_iso = (datetime.now(_tz.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
+    try:
+        events_24h = repo.query(
+            limit=200, tenant_id=tenant_id, host_id=host_id, since=since_iso,
+        )
+    except Exception as exc:
+        logger.warning("host_triage query falhou tid=%s hid=%s: %s",
+                       tenant_id, host_id, exc)
+        events_24h = []
+
+    risk        = _host_risk_score(events_24h, host)
+    next_action = _host_next_action(events_24h, host)
+
+    # Timeline: 50 mais recentes em forma serializável leve
+    timeline = []
+    for e in events_24h[:50]:
+        timeline.append({
+            "timestamp":    e.get("timestamp"),
+            "event_id":     e.get("event_id"),
+            "kind":         "alert",  # placeholder — checkin/audit entram depois
+            "severity":     (e.get("severity") or "").upper(),
+            "rule_name":    e.get("rule_name") or e.get("rule_id") or "—",
+            "summary":      (e.get("rule_name") or e.get("event_type") or "evento"),
+            "source":       e.get("source") or "",
+            "acknowledged": bool(e.get("acknowledged")),
+        })
+
+    audit("HOST_TRIAGE_VIEW", actor="admin",
+          ip=request.remote_addr or "-",
+          detail=f"tenant={tenant_id} host={host_id} risk={risk['score']}")
+
+    return jsonify({
+        "tenant_id":         tenant_id,
+        "tenant_name":       tenant_name,
+        "host":              host,
+        "geo":               geo,
+        "risk":              risk,
+        "next_action":       next_action,
+        "timeline":          timeline,
+        "events_24h_count":  len(events_24h),
+        "generated_at":      datetime.now(_tz.utc).isoformat(),
+    })
+
+
+def _host_inbox_ranking(limit: int = 20, tenant_filter: str | None = None) -> list:
+    """
+    Retorna hosts ranqueados por urgência (cross-tenant para admin).
+
+    Eficiência: itera tenants → list_hosts(50) por tenant → para CADA host
+    chama _host_risk_score com events_24h carregados via repo.query. Em
+    deployments grandes (1000+ hosts) isso fica caro; mitigamos com:
+      - cap de 50 hosts/tenant na varredura inicial
+      - cap de 100 events/host na query de risco
+      - filtro opcional por tenant_id (operador focado em 1 cliente)
+      - resultado é "top-N por score", então consumidor recebe só `limit`
+
+    Caching cross-request fica como follow-up (cache em memória com TTL
+    curto, invalidado em INGEST de evento). Por enquanto, aceita o custo —
+    Inbox é GET on-demand, não polling agressivo.
+    """
+    from datetime import datetime, timedelta, timezone as _tz
+
+    since_iso = (datetime.now(_tz.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
+    ranked: list[dict] = []
+
+    try:
+        tenants = repo.list_tenants() or []
+    except Exception as exc:
+        logger.warning("inbox list_tenants falhou: %s", exc)
+        return []
+
+    for t in tenants:
+        tid = t.get("tenant_id") or t.get("id") or ""
+        if not tid:
+            continue
+        if tenant_filter and tid != tenant_filter:
+            continue
+        tname = t.get("name") or tid
+
+        try:
+            hosts = _get_host_registry(tid).list_hosts(limit=50, tenant_id=tid) or []
+        except Exception as exc:
+            logger.debug("inbox list_hosts tid=%s falhou: %s", tid, exc)
+            continue
+
+        for h in hosts:
+            hid = h.get("host_id")
+            if not hid:
+                continue
+            try:
+                events = repo.query(limit=100, tenant_id=tid, host_id=hid, since=since_iso)
+            except Exception:
+                events = []
+
+            risk = _host_risk_score(events, h)
+            if risk["score"] == 0:
+                continue  # host saudável — não polui a inbox
+
+            action = _host_next_action(events, h)
+            ranked.append({
+                "tenant_id":    tid,
+                "tenant_name":  tname,
+                "host_id":      hid,
+                "display_name": h.get("display_name") or hid,
+                "platform":     h.get("platform") or "",
+                "status":       h.get("status") or "enrolled",
+                "last_ip":      h.get("last_ip") or "",
+                "last_seen":    h.get("last_seen"),
+                "risk_score":   risk["score"],
+                "risk_band":    risk["band"],
+                "next_action":  action["action"],
+                "urgency":      action["urgency"],
+            })
+
+    # Ordena por score desc, depois por last_seen desc (mais recente primeiro)
+    ranked.sort(key=lambda r: (r["risk_score"], str(r.get("last_seen") or "")), reverse=True)
+    return ranked[: max(1, min(limit, 100))]
+
+
+@app.route("/api/admin/inbox")
+@_admin_only
+def admin_inbox():
+    """
+    T14 — Operator Inbox.
+
+    Lista cross-tenant de hosts que precisam de atenção, ordenados por
+    risk score. Filtros via query string:
+      - tenant=<tid>  → restringe a 1 tenant
+      - limit=<N>     → cap de itens (default 20, max 100)
+
+    Cada item carrega tenant, host, score, band, próxima ação, urgência —
+    o suficiente pra UI renderizar a lista E saber pra onde linkar.
+    """
+    try:
+        raw_limit = int(request.args.get("limit", 20))
+    except (TypeError, ValueError):
+        raw_limit = 20
+    limit = max(1, min(raw_limit, 100))
+    tenant_filter = (request.args.get("tenant") or "").strip() or None
+
+    items = _host_inbox_ranking(limit=limit, tenant_filter=tenant_filter)
+
+    return jsonify({
+        "items":          items,
+        "count":          len(items),
+        "tenant_filter":  tenant_filter,
+        "generated_at":   __import__("datetime").datetime.now(
+                              __import__("datetime").timezone.utc).isoformat(),
     })
 
 

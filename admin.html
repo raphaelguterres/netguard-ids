@@ -1685,10 +1685,20 @@ function gvRenderDrillDown(r){
     const statusColor = h.status === 'online' ? 'var(--green)'
                       : h.status === 'offline' ? 'var(--muted)'
                       : 'var(--blue)';
+    // T14 — deep-link do nome do host pra Host Triage View.
+    // gvModalTid está em scope do modal aberto (variável global do God View).
+    // target=_blank: triage abre em outra aba pra não perder o contexto do drill-down.
+    const triageUrl = '/admin/host/' + encodeURIComponent(gvModalTid)
+                     + '/' + encodeURIComponent(h.host_id || '');
+    const nameCell = h.host_id
+      ? `<a href="${triageUrl}" target="_blank" rel="noopener"
+            style="color:var(--blue);text-decoration:none"
+            title="Abrir Host Triage View">${gvEsc(h.display_name||h.host_id||'—')}</a>`
+      : gvEsc(h.display_name||'—');
     return `
     <tr>
       <td style="padding:6px 4px">
-        <span title="${gvEsc(orgTitle)}" style="margin-right:4px">${flag}</span>${gvEsc(h.display_name||h.host_id||'—')}
+        <span title="${gvEsc(orgTitle)}" style="margin-right:4px">${flag}</span>${nameCell}
       </td>
       <td style="padding:6px 4px;font-family:monospace;font-size:.78rem">${gvEsc(ipDisp)}</td>
       <td style="padding:6px 4px;font-size:.72rem;color:var(--muted)">${gvEsc(where)}</td>
