@@ -246,6 +246,7 @@ hr{border:none;border-top:1px solid var(--border);margin:20px 0}
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn sm primary" id="gv-modal-openbtn" onclick="gvModalOpenAsTenant()">↗ Abrir como tenant</button>
+          <button class="btn sm" id="gv-modal-resetbtn" onclick="gvResetHosts()" style="border-color:var(--red);color:var(--red)" title="Apaga managed_hosts do tenant; eventos históricos preservados">🧹 Zerar hosts</button>
           <button class="btn sm" onclick="gvCloseModal()">✕ Fechar</button>
         </div>
       </div>
@@ -1395,6 +1396,75 @@ function gvModalOpenAsTenant(){
   if(gvModalTid) gvOpenTenantDash(gvModalTid);
 }
 
+// ── Zerar hosts (managed_hosts) do tenant via God View ─────────────
+// Backend: POST /api/admin/tenants/<tid>/hosts/reset
+//   • @auth + @require_role("admin") + @csrf_protect
+//   • Apaga managed_hosts; eventos históricos (events) ficam preservados.
+// UX: dois confirmes — o segundo exige digitar o nome/tenant_id pra
+// evitar click acidental, já que é destrutivo e silencioso (sem undo).
+async function gvResetHosts(){
+  if(!gvModalTid){
+    toast('Modal sem tenant_id — recarregue o God View.', 'err');
+    return;
+  }
+  const tid = gvModalTid;
+  // Pega o título atual do modal pra mostrar no prompt (sem o emoji 🔎 prefixo)
+  const titleEl = document.getElementById('gv-modal-title');
+  const tenantLabel = ((titleEl && titleEl.textContent) || tid).replace(/^🔎\s*/, '').trim() || tid;
+
+  if(!confirm(
+    'ZERAR HOSTS DESTE TENANT?\n\n' +
+    'Tenant: ' + tenantLabel + '\n' +
+    'ID: ' + tid + '\n\n' +
+    'Vai apagar TODOS os managed_hosts do tenant.\n' +
+    'Eventos históricos serão preservados.\n\n' +
+    'Esta ação é irreversível. Continuar?'
+  )) return;
+
+  // Segundo confirme: digite o tid pra liberar.
+  const typed = prompt(
+    'Para confirmar, digite o tenant_id exatamente:\n\n' + tid
+  );
+  if(typed === null) return;
+  if(typed.trim() !== tid){
+    toast('tenant_id não confere — operação cancelada.', 'err');
+    return;
+  }
+
+  const btn = document.getElementById('gv-modal-resetbtn');
+  const orig = btn ? btn.textContent : null;
+  if(btn){ btn.disabled = true; btn.textContent = 'Zerando...'; }
+
+  try{
+    const r = await fetchCsrf(
+      BASE + '/api/admin/tenants/' + encodeURIComponent(tid) + '/hosts/reset',
+      {method: 'POST', headers: {'Content-Type':'application/json'}}
+    );
+    let data = null;
+    try{ data = await r.json(); }catch{ /* ignore */ }
+    if(!r.ok || !data || data.ok !== true){
+      const hint = r.status === 429
+        ? 'Rate limit admin atingido. Aguarde 1 minuto.'
+        : r.status === 403
+          ? 'Sessão expirada / CSRF inválido. Recarregue a página.'
+          : r.status === 404
+            ? 'Tenant não encontrado (já foi removido?).'
+            : (data && data.error) || ('HTTP ' + r.status);
+      toast('Falha ao zerar hosts: ' + hint, 'err');
+      return;
+    }
+    const n = (typeof data.deleted_hosts === 'number') ? data.deleted_hosts : 0;
+    toast('Hosts zerados (' + n + ' removidos) — ' + tenantLabel, 'ok');
+    // Atualiza overview e re-abre drill-down pra refletir contadores zerados.
+    try{ await loadGodView(); }catch{}
+    try{ await gvOpenDrillDown(tid, tenantLabel); }catch{}
+  }catch(e){
+    toast('Erro de rede ao zerar hosts: ' + (e && e.message ? e.message : e), 'err');
+  }finally{
+    if(btn){ btn.disabled = false; if(orig) btn.textContent = orig; }
+  }
+}
+
 function gvRenderDrillDown(r){
   const tl = r.timeline || [];  // [{hour:"2026-04-20T13:00", total, critical, high, medium, low}, ...]
   const topRules = r.top_rules || [];
@@ -1464,11 +1534,47 @@ function gvRenderDrillDown(r){
       <td style="padding:6px 4px;text-align:right;color:var(--muted)">${r.count||0}</td>
     </tr>`).join('') : `<tr><td colspan="2" style="padding:10px;color:var(--muted)">Sem dados.</td></tr>`;
 
-  const ipsRows = topIPs.length ? topIPs.map(r=>`
+  const ipsRows = topIPs.length ? topIPs.map(r=>{
+    // Flag/country vêm do enriquecimento geo (GeoLite2 ou prefix DB).
+    // Se backend antigo não enviar, usamos 🌐 como neutro.
+    const flag = r.flag || '🌐';
+    const loc  = (r.city && r.country) ? (r.city + ' / ' + r.country)
+                                       : (r.country || '');
+    const locTitle = r.org ? (loc + ' · ' + r.org) : loc;
+    return `
     <tr>
-      <td style="padding:6px 4px;font-family:monospace">${gvEsc(r.ip||'—')}</td>
+      <td style="padding:6px 4px;font-family:monospace;white-space:nowrap">
+        <span title="${gvEsc(locTitle)}" style="margin-right:4px">${flag}</span>${gvEsc(r.ip||'—')}
+      </td>
+      <td style="padding:6px 4px;font-size:.72rem;color:var(--muted)">${gvEsc(loc)}</td>
       <td style="padding:6px 4px;text-align:right;color:var(--muted)">${r.count||0}</td>
-    </tr>`).join('') : `<tr><td colspan="2" style="padding:10px;color:var(--muted)">Sem dados.</td></tr>`;
+    </tr>`;
+  }).join('') : `<tr><td colspan="3" style="padding:10px;color:var(--muted)">Sem dados.</td></tr>`;
+
+  // ── Hosts gerenciados (geo enriquecido) ──────────────────────────
+  // Responde "para cada máquina aberta, de onde está abrindo".
+  // last_ip vem do touch_host (heartbeat / event ingest do agente).
+  const hostsArr = r.hosts || [];
+  const hostsRows = hostsArr.length ? hostsArr.map(h=>{
+    const flag = h.flag || (h.private ? '🏠' : '🌐');
+    const where = h.private ? 'Rede local'
+                            : (h.city && h.country) ? (h.city + ' / ' + h.country)
+                                                    : (h.country || '—');
+    const ipDisp = h.last_ip || '—';
+    const orgTitle = h.org ? (where + ' · ' + h.org) : where;
+    const statusColor = h.status === 'online' ? 'var(--green)'
+                      : h.status === 'offline' ? 'var(--muted)'
+                      : 'var(--blue)';
+    return `
+    <tr>
+      <td style="padding:6px 4px">
+        <span title="${gvEsc(orgTitle)}" style="margin-right:4px">${flag}</span>${gvEsc(h.display_name||h.host_id||'—')}
+      </td>
+      <td style="padding:6px 4px;font-family:monospace;font-size:.78rem">${gvEsc(ipDisp)}</td>
+      <td style="padding:6px 4px;font-size:.72rem;color:var(--muted)">${gvEsc(where)}</td>
+      <td style="padding:6px 4px;font-size:.72rem;color:${statusColor};text-align:right">${gvEsc(h.status||'—')}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="4" style="padding:10px;color:var(--muted)">Sem hosts gerenciados.</td></tr>`;
 
   document.getElementById('gv-modal-body').innerHTML = `
     ${summaryCards}
@@ -1492,10 +1598,28 @@ function gvRenderDrillDown(r){
       <div>
         <div style="font-size:.75rem;color:var(--muted);margin-bottom:4px">Top 5 IPs de origem</div>
         <table class="tbl" style="width:100%;font-size:.82rem">
-          <thead><tr><th style="text-align:left;padding:4px">IP</th><th style="text-align:right;padding:4px">Eventos</th></tr></thead>
+          <thead><tr>
+            <th style="text-align:left;padding:4px">IP</th>
+            <th style="text-align:left;padding:4px">Localização</th>
+            <th style="text-align:right;padding:4px">Eventos</th>
+          </tr></thead>
           <tbody>${ipsRows}</tbody>
         </table>
       </div>
+    </div>
+    <div style="margin-top:14px">
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:4px">
+        Hosts gerenciados (${hostsArr.length}) — última conexão por geolocalização
+      </div>
+      <table class="tbl" style="width:100%;font-size:.82rem">
+        <thead><tr>
+          <th style="text-align:left;padding:4px">Host</th>
+          <th style="text-align:left;padding:4px">Last IP</th>
+          <th style="text-align:left;padding:4px">Onde está abrindo</th>
+          <th style="text-align:right;padding:4px">Status</th>
+        </tr></thead>
+        <tbody>${hostsRows}</tbody>
+      </table>
     </div>
   `;
 }
