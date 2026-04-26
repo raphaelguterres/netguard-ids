@@ -5385,11 +5385,24 @@ def auth_login():
         "tenant": result.get("tenant"),
     }))
     _clear_preview_cookies(resp)
+    # F4 — Defesa em profundidade: cookie de admin é SameSite=Strict
+    #
+    # Por quê: a sessão de admin é a credencial mais sensível do sistema
+    # (rota toda /api/admin/* + impersonate). Strict bloqueia QUALQUER
+    # request cross-site (inclusive top-level GET vindo de link clicado em
+    # outro site), o que mata uma classe inteira de CSRF/click-bait —
+    # mesmo que um atacante consiga arrastar o admin pra um site malicioso,
+    # o cookie não viaja.
+    #
+    # Tenant continua Lax porque é razoável que o usuário acesse
+    # /dashboard via link de e-mail/Slack (top-level GET cross-site é
+    # autorizado em Lax). Admin não tem esse caso de uso.
+    cookie_samesite = "Strict" if result.get("type") == "admin" else "Lax"
     resp.set_cookie(
         "netguard_token",
         token,
         httponly=True,
-        samesite="Lax",
+        samesite=cookie_samesite,
         max_age=8 * 3600,
         secure=_HTTPS_ONLY,  # True automaticamente quando HTTPS_ONLY=true
     )
@@ -8193,8 +8206,21 @@ def admin_tenants_create():
 @require_role("admin")
 @csrf_protect
 def admin_tenants_delete(tid):
-    """Remove um tenant do banco (não apaga dados de detecção)."""
+    """
+    Remove um tenant do banco (não apaga dados de detecção).
+
+    F5 — Valida existência antes de deletar:
+        Sem o check, um DELETE em tid inexistente retornava 200 OK e
+        emitia audit TENANT_DELETED com tid arbitrário. Isso polui o
+        audit log (atacante com token admin pode esconder ações reais
+        em meio a deletes-de-fantasma) e dá feedback errado pro chamador.
+        404 é o status semanticamente correto + zero side effects.
+    """
     try:
+        existing = repo.get_tenant_by_id(tid) if hasattr(repo, "get_tenant_by_id") else None
+        if not existing:
+            return jsonify({"error": "tenant não encontrado", "tenant_id": tid}), 404
+
         repo.delete_tenant(tid)
         # Remove engine em memória se existir
         with _ids_lock:
@@ -8210,9 +8236,20 @@ def admin_tenants_delete(tid):
 @require_role("admin")
 @csrf_protect
 def admin_rotate_tenant_token(tid):
-    """Rotaciona o token de um tenant específico (ação admin)."""
+    """
+    Rotaciona o token de um tenant específico (ação admin).
+
+    F5 — Valida existência antes de rotacionar:
+        Sem o check, rotate em tid inexistente fazia update em zero linhas
+        e ainda emitia audit TOKEN_ROTATED + retornava new_token "válido"
+        (que nunca foi associado a tenant nenhum). Resposta enganosa +
+        polui audit log. 404 antes de qualquer mutação é o caminho certo.
+    """
     try:
         old_row = repo.get_tenant_by_id(tid) if hasattr(repo, "get_tenant_by_id") else None
+        if not old_row:
+            return jsonify({"error": "tenant não encontrado", "tenant_id": tid}), 404
+
         old_prefix = (dict(old_row).get("token_prefix","") if old_row else "")
         new_token, new_hash = rotate_token(old_prefix, generate_api_token)
         repo.update_tenant_token(tid, new_token, new_hash)
