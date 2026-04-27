@@ -1,16 +1,100 @@
 # NetGuard IDS
 
-Host-centric detection and response platform built in Python, with a local-first SOC dashboard, XDR-style endpoint ingest, incident workflow, risk scoring, and a path from desktop demo to lightweight SaaS.
+A host-centric **Intrusion Detection / EDR / SIEM hybrid** built in Python — single-binary SOC dashboard, multi-tenant SaaS layer, deterministic risk scoring, and a one-click Host Triage View that gets the operator from "something is wrong" to "this is the next action" in a single click.
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://python.org)
+[![Flask](https://img.shields.io/badge/Flask-3.x-000000?logo=flask)](https://flask.palletsprojects.com/)
 [![MITRE ATT&CK](https://img.shields.io/badge/MITRE-ATT%26CK%20Aligned-red)](https://attack.mitre.org)
-[![CI](https://github.com/raphaelguterres/netguard-ids/actions/workflows/tests.yml/badge.svg)](https://github.com/raphaelguterres/netguard-ids/actions/workflows/tests.yml)
-[![License](https://img.shields.io/badge/License-MIT-lightgrey)]()
+[![Pentest](https://img.shields.io/badge/pentest-34%2F34%20passing-brightgreen)](run_pentest_audit.py)
+[![License](https://img.shields.io/badge/License-MIT-lightgrey)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](DOCKER.md)
 
-## What NetGuard is now
+> **Status:** active solo project, ~135 commits. The codebase is shipped through small T-rounds (T6 → T15) — each round adds a feature **and** a regression test in `run_pentest_audit.py`. Every merge to `main` keeps the suite at green.
 
-NetGuard is no longer only a local IDS dashboard. The project now has the foundation of a lightweight EDR/SIEM:
+---
+
+## Why this exists
+
+Most open IDS/EDR tools either (a) drown an analyst in raw events with no priority, or (b) hide the *why* of a verdict behind a black-box ML model. NetGuard takes the opposite stance:
+
+- **Determinist risk scoring.** Every host risk number ships with its own breakdown (`"3× CRITICAL = +60 (cap)"`). No ML, no caixa-preta — auditors and SOC leads can reproduce the score from rules.
+- **One-click triage.** Operator opens *Host Triage View* → sees risk + 50-event timeline + a single recommended next action with rationale. No multi-tab dance.
+- **Cross-tenant inbox.** Admins get a single pane that ranks the worst hosts across **all** tenants by score — built for a small MSSP-style operator running 5–50 customers from one console.
+
+If you build a SOC for a small org and don't want to pay $30k/year for a SaaS that hides its math, this is the shape of tool you'd reach for.
+
+---
+
+## What's inside
+
+| Capability | Where |
+|---|---|
+| Multi-tenant SaaS (admin god-view + tenant drilldown) | `app.py` admin routes + `templates/admin_dashboard.html` |
+| **Host Triage View** — risk score, next action, 50-event timeline | `/admin/host/<tenant>/<host>` ([T14](SECURITY_REPORT_T14.md)) |
+| **Operator Inbox** — cross-tenant ranking by risk | `/admin/inbox` |
+| Deterministic risk scoring + rule-based "next action" | `_host_risk_score`, `_host_next_action` in `app.py` |
+| World-map view of threat sources (GeoLite2 + prefix DB) | `admin.html` god-view, [T10](SECURITY_REPORT_2026-04-25.md) |
+| XDR-style endpoint ingest with strict event whitelist | `/api/xdr/events`, `/api/agent/events` |
+| Sigma-like YAML rules with aggregation windows | `rules/yaml/` + `rules/yaml_loader.py` |
+| Incident lifecycle (status, severity, assign, comments) | `engine/incident_engine.py` |
+| RBAC (admin / analyst / viewer) + audit log | `auth.py` + `audit.log()` calls across `app.py` |
+| BruteForceGuard with escalating lockout | `auth.py` |
+| CSRF (cookie + `X-CSRFToken` header) on every destructive admin endpoint | covered by `t11a` regression |
+| SameSite cookie posture (Strict admin / Lax tenant) | covered by `t12b`, `t13a` |
+
+---
+
+## Quick start
+
+```bash
+git clone https://github.com/raphaelguterres/netguard-ids.git
+cd netguard-ids
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python app.py
+```
+
+Open:
+
+- **Admin dashboard:** `http://127.0.0.1:5000/admin` (token in `.netguard_token`)
+- **Tenant SOC:** `http://127.0.0.1:5000/soc-preview`
+- **Health:** `http://127.0.0.1:5000/api/health`
+
+Run the regression suite (static AST + grep checks across `app.py` and templates):
+
+```bash
+python run_pentest_audit.py
+# === 34/34 passaram ===
+```
+
+---
+
+## Endpoint agent
+
+The XDR collector lives in `netguard_agent/` and ships events with a host API key:
+
+```bash
+python -m netguard_agent \
+  --hub http://127.0.0.1:5000 \
+  --token YOUR_BOOTSTRAP_TOKEN \
+  --host-id lab-win-01 \
+  --mode xdr
+```
+
+Or with an issued host key (`nga_...`):
+
+```bash
+python -m netguard_agent \
+  --hub http://127.0.0.1:5000 \
+  --agent-key nga_ISSUED_HOST_KEY \
+  --host-id lab-win-01 \
+  --mode xdr
+```
+
+---
+
+## Foundation already in place
 
 - Flask server with REST API and SOC dashboard
 - Modular endpoint agent (`netguard_agent/`) with legacy and XDR transport modes
@@ -21,47 +105,7 @@ NetGuard is no longer only a local IDS dashboard. The project now has the founda
 - SQLite-first storage for local/demo, with repositories written to be PostgreSQL-ready
 - Sigma-like YAML rules loaded from `rules/yaml/`
 
-The project still runs locally with the current app entrypoint, but it is now organized to support a more professional Agent + Server model.
-
-## Quick Start
-
-### 1. Local server
-
-```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-python app.py
-```
-
-Open:
-
-- Dashboard: `http://127.0.0.1:5000`
-- Demo flow: `http://127.0.0.1:5000/demo`
-- Health check: `http://127.0.0.1:5000/api/health`
-
-### 2. Run the modular endpoint agent
-
-Use an admin token from `.netguard_token` or a tenant token (`ng_...`) as the bootstrap credential:
-
-```bash
-python -m netguard_agent \
-  --hub http://127.0.0.1:5000 \
-  --token YOUR_BOOTSTRAP_TOKEN \
-  --host-id lab-win-01 \
-  --mode xdr
-```
-
-You can also reuse an issued host key:
-
-```bash
-python -m netguard_agent \
-  --hub http://127.0.0.1:5000 \
-  --agent-key nga_ISSUED_HOST_KEY \
-  --host-id lab-win-01 \
-  --mode xdr
-```
+The project still runs locally with the current app entrypoint, but it is organized to support a more professional Agent + Server model.
 
 ## Operating Modes
 
