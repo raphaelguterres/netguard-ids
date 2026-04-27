@@ -79,6 +79,8 @@ def create_agent_api_blueprint(
             if not host_id:
                 return jsonify({"error": "host_id obrigatorio"}), 400
             platform_name = sanitize_text(str(data.get("platform") or ""), max_len=64).lower()
+            # F-AGENT-1 (T16): admin pode pinar tenant via body; tenant/agent ignoram.
+            tenant_override = sanitize_text(str(data.get("tenant_id") or ""), max_len=128)
             host = get_agent_service().record_heartbeat(
                 auth_ctx=auth_ctx,
                 host_id=host_id,
@@ -90,6 +92,7 @@ def create_agent_api_blueprint(
                     "snapshot_summary": agent_snapshot_summary(data),
                     **(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}),
                 },
+                tenant_id=tenant_override or None,
             )
             set_request_tenant_context(str(host.get("tenant_id") or auth_ctx.tenant_id), "analyst")
             return jsonify({"ok": True, "host": host})
@@ -112,6 +115,8 @@ def create_agent_api_blueprint(
             if not host_id:
                 return jsonify({"error": "host_id obrigatorio"}), 400
             platform_name = sanitize_text(str(data.get("platform") or ""), max_len=64).lower()
+            # F-AGENT-1 (T16): admin pode pinar tenant via body; tenant/agent ignoram.
+            tenant_override = sanitize_text(str(data.get("tenant_id") or ""), max_len=128)
             host = get_agent_service().record_heartbeat(
                 auth_ctx=auth_ctx,
                 host_id=host_id,
@@ -124,6 +129,7 @@ def create_agent_api_blueprint(
                     **(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}),
                 },
                 mark_event=True,
+                tenant_id=tenant_override or None,
             )
             set_request_tenant_context(str(host.get("tenant_id") or auth_ctx.tenant_id), "analyst")
             payload = normalize_agent_event_payload(data, host_id, platform_name)

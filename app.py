@@ -8838,6 +8838,87 @@ def admin_tenant_hosts_reset(tid):
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/admin/orphan-hosts", methods=["GET"])
+@_admin_only
+def admin_orphan_hosts_list():
+    """
+    F-HOST-1 (T16) — listagem de hosts órfãos (`tenant_id="admin"`).
+
+    Por que esse endpoint existe:
+        Antes do fix de F-AGENT-1 (T16), quando admin batia em
+        /api/agent/heartbeat ou /api/agent/events sem mexer no body, o
+        host era gravado com tenant_id="admin" — bucket que nenhum
+        drilldown por tenant mostra. Esses hosts ficavam invisíveis pra
+        operação. Esse endpoint expõe a frota de órfãos pra triagem
+        manual antes do sweep destrutivo.
+
+    Retorno:
+        200 {"items": [...], "count": N}
+        Cada item é a row de managed_hosts com tenant_id="admin".
+
+    Read-only — não muda estado. Pra deletar, use POST /sweep.
+    """
+    try:
+        items = host_registry.list_hosts(tenant_id="admin", limit=1000)
+        return jsonify({"items": items, "count": len(items)})
+    except Exception as exc:
+        logger.error("admin_orphan_hosts_list error: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/admin/orphan-hosts/sweep", methods=["POST"])
+@_admin_only
+@csrf_protect
+def admin_orphan_hosts_sweep():
+    """
+    F-HOST-1 (T16) — varredura de órfãos com dry_run + delete.
+
+    Body JSON:
+        {"dry_run": true}   → padrão; só conta, não apaga
+        {"dry_run": false}  → apaga todos os hosts com tenant_id="admin"
+
+    Por que dry_run é o default:
+        Sweeps destrutivos sem confirmação levam a perda de dados quando
+        um operador clica errado num cliente admin. Forçar opt-in
+        explícito alinha com o padrão das outras rotas destrutivas
+        (HOSTS_RESET pede tid específico).
+
+    Segurança:
+        - @_admin_only + @csrf_protect (mesmo padrão de hosts_reset)
+        - audit log ORPHAN_HOSTS_SWEPT com count e modo
+
+    Retorno:
+        200 {"ok": true, "dry_run": bool, "count": N, "deleted": N|0}
+        500 em falha de DB
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        dry_run = bool(data.get("dry_run", True))
+
+        # Bucket de órfãos = managed_hosts onde tenant_id="admin"
+        orphans = host_registry.list_hosts(tenant_id="admin", limit=1000)
+        count = len(orphans)
+
+        deleted = 0
+        if not dry_run and count > 0:
+            deleted = host_registry.delete_hosts_for_tenant(tenant_id="admin")
+
+        audit("ORPHAN_HOSTS_SWEPT",
+              actor="admin",
+              ip=request.remote_addr or "-",
+              detail=f"dry_run={dry_run} count={count} deleted={deleted}")
+
+        return jsonify({
+            "ok":      True,
+            "dry_run": dry_run,
+            "count":   count,
+            "deleted": deleted,
+        })
+    except Exception as exc:
+        logger.error("admin_orphan_hosts_sweep error: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/api/admin/rotate-admin-token", methods=["POST"])
 @_admin_only
 @csrf_protect

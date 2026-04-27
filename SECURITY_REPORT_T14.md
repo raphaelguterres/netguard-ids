@@ -263,3 +263,48 @@ Não foram corrigidos em T15 — agendados para T16+:
 - **F-HOST-1**: hosts órfãos (`tenant_id="admin"`) não aparecem em nenhum drilldown — precisa varredura pós-fix de F-AGENT-1.
 
 Ambos são INFO/MEDIUM — não bloqueiam release de T14/T15.
+
+---
+
+## 9. Addendum T16 — Patches F-AGENT-1 + F-HOST-1 (2026-04-27)
+
+### 9.1 F-AGENT-1 — Tenant binding correto em record_heartbeat
+
+**Bug:** `AgentService.record_heartbeat` lia tenant exclusivamente de `auth_ctx.tenant_id`. Quando admin batia em `/api/agent/heartbeat` ou `/api/agent/events` sem repassar tenant pro service, o host era gravado com `tenant_id="admin"` (resultado de `resolve_tenant_with_role()` retornar `"admin", "admin"` pra requests admin sem `tenant_for` setado). `register_host` já tinha a lógica certa.
+
+**Fix:** `record_heartbeat` agora aceita `tenant_id: str | None = None` e computa `effective_tenant_id` com a mesma regra de `register_host`:
+
+```python
+effective_tenant_id = (
+    tenant_id if auth_ctx.auth_type == "admin" and tenant_id else auth_ctx.tenant_id
+)
+```
+
+Não-admin (tenant key, agent key) ignora o body — não pode pular pra outro tenant via `tenant_id` forjado. Em `routes/agent_api.py`, ambos `/api/agent/heartbeat` e `/api/agent/events` sanitizam `data.get("tenant_id")` (max_len=128) e passam pra service.
+
+### 9.2 F-HOST-1 — Sweep de órfãos legados
+
+**Bug:** Hosts gravados antes do fix ficaram presos em `tenant_id="admin"`, invisíveis em qualquer drilldown.
+
+**Fix:** Par de rotas admin em `app.py`:
+
+| Rota | Método | Função |
+| ---- | ------ | ------ |
+| `/api/admin/orphan-hosts` | GET | Lista órfãos (`tenant_id="admin"`), read-only, admin-only |
+| `/api/admin/orphan-hosts/sweep` | POST | Apaga órfãos. `dry_run=true` é default. CSRF + admin-only. Audit `ORPHAN_HOSTS_SWEPT`. |
+
+Default seguro: sweep dry-run só conta — operador precisa enviar `{"dry_run": false}` explicitamente pra apagar. Mesmo padrão de opt-in que `HOSTS_RESET`.
+
+### 9.3 Regressão T16
+
+| ID    | O que valida |
+| ----- | ------------ |
+| t16a  | `record_heartbeat` aceita `tenant_id`, usa override só sob admin, fallback `auth_ctx.tenant_id` quando não-admin; `agent_api.py` propaga em heartbeat E events |
+| t16b  | Par de rotas `/api/admin/orphan-hosts[/sweep]` existe, admin-only, sweep tem CSRF + dry_run default + audit log |
+
+Resultado: **36/36 passando** (34 anteriores + 2 novos T16). Nenhum WARN.
+
+```bash
+python3 run_pentest_audit.py
+# === 36/36 passaram ===
+```

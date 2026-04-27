@@ -126,13 +126,22 @@ class AgentService:
         metadata: dict[str, Any] | None = None,
         tags: list[str] | None = None,
         mark_event: bool = False,
+        tenant_id: str | None = None,
     ) -> dict:
-        tenant_id = auth_ctx.tenant_id
+        # F-AGENT-1 (T16): se a chamada vem sob auth admin e o body traz
+        # tenant_id, esse valor pina o host no tenant correto. Sem esse
+        # override, /api/agent/events sob admin grudava o host em
+        # tenant_id="admin" (bucket de órfãos invisível em qualquer drilldown).
+        # Mesma regra que register_host já aplicava: somente admin pode
+        # escolher tenant via body — tenant/agent ficam presos ao seu próprio.
         if auth_ctx.auth_type == "agent" and auth_ctx.host_id and auth_ctx.host_id != host_id:
             raise PermissionError("agent key cannot write for another host")
+        effective_tenant_id = (
+            tenant_id if auth_ctx.auth_type == "admin" and tenant_id else auth_ctx.tenant_id
+        )
         return self.host_repo.touch_host(
             host_id,
-            tenant_id=tenant_id,
+            tenant_id=effective_tenant_id,
             display_name=display_name,
             platform=platform,
             agent_version=agent_version,
