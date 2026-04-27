@@ -44,6 +44,36 @@ If you build a SOC for a small org and don't want to pay $30k/year for a SaaS th
 
 ---
 
+## Screenshots
+
+> Captured live from the running app at `127.0.0.1:5000` on a seeded multi-tenant database (~614 active clients across ~20 tenants).
+
+### God View — multi-tenant overview
+
+![God View](docs/screenshots/netguard-01-godview.png)
+
+Top of the admin dashboard: every tenant ranked by critical/high event count in the last 24h, total active clients, and a single "worst tenants" leaderboard. Built for a small MSSP-style operator running 5–50 customers from one console.
+
+### Tenant drilldown — timeline + threat origins
+
+![Tenant drilldown](docs/screenshots/netguard-02-tenant-drilldown.png)
+
+Per-tenant view: events-by-hour bar chart and a world map plotting attack source IPs against managed hosts (GeoLite2 + prefix DB). The red dot on the right is a single attack origin from this tenant's last 24h window.
+
+### Operator Inbox — cross-tenant ranking
+
+![Operator Inbox](docs/screenshots/netguard-03-operator-inbox.png)
+
+`/admin/inbox` — every host across every tenant ranked by deterministic risk score, with a single "Próxima Ação" column already filled in. The inbox is the answer to "I have 60 customers, where do I look first."
+
+### Host Triage View — risk + next action + 50-event timeline
+
+![Host Triage View](docs/screenshots/netguard-04-host-triage.png)
+
+`/admin/host/<tenant>/<host>` — the centerpiece of T14 + T15. Risk score with full breakdown (`6× CRITICAL = +60 (cap)`, `6× HIGH = +40`, `1× MEDIUM = +3`), a single recommended next action with rationale, and the enriched 50-event timeline (process_name, command_line, source_ip on each row). One click from the inbox to here, no multi-tab dance.
+
+---
+
 ## Quick start
 
 ```bash
