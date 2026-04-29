@@ -271,6 +271,11 @@ These rules support:
 - field matching (`equals`, `contains`, `regex`, numeric comparisons)
 - `all` / `any` matching blocks
 - simple aggregation windows (`count`, `within_seconds`, `group_by`, `distinct_field`)
+- Sigma-like metadata (`level`, `status`, `references`, `falsepositives`, `logsource`)
+- Sigma-like selections such as `detection.selection` with `condition: selection`
+- common Sigma field modifiers (`CommandLine|contains`, `Image|endswith`, `field|regex`)
+
+The Sigma compatibility layer is intentionally conservative. It supports the subset needed for portable endpoint/process/network/auth rules while rejecting ambiguous mixed logical expressions instead of silently weakening detections.
 
 ## Main Endpoints
 

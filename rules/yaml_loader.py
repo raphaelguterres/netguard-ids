@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -24,11 +25,68 @@ _SUPPORTED_OPERATORS = {
     "startswith",
     "endswith",
     "regex",
+    "regex_any",
     "in",
+    "not_equals",
+    "not_contains",
+    "exists",
+    "startswith_any",
+    "endswith_any",
     "gte",
     "lte",
     "gt",
     "lt",
+}
+_SEVERITY_ALIASES = {
+    "informational": "low",
+    "info": "low",
+    "low": "low",
+    "medium": "medium",
+    "moderate": "medium",
+    "high": "high",
+    "critical": "critical",
+    "crit": "critical",
+}
+_SIGMA_CONTROL_KEYS = {
+    "aggregation",
+    "all",
+    "any",
+    "condition",
+    "event_types",
+    "timeframe",
+}
+_SIGMA_FIELD_ALIASES = {
+    "commandline": "command_line",
+    "currentdirectory": "details.current_directory",
+    "destinationhostname": "details.destination_hostname",
+    "destinationip": "network_dst_ip",
+    "destinationport": "network_dst_port",
+    "eventid": "details.event_id",
+    "image": "process_name",
+    "imagename": "process_name",
+    "integritylevel": "details.integrity_level",
+    "logonsourceip": "auth_source_ip",
+    "originalfilename": "details.original_file_name",
+    "parentcommandline": "details.parent_command_line",
+    "parentimage": "parent_process",
+    "processcommandline": "command_line",
+    "processid": "pid",
+    "processname": "process_name",
+    "sourceip": "auth_source_ip",
+    "sourceport": "details.source_port",
+    "targetusername": "username",
+    "user": "username",
+    "username": "username",
+}
+_LOGSOURCE_CATEGORY_EVENT_TYPES = {
+    "authentication": ("authentication",),
+    "auth": ("authentication",),
+    "network_connection": ("network_connection",),
+    "network": ("network_connection",),
+    "process_creation": ("process_execution",),
+    "process": ("process_execution",),
+    "registry_event": ("persistence_indicator",),
+    "script": ("script_execution",),
 }
 
 
@@ -68,6 +126,7 @@ class YamlDetectionRule:
     recommended_action: str = "investigate"
     source_path: str = ""
     alert_type: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def matches_current_event(self, context: Any) -> bool:
         if self.event_types and context.event.event_type not in self.event_types:
@@ -108,6 +167,8 @@ class YamlDetectionRule:
             "all": [condition.field for condition in self.all_conditions],
             "any": [condition.field for condition in self.any_conditions],
         }
+        if self.metadata:
+            details["metadata"] = dict(self.metadata)
         return DetectionRecord(
             rule_id=self.rule_id,
             rule_name=self.title,
@@ -133,7 +194,7 @@ class YamlDetectionRule:
 class YamlRuleRegistry:
     rules: tuple[YamlDetectionRule, ...] = field(default_factory=tuple)
 
-    def evaluate(self, context: DetectionContext) -> list[DetectionRecord]:
+    def evaluate(self, context: Any) -> list[DetectionRecord]:
         detections: list[DetectionRecord] = []
         for rule in self.rules:
             if rule.matches_current_event(context):
@@ -160,9 +221,9 @@ def _parse_rule(payload: dict[str, Any], *, source_path: str) -> YamlDetectionRu
         raise YamlRuleValidationError(f"{source_path}: rule body must be an object")
 
     rule_id = str(payload.get("id") or "").strip()
-    title = str(payload.get("title") or "").strip()
+    title = str(payload.get("title") or payload.get("name") or "").strip()
     description = str(payload.get("description") or "").strip()
-    severity = str(payload.get("severity") or "medium").strip().lower()
+    severity = _normalize_severity(payload.get("severity") or payload.get("level") or "medium")
     if not rule_id or not title:
         raise YamlRuleValidationError(f"{source_path}: id and title are required")
 
@@ -170,19 +231,29 @@ def _parse_rule(payload: dict[str, Any], *, source_path: str) -> YamlDetectionRu
     if not isinstance(detection, dict):
         raise YamlRuleValidationError(f"{source_path}: detection must be an object")
 
-    event_types = tuple(
-        str(item).strip().lower()
-        for item in (payload.get("event_types") or detection.get("event_types") or [])
-        if str(item).strip()
+    raw_event_types = payload.get("event_types") or detection.get("event_types")
+    event_types = (
+        tuple(
+            str(item).strip().lower()
+            for item in _as_list(raw_event_types)
+            if str(item).strip()
+        )
+        if raw_event_types
+        else _event_types_from_logsource(payload.get("logsource") or {})
+    )
+
+    sigma_all_conditions, sigma_any_conditions = _parse_sigma_detection(
+        detection,
+        source_path=source_path,
     )
     all_conditions = tuple(
         _parse_condition(item, source_path=source_path)
-        for item in detection.get("all", [])
-    )
+        for item in _as_list(detection.get("all"))
+    ) + sigma_all_conditions
     any_conditions = tuple(
         _parse_condition(item, source_path=source_path)
-        for item in detection.get("any", [])
-    )
+        for item in _as_list(detection.get("any"))
+    ) + sigma_any_conditions
     if not all_conditions and not any_conditions:
         raise YamlRuleValidationError(
             f"{source_path}: detection requires at least one condition",
@@ -216,11 +287,233 @@ def _parse_rule(payload: dict[str, Any], *, source_path: str) -> YamlDetectionRu
         aggregation=aggregation,
         tactic=str(mitre.get("tactic") or "").strip(),
         technique=str(mitre.get("technique") or "").strip(),
-        tags=tuple(str(item).strip().lower() for item in (payload.get("tags") or []) if str(item).strip()),
+        tags=tuple(str(item).strip().lower() for item in _as_list(payload.get("tags")) if str(item).strip()),
         recommended_action=str(payload.get("recommended_action") or "investigate").strip(),
         source_path=source_path,
         alert_type=str(payload.get("alert_type") or "").strip().lower(),
+        metadata=_rule_metadata(payload),
     )
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
+def _normalize_severity(value: Any) -> str:
+    raw = str(value or "medium").strip().lower().replace("-", "_").replace(" ", "_")
+    return _SEVERITY_ALIASES.get(raw, "medium")
+
+
+def _event_types_from_logsource(logsource: Any) -> tuple[str, ...]:
+    if not isinstance(logsource, dict):
+        return ()
+    candidates = [
+        str(logsource.get("category") or "").strip().lower(),
+        str(logsource.get("service") or "").strip().lower(),
+        str(logsource.get("product") or "").strip().lower(),
+    ]
+    event_types: list[str] = []
+    for candidate in candidates:
+        event_types.extend(_LOGSOURCE_CATEGORY_EVENT_TYPES.get(candidate, ()))
+    return tuple(dict.fromkeys(event_types))
+
+
+def _rule_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    metadata = {
+        "author": payload.get("author"),
+        "status": payload.get("status"),
+        "references": _as_list(payload.get("references")),
+        "falsepositives": _as_list(payload.get("falsepositives")),
+        "logsource": payload.get("logsource") if isinstance(payload.get("logsource"), dict) else {},
+    }
+    return {
+        key: value
+        for key, value in metadata.items()
+        if value not in (None, "", [], {})
+    }
+
+
+def _parse_sigma_detection(
+    detection: dict[str, Any],
+    *,
+    source_path: str,
+) -> tuple[tuple[YamlRuleCondition, ...], tuple[YamlRuleCondition, ...]]:
+    selections = {
+        str(name).strip().lower(): body
+        for name, body in detection.items()
+        if str(name).strip().lower() not in _SIGMA_CONTROL_KEYS and isinstance(body, dict)
+    }
+    if not selections:
+        return (), ()
+
+    condition = str(detection.get("condition") or "").strip()
+    if not condition and len(selections) == 1:
+        condition = next(iter(selections))
+    if not condition:
+        return (), ()
+
+    condition_lower = condition.lower().strip()
+    if " not " in f" {condition_lower} ":
+        raise YamlRuleValidationError(
+            f"{source_path}: Sigma 'not' conditions are not supported by this loader",
+        )
+
+    if condition_lower.startswith("1 of "):
+        refs = _selection_refs_from_pattern(condition_lower.removeprefix("1 of ").strip(), selections)
+        return (), tuple(_flatten_any_selection_conditions(refs, selections, source_path=source_path))
+
+    if condition_lower.startswith("all of "):
+        refs = _selection_refs_from_pattern(condition_lower.removeprefix("all of ").strip(), selections)
+        return tuple(_flatten_selection_conditions(refs, selections, source_path=source_path)), ()
+
+    has_and = " and " in f" {condition_lower} "
+    has_or = " or " in f" {condition_lower} "
+    if has_and and has_or:
+        raise YamlRuleValidationError(
+            f"{source_path}: mixed Sigma and/or conditions are not supported",
+        )
+
+    refs = _selection_refs_from_expression(condition_lower, selections)
+    if has_or:
+        return (), tuple(_flatten_any_selection_conditions(refs, selections, source_path=source_path))
+    return tuple(_flatten_selection_conditions(refs, selections, source_path=source_path)), ()
+
+
+def _selection_refs_from_pattern(pattern: str, selections: dict[str, Any]) -> tuple[str, ...]:
+    refs = [
+        name
+        for name in selections
+        if fnmatch(name.lower(), pattern.lower())
+    ]
+    if not refs and pattern in selections:
+        refs = [pattern]
+    return tuple(dict.fromkeys(refs))
+
+
+def _selection_refs_from_expression(expression: str, selections: dict[str, Any]) -> tuple[str, ...]:
+    tokens = [
+        token
+        for token in re.split(r"[\s()]+", expression)
+        if token and token not in {"and", "or"}
+    ]
+    refs: list[str] = []
+    for token in tokens:
+        if "*" in token:
+            refs.extend(_selection_refs_from_pattern(token, selections))
+        elif token in selections:
+            refs.append(token)
+        else:
+            raise YamlRuleValidationError(f"unknown Sigma selection: {token}")
+    return tuple(dict.fromkeys(refs))
+
+
+def _flatten_selection_conditions(
+    refs: tuple[str, ...],
+    selections: dict[str, Any],
+    *,
+    source_path: str,
+) -> list[YamlRuleCondition]:
+    conditions: list[YamlRuleCondition] = []
+    for ref in refs:
+        selection = selections.get(ref)
+        if not isinstance(selection, dict):
+            raise YamlRuleValidationError(f"{source_path}: Sigma selection {ref} must be an object")
+        conditions.extend(_conditions_from_sigma_selection(selection, source_path=source_path))
+    return conditions
+
+
+def _flatten_any_selection_conditions(
+    refs: tuple[str, ...],
+    selections: dict[str, Any],
+    *,
+    source_path: str,
+) -> list[YamlRuleCondition]:
+    conditions: list[YamlRuleCondition] = []
+    for ref in refs:
+        selection = selections.get(ref)
+        if not isinstance(selection, dict):
+            raise YamlRuleValidationError(f"{source_path}: Sigma selection {ref} must be an object")
+        parsed = _conditions_from_sigma_selection(selection, source_path=source_path)
+        if len(parsed) != 1:
+            raise YamlRuleValidationError(
+                f"{source_path}: Sigma OR/1-of selection {ref} must contain exactly one field",
+            )
+        conditions.extend(parsed)
+    return conditions
+
+
+def _conditions_from_sigma_selection(
+    selection: dict[str, Any],
+    *,
+    source_path: str,
+) -> list[YamlRuleCondition]:
+    conditions: list[YamlRuleCondition] = []
+    for raw_field, expected in selection.items():
+        field, modifiers = _split_sigma_field(raw_field)
+        if not field:
+            raise YamlRuleValidationError(f"{source_path}: Sigma selection contains an empty field name")
+        operator = _operator_from_sigma_modifiers(modifiers, expected)
+        values = _as_list(expected)
+        if "all" in modifiers and isinstance(expected, list):
+            for value in values:
+                conditions.append(YamlRuleCondition(field=field, operator=operator, value=value))
+            continue
+        if isinstance(expected, dict):
+            raise YamlRuleValidationError(
+                f"{source_path}: nested Sigma field values are not supported for {raw_field}",
+            )
+        conditions.append(
+            YamlRuleCondition(
+                field=field,
+                operator=_operator_for_multi_value(operator, expected),
+                value=expected,
+            )
+        )
+    return conditions
+
+
+def _split_sigma_field(raw_field: Any) -> tuple[str, set[str]]:
+    parts = [str(part).strip() for part in str(raw_field).split("|") if str(part).strip()]
+    if not parts:
+        return "", set()
+    alias_key = re.sub(r"[^a-z0-9]", "", parts[0].lower())
+    field = _SIGMA_FIELD_ALIASES.get(alias_key, parts[0].strip())
+    modifiers = {part.lower() for part in parts[1:]}
+    return field, modifiers
+
+
+def _operator_from_sigma_modifiers(modifiers: set[str], expected: Any) -> str:
+    if "exists" in modifiers:
+        return "exists"
+    if "contains" in modifiers:
+        return "contains"
+    if "startswith" in modifiers:
+        return "startswith"
+    if "endswith" in modifiers:
+        return "endswith"
+    if "re" in modifiers or "regex" in modifiers:
+        return "regex"
+    return "in" if isinstance(expected, list) else "equals"
+
+
+def _operator_for_multi_value(operator: str, expected: Any) -> str:
+    if not isinstance(expected, list):
+        return operator
+    if operator == "contains":
+        return "contains_any"
+    if operator == "startswith":
+        return "startswith_any"
+    if operator == "endswith":
+        return "endswith_any"
+    if operator == "regex":
+        return "regex_any"
+    if operator == "equals":
+        return "in"
+    return operator
 
 
 def _parse_condition(payload: dict[str, Any], *, source_path: str) -> YamlRuleCondition:
@@ -261,21 +554,48 @@ def _match_condition(condition: YamlRuleCondition, payload: dict[str, Any]) -> b
     expected = condition.value
     if operator == "equals":
         return str(actual).lower() == str(expected).lower()
+    if operator == "not_equals":
+        return str(actual).lower() != str(expected).lower()
     if operator == "contains":
         return str(expected).lower() in str(actual or "").lower()
+    if operator == "not_contains":
+        return str(expected).lower() not in str(actual or "").lower()
     if operator == "contains_any":
         values = expected if isinstance(expected, list) else [expected]
         actual_text = str(actual or "").lower()
         return any(str(item).lower() in actual_text for item in values)
     if operator == "startswith":
         return str(actual or "").lower().startswith(str(expected).lower())
+    if operator == "startswith_any":
+        values = expected if isinstance(expected, list) else [expected]
+        actual_text = str(actual or "").lower()
+        return any(actual_text.startswith(str(item).lower()) for item in values)
     if operator == "endswith":
         return str(actual or "").lower().endswith(str(expected).lower())
+    if operator == "endswith_any":
+        values = expected if isinstance(expected, list) else [expected]
+        actual_text = str(actual or "").lower()
+        return any(actual_text.endswith(str(item).lower()) for item in values)
     if operator == "regex":
-        return bool(re.search(str(expected), str(actual or ""), flags=re.IGNORECASE))
+        try:
+            return bool(re.search(str(expected), str(actual or ""), flags=re.IGNORECASE))
+        except re.error:
+            return False
+    if operator == "regex_any":
+        values = expected if isinstance(expected, list) else [expected]
+        try:
+            return any(
+                re.search(str(item), str(actual or ""), flags=re.IGNORECASE)
+                for item in values
+            )
+        except re.error:
+            return False
     if operator == "in":
-        values = [str(item).lower() for item in (expected or [])]
+        values = [str(item).lower() for item in _as_list(expected)]
         return str(actual).lower() in values
+    if operator == "exists":
+        exists = actual not in (None, "", [], {})
+        return exists if bool(expected) else not exists
     try:
         actual_num = float(actual)
         expected_num = float(expected)

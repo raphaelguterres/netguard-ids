@@ -14,6 +14,8 @@ WORK_TMP = os.path.join(ROOT, ".tmp_test_workspace")
 os.makedirs(WORK_TMP, exist_ok=True)
 
 from rules.yaml_loader import load_yaml_rules
+from xdr.detection import BehaviorDetectionEngine
+from xdr.detections.yaml_rules import YamlRuleSet
 from xdr.pipeline import XDRPipeline
 
 
@@ -55,6 +57,97 @@ class TestYamlRuleLoader(unittest.TestCase):
             registry = load_yaml_rules(tmpdir)
             rule_ids = {rule.rule_id for rule in registry.rules}
             self.assertEqual(rule_ids, {"NG-TMP-001"})
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_sigma_like_selection_rule_with_logsource_loads_and_matches(self):
+        tmpdir = os.path.join(WORK_TMP, f"sigma-rules-{uuid.uuid4().hex}")
+        os.makedirs(tmpdir, exist_ok=True)
+        try:
+            sigma_rule = textwrap.dedent(
+                """
+                title: Sigma Style Encoded PowerShell
+                id: NG-SIGMA-001
+                status: test
+                author: NetGuard Labs
+                level: high
+                logsource:
+                  product: windows
+                  category: process_creation
+                references:
+                  - https://attack.mitre.org/techniques/T1059/001/
+                falsepositives:
+                  - administrative automation
+                detection:
+                  selection:
+                    Image|endswith:
+                      - powershell.exe
+                    CommandLine|contains|all:
+                      - powershell
+                      - "-enc"
+                  condition: selection
+                """
+            ).strip()
+            with open(os.path.join(tmpdir, "sigma_powershell.yml"), "w", encoding="utf-8") as handle:
+                handle.write(sigma_rule)
+
+            registry = load_yaml_rules(tmpdir)
+            self.assertEqual(len(registry.rules), 1)
+            loaded_rule = registry.rules[0]
+            self.assertEqual(loaded_rule.severity, "high")
+            self.assertEqual(loaded_rule.event_types, ("process_execution",))
+            self.assertEqual(loaded_rule.metadata["status"], "test")
+
+            pipeline = XDRPipeline(
+                detection_engine=BehaviorDetectionEngine(
+                    rules=[YamlRuleSet(rules_dir=tmpdir)],
+                ),
+            )
+            outcome = pipeline.process_payload(
+                {
+                    "host_id": "sigma-host-01",
+                    "event_type": "process_execution",
+                    "severity": "medium",
+                    "timestamp": "2026-04-23T10:03:00Z",
+                    "process_name": r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                    "command_line": "powershell.exe -NoProfile -enc ZQBjAGgAbwA=",
+                    "source": "agent",
+                    "platform": "windows",
+                    "details": {},
+                }
+            )[0]
+            detections = {item.rule_id: item for item in outcome.detections}
+            self.assertIn("NG-SIGMA-001", detections)
+            self.assertEqual(detections["NG-SIGMA-001"].details["metadata"]["author"], "NetGuard Labs")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_sigma_or_with_multi_field_selection_is_rejected(self):
+        tmpdir = os.path.join(WORK_TMP, f"sigma-unsafe-or-{uuid.uuid4().hex}")
+        os.makedirs(tmpdir, exist_ok=True)
+        try:
+            unsafe_rule = textwrap.dedent(
+                """
+                title: Unsafe OR Shape
+                id: NG-SIGMA-UNSAFE-001
+                level: high
+                logsource:
+                  product: windows
+                  category: process_creation
+                detection:
+                  selection_a:
+                    Image|endswith: powershell.exe
+                    CommandLine|contains: "-enc"
+                  selection_b:
+                    Image|endswith: cmd.exe
+                  condition: selection_a or selection_b
+                """
+            ).strip()
+            with open(os.path.join(tmpdir, "unsafe_or.yml"), "w", encoding="utf-8") as handle:
+                handle.write(unsafe_rule)
+
+            registry = load_yaml_rules(tmpdir)
+            self.assertEqual(registry.rules, ())
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
