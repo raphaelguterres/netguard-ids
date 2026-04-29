@@ -21,7 +21,7 @@ import logging
 import os
 from typing import Iterable
 
-from .migrations import MIGRATIONS
+from .migrations import MIGRATIONS, SCHEMA_VERSION, expected_migration_map
 from .repository import Alert, Event, Host, Repository
 
 logger = logging.getLogger("netguard.storage.postgres")
@@ -31,6 +31,8 @@ _SCHEMA_PG = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version     INTEGER PRIMARY KEY,
     name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    checksum    TEXT NOT NULL DEFAULT '',
     applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -132,13 +134,45 @@ class PostgresRepository(Repository):
                 self._record_schema_migrations(cur)
 
     def _record_schema_migrations(self, cur) -> None:
+        cur.execute(
+            "ALTER TABLE schema_migrations "
+            "ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''"
+        )
+        cur.execute(
+            "ALTER TABLE schema_migrations "
+            "ADD COLUMN IF NOT EXISTS checksum TEXT NOT NULL DEFAULT ''"
+        )
         cur.executemany(
             """
-            INSERT INTO schema_migrations (version, name)
-            VALUES (%s, %s)
+            INSERT INTO schema_migrations (version, name, description, checksum)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT (version) DO NOTHING
             """,
-            [(item["version"], item["name"]) for item in MIGRATIONS],
+            [
+                (
+                    item["version"],
+                    item["name"],
+                    item.get("description", ""),
+                    item.get("checksum", ""),
+                )
+                for item in MIGRATIONS
+            ],
+        )
+        cur.executemany(
+            """
+            UPDATE schema_migrations
+            SET name = %s, description = %s, checksum = %s
+            WHERE version = %s
+            """,
+            [
+                (
+                    item["name"],
+                    item.get("description", ""),
+                    item.get("checksum", ""),
+                    item["version"],
+                )
+                for item in MIGRATIONS
+            ],
         )
 
     def schema_version(self) -> int:
@@ -157,7 +191,7 @@ class PostgresRepository(Repository):
                 try:
                     cur.execute(
                         """
-                        SELECT version, name, applied_at
+                        SELECT version, name, description, checksum, applied_at
                         FROM schema_migrations
                         ORDER BY version ASC
                         """,
@@ -167,6 +201,42 @@ class PostgresRepository(Repository):
                 except Exception:
                     return []
         return [dict(zip(cols, row)) for row in rows]
+
+    def migration_status(self) -> dict:
+        history = self.migration_history()
+        expected = expected_migration_map()
+        applied = {int(item["version"]): item for item in history}
+        pending = [
+            expected_item
+            for version, expected_item in expected.items()
+            if version not in applied
+        ]
+        mismatched = [
+            {
+                "version": version,
+                "name": row.get("name", ""),
+                "expected_checksum": expected[version].get("checksum", ""),
+                "actual_checksum": row.get("checksum", ""),
+            }
+            for version, row in applied.items()
+            if version in expected
+            and row.get("checksum")
+            and row.get("checksum") != expected[version].get("checksum")
+        ]
+        unknown = [
+            row for version, row in applied.items()
+            if version not in expected
+        ]
+        current = self.schema_version()
+        return {
+            "ok": current == SCHEMA_VERSION and not pending and not mismatched and not unknown,
+            "schema_version": current,
+            "latest_version": SCHEMA_VERSION,
+            "pending": pending,
+            "mismatched": mismatched,
+            "unknown": unknown,
+            "history": history,
+        }
 
     def close(self) -> None:
         if self._pool is not None:
@@ -252,11 +322,14 @@ class PostgresRepository(Repository):
         clauses = []
         params: list = []
         if host_id:
-            clauses.append("host_id = %s"); params.append(host_id)
+            clauses.append("host_id = %s")
+            params.append(host_id)
         if event_type:
-            clauses.append("event_type = %s"); params.append(event_type)
+            clauses.append("event_type = %s")
+            params.append(event_type)
         if since_iso:
-            clauses.append("ts >= %s"); params.append(since_iso)
+            clauses.append("ts >= %s")
+            params.append(since_iso)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         sql = f"SELECT * FROM events {where} ORDER BY ts DESC LIMIT %s"
         params.append(int(limit))
@@ -298,11 +371,14 @@ class PostgresRepository(Repository):
         clauses = []
         params: list = []
         if host_id:
-            clauses.append("host_id = %s"); params.append(host_id)
+            clauses.append("host_id = %s")
+            params.append(host_id)
         if since_iso:
-            clauses.append("ts >= %s"); params.append(since_iso)
+            clauses.append("ts >= %s")
+            params.append(since_iso)
         if status:
-            clauses.append("status = %s"); params.append(status)
+            clauses.append("status = %s")
+            params.append(status)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         sql = f"SELECT * FROM alerts {where} ORDER BY ts DESC LIMIT %s"
         params.append(int(limit))
@@ -329,7 +405,8 @@ class PostgresRepository(Repository):
         sql = "SELECT severity, COUNT(*) FROM alerts"
         params: list = []
         if since_iso:
-            sql += " WHERE ts >= %s"; params.append(since_iso)
+            sql += " WHERE ts >= %s"
+            params.append(since_iso)
         sql += " GROUP BY severity"
         with self._conn_ctx() as conn, conn.cursor() as cur:
             cur.execute(sql, params)
@@ -344,7 +421,8 @@ class PostgresRepository(Repository):
         )
         params: list = []
         if since_iso:
-            sql += " AND ts >= %s"; params.append(since_iso)
+            sql += " AND ts >= %s"
+            params.append(since_iso)
         sql += " GROUP BY mitre_technique ORDER BY 2 DESC LIMIT %s"
         params.append(int(limit))
         with self._conn_ctx() as conn, conn.cursor() as cur:

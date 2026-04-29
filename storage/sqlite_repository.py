@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from .migrations import MIGRATIONS
+from .migrations import MIGRATIONS, SCHEMA_VERSION, expected_migration_map
 from .repository import Alert, Event, Host, Repository
 
 logger = logging.getLogger("netguard.storage.sqlite")
@@ -49,6 +49,8 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version     INTEGER PRIMARY KEY,
     name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    checksum    TEXT NOT NULL DEFAULT '',
     applied_at  TEXT NOT NULL
 );
 
@@ -160,14 +162,58 @@ class SqliteRepository(Repository):
         self._initialized = True
 
     def _record_schema_migrations(self, conn) -> None:
+        self._ensure_schema_migration_columns(conn)
         applied_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         conn.executemany(
             """
-            INSERT OR IGNORE INTO schema_migrations (version, name, applied_at)
-            VALUES (?, ?, ?)
+            INSERT OR IGNORE INTO schema_migrations (
+                version, name, description, checksum, applied_at
+            )
+            VALUES (?, ?, ?, ?, ?)
             """,
-            [(item["version"], item["name"], applied_at) for item in MIGRATIONS],
+            [
+                (
+                    item["version"],
+                    item["name"],
+                    item.get("description", ""),
+                    item.get("checksum", ""),
+                    applied_at,
+                )
+                for item in MIGRATIONS
+            ],
         )
+        conn.executemany(
+            """
+            UPDATE schema_migrations
+            SET name = ?, description = ?, checksum = ?
+            WHERE version = ?
+            """,
+            [
+                (
+                    item["name"],
+                    item.get("description", ""),
+                    item.get("checksum", ""),
+                    item["version"],
+                )
+                for item in MIGRATIONS
+            ],
+        )
+
+    def _ensure_schema_migration_columns(self, conn) -> None:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(schema_migrations)").fetchall()
+        }
+        if "description" not in columns:
+            conn.execute(
+                "ALTER TABLE schema_migrations "
+                "ADD COLUMN description TEXT NOT NULL DEFAULT ''"
+            )
+        if "checksum" not in columns:
+            conn.execute(
+                "ALTER TABLE schema_migrations "
+                "ADD COLUMN checksum TEXT NOT NULL DEFAULT ''"
+            )
 
     def schema_version(self) -> int:
         with self._conn() as conn:
@@ -184,7 +230,7 @@ class SqliteRepository(Repository):
             try:
                 rows = conn.execute(
                     """
-                    SELECT version, name, applied_at
+                    SELECT version, name, description, checksum, applied_at
                     FROM schema_migrations
                     ORDER BY version ASC
                     """,
@@ -192,6 +238,42 @@ class SqliteRepository(Repository):
             except sqlite3.OperationalError:
                 return []
         return [dict(row) for row in rows]
+
+    def migration_status(self) -> dict:
+        history = self.migration_history()
+        expected = expected_migration_map()
+        applied = {int(item["version"]): item for item in history}
+        pending = [
+            expected_item
+            for version, expected_item in expected.items()
+            if version not in applied
+        ]
+        mismatched = [
+            {
+                "version": version,
+                "name": row.get("name", ""),
+                "expected_checksum": expected[version].get("checksum", ""),
+                "actual_checksum": row.get("checksum", ""),
+            }
+            for version, row in applied.items()
+            if version in expected
+            and row.get("checksum")
+            and row.get("checksum") != expected[version].get("checksum")
+        ]
+        unknown = [
+            row for version, row in applied.items()
+            if version not in expected
+        ]
+        current = self.schema_version()
+        return {
+            "ok": current == SCHEMA_VERSION and not pending and not mismatched and not unknown,
+            "schema_version": current,
+            "latest_version": SCHEMA_VERSION,
+            "pending": pending,
+            "mismatched": mismatched,
+            "unknown": unknown,
+            "history": history,
+        }
 
     def close(self) -> None:
         # Per-call connections — nothing pooled. No-op kept for ABC compliance.

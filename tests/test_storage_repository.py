@@ -8,13 +8,14 @@ no live Postgres in CI by default.
 from __future__ import annotations
 
 import os
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 
 import pytest
 
-from storage.repository import Alert, Event, Host, get_repository
 from storage.migrations import SCHEMA_VERSION
+from storage.repository import Alert, Event, Host, get_repository
 from storage.sqlite_repository import SqliteRepository
 
 
@@ -99,20 +100,67 @@ def test_postgres_factory_lazy_imports():
 def test_schema_migrations_are_recorded_idempotently(repo):
     assert repo.schema_version() == SCHEMA_VERSION
     history = repo.migration_history()
-    assert len(history) == 1
-    assert history[0]["version"] == SCHEMA_VERSION
+    assert len(history) == SCHEMA_VERSION
+    assert history[-1]["version"] == SCHEMA_VERSION
     assert history[0]["name"] == "initial_edr_schema"
+    assert history[0]["description"]
+    assert history[0]["checksum"]
 
     repo.init_schema()
     history_after_second_init = repo.migration_history()
-    assert len(history_after_second_init) == 1
-    assert history_after_second_init[0]["version"] == SCHEMA_VERSION
+    assert len(history_after_second_init) == SCHEMA_VERSION
+    assert history_after_second_init[-1]["version"] == SCHEMA_VERSION
+
+
+def test_migration_status_reports_clean_schema(repo):
+    status = repo.migration_status()
+
+    assert status["ok"] is True
+    assert status["schema_version"] == SCHEMA_VERSION
+    assert status["latest_version"] == SCHEMA_VERSION
+    assert status["pending"] == []
+    assert status["mismatched"] == []
+    assert status["unknown"] == []
+    assert len(status["history"]) == SCHEMA_VERSION
 
 
 def test_schema_version_before_init_is_zero(tmp_path):
     repo = SqliteRepository(db_path=tmp_path / "not_initialized.db")
     assert repo.schema_version() == 0
     assert repo.migration_history() == []
+    status = repo.migration_status()
+    assert status["ok"] is False
+    assert status["pending"]
+
+
+def test_init_schema_upgrades_legacy_migration_table(tmp_path):
+    db_path = tmp_path / "legacy_migrations.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO schema_migrations (version, name, applied_at)
+            VALUES (1, 'initial_edr_schema', '2026-04-01T00:00:00Z')
+            """
+        )
+
+    repo = SqliteRepository(db_path=db_path)
+    repo.init_schema()
+    history = repo.migration_history()
+
+    assert repo.schema_version() == SCHEMA_VERSION
+    assert len(history) == SCHEMA_VERSION
+    assert all(item["description"] for item in history)
+    assert all(item["checksum"] for item in history)
+    assert repo.migration_status()["ok"] is True
 
 
 def test_upsert_and_get_host(repo):

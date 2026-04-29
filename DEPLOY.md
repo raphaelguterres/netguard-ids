@@ -199,6 +199,13 @@ The repositories already support PostgreSQL-ready behavior through:
 - `EventRepository`
 - `HostRepository`
 - `IncidentRepository`
+- modular EDR `Repository` schema version and migration status metadata
+
+For the modular EDR repository, `init_schema()` records applied migrations
+with deterministic checksums. Before and after upgrades, check
+`repo.migration_status()` in a maintenance script or Python shell; it reports
+the current version, latest expected version, pending migrations, unknown
+migrations, and checksum mismatches.
 
 ## Agent execution against the central server
 

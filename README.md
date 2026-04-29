@@ -350,12 +350,14 @@ Current repository abstractions:
 - `EventRepository`: events, tenants, onboarding artifacts
 - `HostRepository`: managed hosts, API key hashes, heartbeat metadata
 - `IncidentRepository`: incidents and incident timeline records
+- modular EDR `Repository`: schema version, migration history, and checksum-backed migration status
 
 This makes it easier to:
 
 - keep desktop demos frictionless
 - move SaaS or VPS installs to PostgreSQL
 - write tests against business logic without coupling every feature to `app.py`
+- detect pending or drifted EDR storage migrations before production rollout
 
 ## Testing
 
@@ -400,7 +402,8 @@ The new coverage adds checks for:
 - [x] Server-to-agent response action queue with polling, ACK, and safe agent executor
 - [x] Server-side signed policy gate for destructive response action queuing
 - [x] Shared SQLite rate limiting for the modular EDR ingest API
-- [ ] Database migrations for production upgrades
+- [x] Versioned EDR storage migration metadata with checksums/status reporting
+- [ ] Full domain migrations for all legacy app tables
 - [ ] Agent packaging as service/daemon for Windows and Linux
 - [ ] Endpoint-side destructive response handlers with signed policy enforcement
 - [ ] Redis/shared cache options for multi-node production topologies

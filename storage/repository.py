@@ -157,6 +157,10 @@ class Repository(abc.ABC):
         """Return applied schema migrations in ascending version order."""
 
     @abc.abstractmethod
+    def migration_status(self) -> dict[str, Any]:
+        """Return schema version, pending migrations, and drift indicators."""
+
+    @abc.abstractmethod
     def close(self) -> None:
         """Release pools, file handles, etc."""
 
