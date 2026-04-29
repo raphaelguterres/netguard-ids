@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import pytest
 
 from storage.repository import Alert, Event, Host, get_repository
+from storage.migrations import SCHEMA_VERSION
 from storage.sqlite_repository import SqliteRepository
 
 
@@ -79,6 +80,7 @@ def test_factory_builds_sqlite(tmp_path):
     repo = get_repository("sqlite", db_path=tmp_path / "x.db")
     repo.init_schema()
     assert isinstance(repo, SqliteRepository)
+    assert repo.schema_version() == SCHEMA_VERSION
 
 
 def test_unknown_backend_raises():
@@ -92,6 +94,25 @@ def test_postgres_factory_lazy_imports():
     os.environ.pop("NETGUARD_PG_DSN", None)
     with pytest.raises((RuntimeError, ValueError)):
         get_repository("postgres")
+
+
+def test_schema_migrations_are_recorded_idempotently(repo):
+    assert repo.schema_version() == SCHEMA_VERSION
+    history = repo.migration_history()
+    assert len(history) == 1
+    assert history[0]["version"] == SCHEMA_VERSION
+    assert history[0]["name"] == "initial_edr_schema"
+
+    repo.init_schema()
+    history_after_second_init = repo.migration_history()
+    assert len(history_after_second_init) == 1
+    assert history_after_second_init[0]["version"] == SCHEMA_VERSION
+
+
+def test_schema_version_before_init_is_zero(tmp_path):
+    repo = SqliteRepository(db_path=tmp_path / "not_initialized.db")
+    assert repo.schema_version() == 0
+    assert repo.migration_history() == []
 
 
 def test_upsert_and_get_host(repo):

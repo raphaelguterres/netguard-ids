@@ -149,6 +149,14 @@ class Repository(abc.ABC):
         """Create tables/indexes if they don't exist. Idempotent."""
 
     @abc.abstractmethod
+    def schema_version(self) -> int:
+        """Return the latest applied repository schema migration version."""
+
+    @abc.abstractmethod
+    def migration_history(self) -> list[dict[str, Any]]:
+        """Return applied schema migrations in ascending version order."""
+
+    @abc.abstractmethod
     def close(self) -> None:
         """Release pools, file handles, etc."""
 

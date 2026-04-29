@@ -21,12 +21,19 @@ import logging
 import os
 from typing import Iterable
 
+from .migrations import MIGRATIONS
 from .repository import Alert, Event, Host, Repository
 
 logger = logging.getLogger("netguard.storage.postgres")
 
 
 _SCHEMA_PG = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version     INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,
+    applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS hosts (
     host_id        TEXT PRIMARY KEY,
     hostname       TEXT NOT NULL DEFAULT '',
@@ -122,6 +129,44 @@ class PostgresRepository(Repository):
         with self._conn_ctx() as conn:
             with conn.cursor() as cur:
                 cur.execute(_SCHEMA_PG)
+                self._record_schema_migrations(cur)
+
+    def _record_schema_migrations(self, cur) -> None:
+        cur.executemany(
+            """
+            INSERT INTO schema_migrations (version, name)
+            VALUES (%s, %s)
+            ON CONFLICT (version) DO NOTHING
+            """,
+            [(item["version"], item["name"]) for item in MIGRATIONS],
+        )
+
+    def schema_version(self) -> int:
+        with self._conn_ctx() as conn:
+            with conn.cursor() as cur:
+                try:
+                    cur.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
+                    row = cur.fetchone()
+                except Exception:
+                    return 0
+        return int(row[0] or 0) if row else 0
+
+    def migration_history(self) -> list[dict]:
+        with self._conn_ctx() as conn:
+            with conn.cursor() as cur:
+                try:
+                    cur.execute(
+                        """
+                        SELECT version, name, applied_at
+                        FROM schema_migrations
+                        ORDER BY version ASC
+                        """,
+                    )
+                    rows = cur.fetchall()
+                    cols = [d.name for d in (cur.description or [])]
+                except Exception:
+                    return []
+        return [dict(zip(cols, row)) for row in rows]
 
     def close(self) -> None:
         if self._pool is not None:

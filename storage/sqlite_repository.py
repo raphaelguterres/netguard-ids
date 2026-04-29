@@ -33,9 +33,11 @@ import sqlite3
 import sys
 import threading
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from .migrations import MIGRATIONS
 from .repository import Alert, Event, Host, Repository
 
 logger = logging.getLogger("netguard.storage.sqlite")
@@ -44,6 +46,12 @@ logger = logging.getLogger("netguard.storage.sqlite")
 # ── schema ────────────────────────────────────────────────────────────
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version     INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,
+    applied_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS hosts (
     host_id        TEXT PRIMARY KEY,
     hostname       TEXT NOT NULL DEFAULT '',
@@ -148,7 +156,42 @@ class SqliteRepository(Repository):
     def init_schema(self) -> None:
         with self._lock, self._conn() as conn:
             conn.executescript(_SCHEMA)
+            self._record_schema_migrations(conn)
         self._initialized = True
+
+    def _record_schema_migrations(self, conn) -> None:
+        applied_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO schema_migrations (version, name, applied_at)
+            VALUES (?, ?, ?)
+            """,
+            [(item["version"], item["name"], applied_at) for item in MIGRATIONS],
+        )
+
+    def schema_version(self) -> int:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations",
+                ).fetchone()
+            except sqlite3.OperationalError:
+                return 0
+        return int(row["version"] or 0) if row else 0
+
+    def migration_history(self) -> list[dict]:
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT version, name, applied_at
+                    FROM schema_migrations
+                    ORDER BY version ASC
+                    """,
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return []
+        return [dict(row) for row in rows]
 
     def close(self) -> None:
         # Per-call connections — nothing pooled. No-op kept for ABC compliance.
