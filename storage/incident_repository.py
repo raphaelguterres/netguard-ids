@@ -553,6 +553,51 @@ class IncidentRepository:
         rows = self._conn().execute(sql, params).fetchall()
         return [self._serialize_incident(dict(row)) for row in rows]
 
+    def find_open_incident_by_event_id(
+        self,
+        event_id: str,
+        *,
+        tenant_id: str | None = None,
+    ) -> Optional[dict]:
+        tid = tenant_id or self.tenant_id
+        clean_event_id = str(event_id or "").strip()
+        if not clean_event_id:
+            return None
+        ph = self._placeholder()
+        if USE_POSTGRES:
+            cur = self._conn().cursor()
+            cur.execute(
+                f"""
+                SELECT * FROM incidents
+                WHERE tenant_id={ph}
+                  AND status NOT IN ('resolved', 'false_positive')
+                  AND event_ids ? {ph}
+                ORDER BY updated_at DESC, id DESC
+                LIMIT 1
+                """,
+                (tid, clean_event_id),
+            )
+            row = cur.fetchone()
+            cur.close()
+            return self._serialize_incident(dict(row) if row else None)
+
+        rows = self._conn().execute(
+            f"""
+            SELECT * FROM incidents
+            WHERE tenant_id={ph}
+              AND status NOT IN ('resolved', 'false_positive')
+              AND event_ids LIKE {ph}
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 20
+            """,
+            (tid, f'%"{clean_event_id}"%'),
+        ).fetchall()
+        for row in rows:
+            incident = self._serialize_incident(dict(row))
+            if incident and clean_event_id in (incident.get("event_ids") or []):
+                return incident
+        return None
+
     def get_timeline(
         self,
         incident_id: int,

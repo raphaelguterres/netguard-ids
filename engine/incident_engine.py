@@ -133,6 +133,9 @@ class IncidentEngine:
     def stats(self) -> dict:
         return self._repo.stats()
 
+    def find_open_incident_by_event_id(self, event_id: str) -> Optional[dict]:
+        return self._repo.find_open_incident_by_event_id(event_id)
+
     def ingest_edr_alert(self, alert: dict) -> Optional[dict]:
         score = alert.get("score", 0)
         if score < 30:

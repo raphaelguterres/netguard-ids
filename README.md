@@ -318,6 +318,10 @@ Operators can inspect loaded built-in and YAML detection content through `/api/d
 | `/soc/grid` | `GET` | Integrated EDR/SOC grid backed by the modular repository |
 | `/soc/grid/api/rules` | `GET` | SOC-grid detection coverage and YAML health feed |
 
+Incident creation is idempotent for active incidents linked to the same
+`event_id`; repeat create requests return the existing incident with
+`deduplicated=true`. Incident list calls can also filter by `host_id`.
+
 SOC host detail currently exposes only safe response actions by default:
 `ping`, `collect_diagnostics`, and `flush_buffer`. Destructive endpoint
 actions such as isolation, process kill, IP block, and file deletion are

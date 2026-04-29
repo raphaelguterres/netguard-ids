@@ -5,6 +5,28 @@ from typing import Any, Callable
 from flask import Blueprint, jsonify, request
 
 
+def _sanitize_list(
+    value: Any,
+    sanitize_text: Callable[..., str],
+    *,
+    max_len: int,
+    max_items: int,
+) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        text = sanitize_text(str(item or ""), max_len=max_len)
+        if not text or text in seen:
+            continue
+        cleaned.append(text)
+        seen.add(text)
+        if len(cleaned) >= max_items:
+            break
+    return cleaned
+
+
 def build_incident_api_handlers(
     *,
     incident_available: bool,
@@ -21,13 +43,41 @@ def build_incident_api_handlers(
             return jsonify({"error": "Incident Engine indisponivel"}), 503
         data = request.get_json(force=True) or {}
         event_id = sanitize_text(str(data.get("event_id") or ""), max_len=128)
-        event_ids = data.get("event_ids") if isinstance(data.get("event_ids"), list) else []
+        event_ids = _sanitize_list(
+            data.get("event_ids"),
+            sanitize_text,
+            max_len=128,
+            max_items=50,
+        )
         tenant_repo = get_tenant_event_repo()
         event_record = tenant_repo.get_event(event_id) if event_id else None
         if event_id and not event_record:
             return jsonify({"error": "Evento nao encontrado"}), 404
         if event_id and event_id not in event_ids:
             event_ids = [event_id, *event_ids]
+
+        eng = get_incidents()
+        for candidate_event_id in event_ids:
+            existing = eng.find_open_incident_by_event_id(candidate_event_id)
+            if not existing:
+                continue
+            comment = sanitize_text(str(data.get("comment") or ""), max_len=2000)
+            if comment:
+                existing = eng.add_note(
+                    int(existing["id"]),
+                    f"Duplicate create request grouped: {comment}",
+                    actor="analyst",
+                ) or existing
+            audit_fn(
+                "INCIDENT_DEDUPLICATED",
+                ip=request.remote_addr or "-",
+                detail=f"iid={existing.get('id')} event_id={candidate_event_id}",
+            )
+            return jsonify({
+                "ok": True,
+                "deduplicated": True,
+                "incident": existing,
+            })
 
         details = (event_record or {}).get("details") or {}
         if not isinstance(details, dict):
@@ -51,7 +101,7 @@ def build_incident_api_handlers(
         if severity not in valid_severity:
             return jsonify({"error": f"severity invalido: {severity}"}), 400
 
-        incident = get_incidents().open_incident(
+        incident = eng.open_incident(
             title=title,
             severity=severity,
             source=sanitize_text(
@@ -71,7 +121,12 @@ def build_incident_api_handlers(
                 max_len=2000,
             ),
             event_ids=event_ids,
-            tags=data.get("tags") if isinstance(data.get("tags"), list) else [],
+            tags=_sanitize_list(
+                data.get("tags"),
+                sanitize_text,
+                max_len=64,
+                max_items=25,
+            ),
             mitre_tactic=sanitize_text(
                 str(data.get("mitre_tactic") or details.get("tactic") or ""),
                 max_len=120,
@@ -95,6 +150,7 @@ def build_incident_api_handlers(
             return jsonify({"error": "Incident Engine indisponível"}), 503
         status = request.args.get("status", "")
         severity = request.args.get("severity", "")
+        host_id = sanitize_text(str(request.args.get("host_id") or ""), max_len=128)
         limit = safe_limit(request.args.get("limit", 50))
 
         if status and status not in valid_status:
@@ -107,6 +163,7 @@ def build_incident_api_handlers(
             "incidents": eng.list_incidents(
                 status=status or None,
                 severity=severity or None,
+                host_id=host_id or None,
                 limit=limit,
             ),
             "stats": eng.stats(),

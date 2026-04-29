@@ -131,6 +131,13 @@ class TestIncidentsApi(unittest.TestCase):
         self.assertEqual(len(listed_body["incidents"]), 1)
         self.assertEqual(listed_body["incidents"][0]["id"], iid)
 
+        host_filtered = self.client.get(
+            "/api/incidents?host_id=endpoint-77&limit=10",
+            headers=self._headers(),
+        )
+        self.assertEqual(host_filtered.status_code, 200, host_filtered.get_data(as_text=True))
+        self.assertEqual(len(host_filtered.get_json()["incidents"]), 1)
+
         detail = self.client.get(f"/api/incidents/{iid}", headers=self._headers())
         self.assertEqual(detail.status_code, 200, detail.get_data(as_text=True))
         timeline_actions = [item["action"] for item in detail.get_json()["timeline"]]
@@ -147,3 +154,40 @@ class TestIncidentsApi(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 404, response.get_data(as_text=True))
         self.assertIn("Evento", response.get_json()["error"])
+
+    def test_create_incident_is_idempotent_for_active_event(self):
+        event_id = self._seed_event()
+
+        first = self.client.post(
+            "/api/incidents",
+            json={"event_id": event_id, "comment": "First escalation."},
+            headers=self._headers(),
+        )
+        self.assertEqual(first.status_code, 201, first.get_data(as_text=True))
+        first_incident = first.get_json()["incident"]
+
+        second = self.client.post(
+            "/api/incidents",
+            json={"event_id": event_id, "comment": "Duplicate escalation."},
+            headers=self._headers(),
+        )
+        self.assertEqual(second.status_code, 200, second.get_data(as_text=True))
+        second_body = second.get_json()
+        self.assertTrue(second_body["deduplicated"])
+        self.assertEqual(second_body["incident"]["id"], first_incident["id"])
+
+        listed = self.client.get(
+            "/api/incidents?host_id=endpoint-77&limit=10",
+            headers=self._headers(),
+        )
+        self.assertEqual(listed.status_code, 200, listed.get_data(as_text=True))
+        self.assertEqual(len(listed.get_json()["incidents"]), 1)
+
+        detail = self.client.get(
+            f"/api/incidents/{first_incident['id']}",
+            headers=self._headers(),
+        )
+        timeline = detail.get_json()["timeline"]
+        self.assertTrue(
+            any("Duplicate create request grouped" in item["detail"] for item in timeline)
+        )
