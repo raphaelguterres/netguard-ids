@@ -19,7 +19,8 @@ Additional current-state notes:
 - the server already supports Agent + Server workflows
 - agents can enroll with an admin or tenant bootstrap token
 - agents can operate with an issued host key (`nga_...`)
-- the agent does not persist the issued host key automatically yet, so unattended execution must provide `--token` or `--agent-key`
+- the production-oriented `agent/` runtime persists the issued host key in its local credential store after enrollment
+- the legacy-compatible `netguard_agent/` runtime still accepts `--token` or `--agent-key` for scripted/demo execution
 
 ## Supported deployment shapes
 
@@ -196,7 +197,27 @@ The repositories already support PostgreSQL-ready behavior through:
 
 ## Agent execution against the central server
 
-Bootstrap with admin or tenant token:
+For production-style endpoint tests, prefer the `agent/` runtime documented in
+`agent/README_AGENT.md`. It supports local host identity, credential storage,
+offline buffering, response-action polling, Windows service installation, and
+`agent.exe` packaging.
+
+Minimal `agent/` execution:
+
+```bash
+cd agent
+python -m agent
+```
+
+Build Windows `agent.exe`:
+
+```powershell
+cd agent
+powershell -ExecutionPolicy Bypass -File .\build_agent.ps1 -Clean -WithService
+```
+
+The compatibility collector remains useful for demos and older automation.
+Bootstrap it with an admin or tenant token:
 
 ```bash
 python -m netguard_agent \
@@ -220,7 +241,26 @@ Operational recommendation:
 
 - use bootstrap token for enrollment and controlled demos
 - use host key for already-approved hosts
+- verify the `agent/` credential store on the endpoint after first enrollment
 - keep the local event buffer on persistent disk
+
+## SOC and detection verification
+
+After deploy, validate the detection/SOC path before adding real endpoints:
+
+```bash
+curl http://127.0.0.1:5000/api/health
+curl -H "X-API-Token: $ADMIN_TOKEN" http://127.0.0.1:5000/api/detection/rules
+curl http://127.0.0.1:5000/soc/grid/api/rules
+```
+
+Expected checks:
+
+- `/api/detection/rules` shows built-in and YAML/Sigma-like rule coverage
+- `/soc/grid/api/rules` returns `ok=true` and YAML health data
+- invalid YAML rules are skipped and reported, not silently loaded
+- creating an incident twice for the same active `event_id` returns the
+  existing incident with `deduplicated=true`
 
 ## Background jobs and startup behavior
 
@@ -279,4 +319,6 @@ pg_dump "$DATABASE_URL" > netguard_backup.sql
 - admin rate-limit DB persistent
 - reverse proxy health checks working
 - `/api/health` and `/metrics` reachable internally
-- at least one end-to-end enrollment test completed with `netguard_agent`
+- `/api/detection/rules` and `/soc/grid/api/rules` reviewed for YAML health
+- incident idempotency tested with a repeated `event_id`
+- at least one end-to-end enrollment test completed with `agent/` or `netguard_agent/`

@@ -195,6 +195,8 @@ Eventos principais:
 - `TENANT_CREATED` / `TENANT_DELETED` / `TOKEN_ROTATED`
 - `TRIAL_CREATED` / `TRIAL_REVOKED` / `TRIAL_EXTENDED`
 - `IMPERSONATE_START` / `IMPERSONATE_FAIL`
+- `INCIDENT_CREATED` / `INCIDENT_DEDUPLICATED`
+- `INCIDENT_STATUS` / `INCIDENT_SEVERITY` / `INCIDENT_ASSIGN`
 
 Schema por linha: `{ts, event_type: "audit", msg, actor, source_ip, detail}`.
 
