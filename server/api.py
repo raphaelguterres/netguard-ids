@@ -36,7 +36,7 @@ from .ingestion import (
     PayloadTooLarge,
     ValidationError,
 )
-from .rate_limit import TokenBucketLimiter
+from .rate_limit import TokenBucketLimiter, build_rate_limiter_from_env
 from storage.repository import Repository, get_repository
 
 logger = logging.getLogger("netguard.server.api")
@@ -58,7 +58,7 @@ def build_blueprint(
 
     bp = Blueprint("netguard_edr", __name__, url_prefix=url_prefix)
     pipeline = pipeline or IngestionPipeline(repo)
-    limiter = limiter or TokenBucketLimiter(rate_per_sec=20.0, burst=40)
+    limiter = limiter or build_rate_limiter_from_env(rate_per_sec=20.0, burst=40)
 
     @bp.route("/events", methods=["POST"])
     @require_agent_key(key_store)

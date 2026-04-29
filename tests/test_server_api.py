@@ -21,7 +21,11 @@ from server.ingestion import (
     PayloadTooLarge,
     ValidationError,
 )
-from server.rate_limit import TokenBucketLimiter
+from server.rate_limit import (
+    SqliteTokenBucketLimiter,
+    TokenBucketLimiter,
+    build_rate_limiter_from_env,
+)
 from storage.sqlite_repository import SqliteRepository
 
 
@@ -118,6 +122,43 @@ def test_token_bucket_invalid_config():
 
 
 # ── ingestion ────────────────────────────────────────────────────────
+
+
+def test_sqlite_token_bucket_is_shared_between_instances(tmp_path):
+    db_path = tmp_path / "rate_limit.db"
+    first = SqliteTokenBucketLimiter(db_path, rate_per_sec=0.001, burst=2)
+    second = SqliteTokenBucketLimiter(db_path, rate_per_sec=0.001, burst=2)
+
+    assert first.allow("agent:shared")
+    assert second.allow("agent:shared")
+    assert not first.allow("agent:shared")
+    assert second.allow("agent:other")
+
+
+def test_sqlite_token_bucket_reset(tmp_path):
+    limiter = SqliteTokenBucketLimiter(
+        tmp_path / "rate_limit.db",
+        rate_per_sec=0.001,
+        burst=1,
+    )
+
+    assert limiter.allow("agent:k")
+    assert not limiter.allow("agent:k")
+    limiter.reset("agent:k")
+    assert limiter.allow("agent:k")
+
+
+def test_rate_limiter_factory_uses_sqlite_backend(tmp_path, monkeypatch):
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_BACKEND", "sqlite")
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_DB", str(tmp_path / "factory_rate_limit.db"))
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_RATE_PER_SEC", "0.001")
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_BURST", "1")
+
+    limiter = build_rate_limiter_from_env()
+
+    assert isinstance(limiter, SqliteTokenBucketLimiter)
+    assert limiter.allow("agent:factory")
+    assert not limiter.allow("agent:factory")
 
 
 def test_ingestion_validates_host_id(tmp_path):
@@ -383,3 +424,28 @@ def test_flask_rate_limit_kicks_in(tmp_path):
     # 3rd burns the bucket
     r = client.post("/api/events", headers=headers, json=body)
     assert r.status_code == 429
+
+
+@pytest.mark.skipif(not _flask_or_skip(), reason="flask not installed")
+def test_flask_default_rate_limiter_can_use_sqlite_backend(tmp_path, monkeypatch):
+    from flask import Flask
+
+    from server.api import build_blueprint
+    from server.auth import StaticKeyStore
+
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_BACKEND", "sqlite")
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_DB", str(tmp_path / "api_rate_limit.db"))
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_RATE_PER_SEC", "0.001")
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_BURST", "1")
+
+    app = Flask("test")
+    repo = _repo(tmp_path)
+    store = StaticKeyStore({"nga_test": AgentPrincipal(key_id="t")})
+    app.register_blueprint(build_blueprint(repo, store))
+
+    client = app.test_client()
+    headers = {"X-API-Key": "nga_test"}
+    body = {"host_id": "h", "events": []}
+
+    assert client.post("/api/events", headers=headers, json=body).status_code == 200
+    assert client.post("/api/events", headers=headers, json=body).status_code == 429

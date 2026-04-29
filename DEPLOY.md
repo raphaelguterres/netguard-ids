@@ -12,6 +12,7 @@ Treat these items as mandatory before exposing the app outside localhost:
 - reverse proxy with TLS
 - PostgreSQL recommended for production
 - persistent admin rate-limit DB (`IDS_ADMIN_RL_DB`)
+- shared modular API rate-limit DB (`NETGUARD_RATE_LIMIT_BACKEND=sqlite`)
 - audit log rotation and retention configured
 
 Additional current-state notes:
@@ -43,7 +44,7 @@ Additional current-state notes:
 - same as single-node production
 - PostgreSQL required
 - explicit backup, metrics, and audit retention
-- shared-cache improvements are still future work, so stay single-node unless you are ready to extend the platform
+- SQLite shared rate limiting is available for single-host multi-worker deploys; Redis/shared-cache remains future work for true multi-node topologies
 
 ## Environment checklist
 
@@ -71,6 +72,10 @@ IDS_AUDIT_LOG_ROTATE_WHEN=midnight
 IDS_AUDIT_LOG_ROTATE_INTERVAL=1
 IDS_AUDIT_LOG_RETENTION=14
 IDS_ADMIN_RL_DB=/var/lib/netguard/netguard_security.db
+NETGUARD_RATE_LIMIT_BACKEND=sqlite
+NETGUARD_RATE_LIMIT_DB=/var/lib/netguard/netguard_rate_limit.db
+NETGUARD_RATE_LIMIT_RATE_PER_SEC=20
+NETGUARD_RATE_LIMIT_BURST=40
 IDS_CORS_ORIGINS=https://your-domain.example
 ```
 
@@ -317,6 +322,7 @@ pg_dump "$DATABASE_URL" > netguard_backup.sql
 - PostgreSQL in use
 - audit log path writable
 - admin rate-limit DB persistent
+- modular `/api/events` rate-limit DB persistent when running multiple workers
 - reverse proxy health checks working
 - `/api/health` and `/metrics` reachable internally
 - `/api/detection/rules` and `/soc/grid/api/rules` reviewed for YAML health

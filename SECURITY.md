@@ -181,6 +181,23 @@ positivo. Exceção: `/api/admin/stream` (SSE long-lived) não conta.
 
 ---
 
+### Modular EDR API
+
+O ingest `/api/events` tambem suporta bucket compartilhado por host via
+SQLite para single-node com multiplos workers:
+
+```dotenv
+NETGUARD_RATE_LIMIT_BACKEND=sqlite
+NETGUARD_RATE_LIMIT_DB=/var/lib/netguard/netguard_rate_limit.db
+NETGUARD_RATE_LIMIT_RATE_PER_SEC=20
+NETGUARD_RATE_LIMIT_BURST=40
+```
+
+O default continua em memoria para dev/local. Para multi-node real, use
+um backend externo compartilhado como proximo passo arquitetural.
+
+---
+
 ## 6. Audit log
 
 ### O que é registrado

@@ -29,7 +29,9 @@ __all__ = [
     "PayloadTooLarge",
     "ValidationError",
     # rate limit
+    "SqliteTokenBucketLimiter",
     "TokenBucketLimiter",
+    "build_rate_limiter_from_env",
     "sign_response_policy",
     "verify_response_policy",
 ]
@@ -51,7 +53,9 @@ _EXPORT_MAP = {
     "IngestionResult": (".ingestion", "IngestionResult"),
     "PayloadTooLarge": (".ingestion", "PayloadTooLarge"),
     "ValidationError": (".ingestion", "ValidationError"),
+    "SqliteTokenBucketLimiter": (".rate_limit", "SqliteTokenBucketLimiter"),
     "TokenBucketLimiter": (".rate_limit", "TokenBucketLimiter"),
+    "build_rate_limiter_from_env": (".rate_limit", "build_rate_limiter_from_env"),
     "sign_response_policy": (".response_policy", "sign_response_policy"),
     "verify_response_policy": (".response_policy", "verify_response_policy"),
 }

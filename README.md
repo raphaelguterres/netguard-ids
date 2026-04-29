@@ -189,6 +189,7 @@ Important hardening already enforced:
 - `TOKEN_SIGNING_SECRET` is mandatory outside `dev/test`
 - Startup fails closed if `IDS_AUTH=false` is exposed outside loopback unless explicitly bypassed
 - Admin rate limiting uses shared SQLite storage per host
+- Modular `/api/events` can use a shared SQLite rate-limit bucket for multi-worker single-host deploys
 - Audit logs rotate and retain automatically
 - Background jobs do not autostart on import in WSGI/Gunicorn mode
 
@@ -398,6 +399,7 @@ The new coverage adds checks for:
 - [x] Persistent host-key credential store, short-lived enrollment tokens, and host key revocation
 - [x] Server-to-agent response action queue with polling, ACK, and safe agent executor
 - [x] Server-side signed policy gate for destructive response action queuing
+- [x] Shared SQLite rate limiting for the modular EDR ingest API
 - [ ] Database migrations for production upgrades
 - [ ] Agent packaging as service/daemon for Windows and Linux
 - [ ] Endpoint-side destructive response handlers with signed policy enforcement
