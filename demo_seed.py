@@ -433,6 +433,252 @@ def _seed_new_modules(verbose: bool = False) -> None:
             print(f"[demo] Custom Rules seed falhou: {e}")
 
 
+# ── T17 — Multi-tenant Operator Inbox seed ────────────────────────
+#
+# Este bloco existe pra preencher o /admin/inbox com hosts ranqueados de
+# múltiplos clientes na hora — útil pra demos/portfolio. O inbox lê
+# repo.list_tenants() → list_hosts(tenant) → events últimas 24h por host.
+# Sem hosts em managed_hosts (T16: bucket "admin" é exatamente isso),
+# o inbox fica vazio mesmo com 350 eventos no events table.
+MT_TENANT_PREFIX = "demo-mt-"
+MT_TOKEN_PREFIX  = "ng_DEMOMT"
+
+# Cenários "high signal" pra cada tenant ter pelo menos 1 evento crítico
+# tangível na timeline do host (não só MEDIUM/LOW que ficam no fundo).
+MT_CRITICAL_SCENARIOS = [
+    ("ransomware",  "Atividade de Ransomware",   "CRITICAL",
+     "Criação massiva de arquivos criptografados em {host}"),
+    ("data_exfil",  "Possível Exfiltração",      "CRITICAL",
+     "Volume anormal de dados saindo para {ip} — {size}MB em 5min"),
+    ("malware",     "Malware Communication",     "CRITICAL",
+     "Comunicação com C2 conhecido: {ip}:{port} — hash: {hash}"),
+    ("privesc",     "Escalada de Privilégio",    "CRITICAL",
+     "Tentativa de sudo/runas em {host} por usuário {user}"),
+    ("rce_attempt", "Remote Code Execution",     "CRITICAL",
+     "Tentativa de RCE via {path} — payload: {payload}"),
+]
+
+# Pool maior de host_ids pra evitar colisão visual no inbox (cada
+# tenant tem set distinto, fica óbvio que são clientes diferentes).
+MT_HOST_POOL = [
+    "srv-web", "srv-db", "srv-app", "srv-api", "srv-mail",
+    "wks-eng", "wks-finance", "wks-ops", "wks-sales",
+    "fw-edge", "fw-core", "lb-prod", "vpn-gw",
+    "k8s-node", "ad-dc", "fileserver",
+]
+
+MT_PLATFORMS = ["linux", "windows", "macos"]
+
+
+def _rand_recent_ts(hours_max: int = 20) -> str:
+    """
+    Timestamp dentro das últimas hours_max horas (default 20h).
+    O inbox filtra `since = now - 24h`, então qualquer coisa mais
+    velha que isso some do ranking de risco.
+    """
+    now   = datetime.now(timezone.utc)
+    delta = timedelta(
+        hours   = random.uniform(0, hours_max),
+        minutes = random.uniform(0, 59),
+    )
+    return (now - delta).isoformat()
+
+
+def _build_recent_critical_event(tenant_id: str, host_id: str) -> dict:
+    """
+    Constrói um evento CRITICAL recente (<24h) ligado a um host
+    específico — necessário pro `_host_inbox_ranking` enxergar o host
+    com risco > 0 e empurrar pra Inbox.
+    """
+    scenario = random.choice(MT_CRITICAL_SCENARIOS)
+    etype, tname, sev, msg_tpl = scenario
+    ip   = random.choice(ATTACKING_IPS)
+    msg  = msg_tpl.format(
+        path    = random.choice(WEB_PATHS),
+        payload = random.choice(PAYLOADS),
+        ip      = ip,
+        host    = host_id,
+        size    = round(random.uniform(50, 2500), 1),
+        port    = random.choice([4444, 8080, 1337, 443, 9001]),
+        hash    = uuid.uuid4().hex[:16],
+        user    = random.choice(USERS),
+    )
+    return {
+        "event_id":    str(uuid.uuid4()),
+        "tenant_id":   tenant_id,
+        "timestamp":   _rand_recent_ts(),
+        "event_type":  etype,
+        "threat_name": tname,
+        "severity":    sev,
+        "source_ip":   ip,
+        "host_id":     host_id,
+        "message":     msg,
+        "rule_id":     f"NG-{random.randint(1000, 9999)}",
+        "acknowledged": False,
+        "details":     {"auto_generated": True, "demo": True, "demo_mt": True},
+    }
+
+
+def seed_multi_tenant_inbox(
+    repo,
+    n_tenants: int = 20,
+    hosts_per_tenant: int = 3,
+    verbose: bool = True,
+) -> dict:
+    """
+    Cria N tenants demo, registra 2-3 hosts por tenant em managed_hosts
+    e insere 1-2 eventos críticos recentes (<24h) por tenant amarrados
+    a um dos hosts. Resultado: /api/admin/inbox retorna ~N hosts
+    ranqueados na primeira request, sem precisar registrar agentes na
+    mão.
+
+    Idempotente: re-rodar não duplica tenants/hosts; eventos novos são
+    inseridos a cada execução (event_id é UUID).
+    """
+    from storage.host_repository import HostRepository
+    from security import hash_token
+
+    n_tenants = max(1, min(n_tenants, 200))
+    hosts_per_tenant = max(1, min(hosts_per_tenant, 10))
+
+    db_path = getattr(repo, "db_path", None)
+    tenants_created = 0
+    hosts_created   = 0
+    events_saved    = 0
+
+    company_suffix = [
+        "Banco", "Logistica", "Saude", "Varejo", "Telecom",
+        "Energia", "Industria", "Educacao", "Seguros", "Mineradora",
+        "Agro", "Tech", "Construcao", "Mídia", "Servicos",
+        "Pharma", "Hotelaria", "Aviacao", "Financeira", "Cooperativa",
+    ]
+
+    for idx in range(1, n_tenants + 1):
+        tid   = f"{MT_TENANT_PREFIX}{idx:02d}"
+        token = f"{MT_TOKEN_PREFIX}{idx:02d}{'0' * 22}"  # ng_DEMOMT01000... (32 chars)
+        tname = f"Cliente {company_suffix[(idx - 1) % len(company_suffix)]} {idx:02d}"
+
+        # ── 1. Tenant ───────────────────────────────────────────────
+        try:
+            existing = repo.get_tenant_by_id(tid)
+            if not existing:
+                repo.create_tenant(
+                    tenant_id = tid,
+                    name      = tname,
+                    token     = token,
+                    plan      = "pro",
+                    max_hosts = 50,
+                    role      = "analyst",
+                )
+                tenants_created += 1
+        except Exception as exc:
+            if verbose:
+                print(f"[demo-mt] Aviso ao criar tenant {tid}: {exc}")
+            continue
+
+        # ── 2. Hosts em managed_hosts ───────────────────────────────
+        host_registry = HostRepository(db_path=db_path, tenant_id=tid)
+        # Sample sem repetição mas amostra do pool grande (suficiente pra hosts_per_tenant<=10)
+        host_names = random.sample(MT_HOST_POOL, k=min(hosts_per_tenant, len(MT_HOST_POOL)))
+        host_ids: list[str] = []
+        for host_name in host_names:
+            host_id = f"{host_name}-{idx:02d}"
+            host_ids.append(host_id)
+            try:
+                fake_key      = f"nga_DEMO{uuid.uuid4().hex[:24]}"
+                host_registry.register_host(
+                    host_id          = host_id,
+                    display_name     = host_id,
+                    platform         = random.choice(MT_PLATFORMS),
+                    agent_version    = "1.0.0-demo",
+                    enrollment_method= "demo_seed",
+                    api_key_hash     = hash_token(fake_key),
+                    api_key_prefix   = fake_key[:16],
+                    metadata         = {"demo_mt": True, "tenant_idx": idx},
+                    tags             = ["demo", "demo-mt"],
+                    tenant_id        = tid,
+                )
+                hosts_created += 1
+            except Exception as exc:
+                if verbose:
+                    print(f"[demo-mt] Aviso ao registrar host {host_id}: {exc}")
+
+        # ── 3. Eventos críticos recentes (<24h) ─────────────────────
+        # 1-2 críticos por tenant amarrados a um host real do tenant.
+        # Sem isso o _host_inbox_ranking devolve risk_score=0 e o host
+        # nunca aparece no inbox.
+        if not host_ids:
+            continue
+        n_critical = random.choice([1, 2])
+        for _ in range(n_critical):
+            target_host = random.choice(host_ids)
+            ev = _build_recent_critical_event(tid, target_host)
+            try:
+                _save_raw(repo, ev)
+                events_saved += 1
+            except Exception as exc:
+                if verbose:
+                    print(f"[demo-mt] Aviso ao salvar evento crítico {tid}/{target_host}: {exc}")
+
+    if verbose:
+        print(
+            f"[demo-mt] {tenants_created} novos tenants | "
+            f"{hosts_created} hosts em managed_hosts | "
+            f"{events_saved} eventos críticos recentes"
+        )
+
+    return {
+        "tenants_created": tenants_created,
+        "hosts_created":   hosts_created,
+        "events_saved":    events_saved,
+        "n_tenants":       n_tenants,
+    }
+
+
+def clear_multi_tenant_inbox(repo, verbose: bool = True) -> dict:
+    """
+    Remove todos os tenants/hosts/eventos criados por
+    `seed_multi_tenant_inbox` (prefix demo-mt-). Útil pra resetar a
+    demo entre apresentações.
+    """
+    ph = repo._placeholder()
+    pattern = f"{MT_TENANT_PREFIX}%"
+
+    # Eventos
+    try:
+        repo._exec_sql(
+            f"DELETE FROM events WHERE tenant_id LIKE {ph}",
+            (pattern,),
+        )
+    except Exception as exc:
+        if verbose:
+            print(f"[demo-mt] Aviso ao limpar eventos: {exc}")
+
+    # Hosts
+    try:
+        repo._exec_sql(
+            f"DELETE FROM managed_hosts WHERE tenant_id LIKE {ph}",
+            (pattern,),
+        )
+    except Exception as exc:
+        if verbose:
+            print(f"[demo-mt] Aviso ao limpar managed_hosts: {exc}")
+
+    # Tenants
+    try:
+        repo._exec_sql(
+            f"DELETE FROM tenants WHERE tenant_id LIKE {ph}",
+            (pattern,),
+        )
+    except Exception as exc:
+        if verbose:
+            print(f"[demo-mt] Aviso ao limpar tenants: {exc}")
+
+    if verbose:
+        print(f"[demo-mt] Tenants/hosts/eventos com prefix '{MT_TENANT_PREFIX}' removidos.")
+    return {"ok": True}
+
+
 def clear_demo(repo, verbose: bool = True) -> None:
     """Remove todos os eventos do tenant demo (EventRepo + DetectionStore)."""
     import sqlite3 as _sq, os as _os
@@ -461,6 +707,14 @@ if __name__ == "__main__":
                         help="Apenas remove, não insere novos eventos")
     parser.add_argument("--events", type=int, default=350,
                         help="Número de eventos a gerar (default: 350)")
+    parser.add_argument("--multi-tenant", type=int, default=0,
+                        metavar="N",
+                        help="Cria N tenants demo + 2-3 hosts/tenant + "
+                             "evento crítico recente (popula /admin/inbox)")
+    parser.add_argument("--hosts-per-tenant", type=int, default=3,
+                        help="Hosts por tenant no modo --multi-tenant (default: 3)")
+    parser.add_argument("--clear-mt", action="store_true",
+                        help="Remove tenants/hosts/eventos do seed multi-tenant")
     args = parser.parse_args()
 
     os.environ.setdefault("IDS_AUTH", "false")
@@ -472,6 +726,9 @@ if __name__ == "__main__":
     if args.clear or args.only_clear:
         clear_demo(repo)
 
+    if args.clear_mt:
+        clear_multi_tenant_inbox(repo)
+
     if not args.only_clear:
         result = seed_demo(repo, n_events=args.events)
         print(f"\nDemo pronto:")
@@ -479,3 +736,16 @@ if __name__ == "__main__":
         print(f"  Tenant ID: {result['tenant_id']}")
         print(f"  Eventos:   {result['events']}")
         print(f"\n  Acesse: http://localhost:5000/demo")
+
+        if args.multi_tenant > 0:
+            mt = seed_multi_tenant_inbox(
+                repo,
+                n_tenants        = args.multi_tenant,
+                hosts_per_tenant = args.hosts_per_tenant,
+            )
+            print(f"\nSeed multi-tenant:")
+            print(f"  Tenants pedidos:   {mt['n_tenants']}")
+            print(f"  Tenants criados:   {mt['tenants_created']}")
+            print(f"  Hosts registrados: {mt['hosts_created']}")
+            print(f"  Eventos críticos:  {mt['events_saved']}")
+            print(f"\n  Inbox: http://localhost:5000/admin/inbox")

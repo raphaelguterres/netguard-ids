@@ -797,6 +797,25 @@ body.soc-shell {
   color: var(--soc-accent-2);
 }
 
+.soc-response-action-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.soc-response-action-grid .soc-action-button {
+  justify-content: center;
+  min-height: 38px;
+}
+
+.soc-action-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 14px;
+}
+
 .soc-status-chip {
   display: inline-flex;
   align-items: center;

@@ -8,6 +8,9 @@
 {% set host_attack_chains = host_attack_chains if host_attack_chains is defined else [] %}
 {% set host_summary_metrics = host_summary_metrics if host_summary_metrics is defined else [] %}
 {% set host_metadata = host_metadata if host_metadata is defined else [] %}
+{% set host_response_actions = host_response_actions if host_response_actions is defined else [] %}
+{% set host_response_action_stats = host_response_action_stats if host_response_action_stats is defined else {"pending": 0, "leased": 0, "terminal": 0} %}
+{% set safe_response_actions = safe_response_actions if safe_response_actions is defined else ["ping", "collect_diagnostics", "flush_buffer"] %}
 {% set selected_chain_focus = selected_chain_focus if selected_chain_focus is defined else none %}
 
 {% block title %}NetGuard SOC | Host Detail{% endblock %}
@@ -230,6 +233,64 @@
   <div class="soc-list">
     <article class="soc-panel">
       <div class="soc-panel-header">
+        <div>
+          <h2 class="soc-panel-title">Response Actions</h2>
+          <div class="soc-list-copy">Safe server-to-agent actions. Destructive actions stay refused by policy.</div>
+        </div>
+      </div>
+      <div class="soc-response-action-grid">
+        {% for action_type in safe_response_actions %}
+        <button
+          class="soc-action-button soc-action-button-primary"
+          type="button"
+          data-host-action="{{ action_type }}"
+          data-host-id="{{ host.host_id|default(host.host_name)|default('') }}"
+        >
+          {{ action_type|replace("_", " ")|title }}
+        </button>
+        {% endfor %}
+      </div>
+      <div class="soc-action-stats">
+        <span class="soc-pill">Pending {{ host_response_action_stats.pending }}</span>
+        <span class="soc-pill">Leased {{ host_response_action_stats.leased }}</span>
+        <span class="soc-pill">Closed {{ host_response_action_stats.terminal }}</span>
+      </div>
+      <div class="soc-list" id="soc-response-actions-list">
+        {% if host_response_actions %}
+          {% for action in host_response_actions %}
+          <div class="soc-list-item">
+            <div class="soc-list-top">
+              <span class="soc-list-title">{{ action.action_type|replace("_", " ")|title }}</span>
+              <span class="soc-severity-chip {{ 'medium' if action.status in ['pending', 'leased', 'running'] else 'low' }}">{{ action.status|replace("_", " ")|title }}</span>
+            </div>
+            <div class="soc-meta-inline">
+              <span>{{ action.action_id }}</span>
+              <span>Attempts {{ action.attempts }}/{{ action.max_attempts }}</span>
+              <span>Created {{ action.created_at }}</span>
+            </div>
+            {% if action.reason %}<div class="soc-list-copy">{{ action.reason }}</div>{% endif %}
+            {% if action.status in ['pending', 'leased', 'running'] %}
+            <div class="soc-action-row">
+              <button
+                class="soc-action-button"
+                type="button"
+                data-host-action-cancel="{{ action.action_id }}"
+                data-host-id="{{ host.host_id|default(host.host_name)|default('') }}"
+              >
+                Cancel Action
+              </button>
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="soc-empty-state">Nenhuma action enfileirada para este host.</div>
+        {% endif %}
+      </div>
+    </article>
+
+    <article class="soc-panel">
+      <div class="soc-panel-header">
         <h2 class="soc-panel-title">Active Alerts</h2>
       </div>
       <div class="soc-list">
@@ -382,7 +443,91 @@
       }
     }
 
+    async function queueHostAction(button) {
+      const actionType = button.getAttribute('data-host-action');
+      const hostId = button.getAttribute('data-host-id');
+      if (!actionType || !hostId) {
+        return;
+      }
+      const headers = { 'Content-Type': 'application/json' };
+      const csrfToken = getCsrfToken();
+      if (csrfToken) {
+        headers['X-CSRFToken'] = csrfToken;
+      }
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Queueing...';
+      try {
+        const resp = await fetch(`/soc/hosts/${encodeURIComponent(hostId)}/actions`, {
+          method: 'POST',
+          headers,
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            action_type: actionType,
+            reason: `Queued from SOC host workspace for ${hostId}`
+          })
+        });
+        if (!resp.ok) {
+          throw new Error(`status ${resp.status}`);
+        }
+        button.textContent = 'Queued';
+        window.setTimeout(() => window.location.reload(), 450);
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = 'Retry ' + originalText.trim();
+      }
+    }
+
+    async function cancelHostAction(button) {
+      const actionId = button.getAttribute('data-host-action-cancel');
+      const hostId = button.getAttribute('data-host-id');
+      if (!actionId || !hostId) {
+        return;
+      }
+      const headers = { 'Content-Type': 'application/json' };
+      const csrfToken = getCsrfToken();
+      if (csrfToken) {
+        headers['X-CSRFToken'] = csrfToken;
+      }
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Cancelling...';
+      try {
+        const resp = await fetch(
+          `/soc/hosts/${encodeURIComponent(hostId)}/actions/${encodeURIComponent(actionId)}/cancel`,
+          {
+            method: 'POST',
+            headers,
+            credentials: 'same-origin',
+            body: JSON.stringify({
+              reason: `Cancelled from SOC host workspace for ${hostId}`
+            })
+          }
+        );
+        if (!resp.ok) {
+          throw new Error(`status ${resp.status}`);
+        }
+        button.textContent = 'Cancelled';
+        window.setTimeout(() => window.location.reload(), 450);
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = 'Retry ' + originalText.trim();
+      }
+    }
+
     document.addEventListener('click', function (event) {
+      const cancelButton = event.target.closest('[data-host-action-cancel][data-host-id]');
+      if (cancelButton) {
+        event.preventDefault();
+        cancelHostAction(cancelButton);
+        return;
+      }
+      const actionButton = event.target.closest('[data-host-action][data-host-id]');
+      if (actionButton) {
+        event.preventDefault();
+        queueHostAction(actionButton);
+        return;
+      }
       const button = event.target.closest('[data-incident-id][data-next-status]');
       if (!button) {
         return;

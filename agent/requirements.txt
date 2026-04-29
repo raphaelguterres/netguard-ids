@@ -1,0 +1,17 @@
+# NetGuard Endpoint Agent — runtime requirements
+#
+# Versões pinadas com >=,< para permitir patches mas evitar quebras
+# de major. Build do agent.exe via PyInstaller herda essas versões.
+
+psutil>=5.9.0,<6.1.0
+requests>=2.31.0,<3.0.0
+PyYAML>=6.0,<7.0
+urllib3>=1.26.0,<3.0
+
+# Opcional (só Windows): registra o agent como serviço.
+# pywin32 só faz sentido em build Windows; pip-install em Linux falha
+# silenciosamente porque a wheel não existe pra Linux.
+pywin32>=306; sys_platform == "win32"
+
+# Build-time only:
+# pyinstaller>=6.3.0

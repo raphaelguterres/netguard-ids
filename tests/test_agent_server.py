@@ -1,6 +1,7 @@
 import os
 import shutil
 import sys
+import time
 import unittest
 import uuid
 
@@ -244,3 +245,228 @@ class TestAgentServerApi(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403, response.get_data(as_text=True))
         self.assertIn("Permissao", response.get_json()["error"])
+
+    def test_enrollment_token_registers_host_once_without_admin_header(self):
+        create = self.client.post(
+            "/api/agent/enrollment-token",
+            json={
+                "tenant_id": "default",
+                "expires_in_seconds": 600,
+                "max_uses": 1,
+            },
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(create.status_code, 201, create.get_data(as_text=True))
+        created = create.get_json()
+        self.assertTrue(created["token"].startswith("nge_"))
+        self.assertEqual(created["enrollment"]["tenant_id"], "default")
+        self.assertEqual(created["enrollment"]["remaining_uses"], 1)
+
+        register = self.client.post(
+            "/api/agent/register",
+            json={
+                "host_id": "enrolled-host-01",
+                "display_name": "Endpoint 01",
+                "platform": "windows",
+                "agent_version": "1.0.0",
+                "enrollment_token": created["token"],
+            },
+        )
+        self.assertEqual(register.status_code, 201, register.get_data(as_text=True))
+        body = register.get_json()
+        self.assertEqual(body["host"]["tenant_id"], "default")
+        self.assertEqual(body["host"]["enrollment_method"], "enrollment_token")
+        self.assertTrue(body["api_key"].startswith("nga_"))
+
+        reused = self.client.post(
+            "/api/agent/register",
+            json={
+                "host_id": "enrolled-host-02",
+                "platform": "windows",
+                "enrollment_token": created["token"],
+            },
+        )
+        self.assertEqual(reused.status_code, 403, reused.get_data(as_text=True))
+        self.assertEqual(reused.get_json()["error"], "invalid_enrollment_token")
+
+    def test_revoked_host_key_cannot_send_heartbeat(self):
+        register = self.client.post(
+            "/api/agent/register",
+            json={"host_id": "agent-host-revoked", "platform": "windows"},
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(register.status_code, 201, register.get_data(as_text=True))
+        agent_key = register.get_json()["api_key"]
+
+        revoke = self.client.post(
+            "/api/agent/hosts/agent-host-revoked/revoke",
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(revoke.status_code, 200, revoke.get_data(as_text=True))
+        self.assertEqual(revoke.get_json()["host"]["status"], "revoked")
+
+        heartbeat = self.client.post(
+            "/api/agent/heartbeat",
+            json={"host_id": "agent-host-revoked"},
+            headers={"X-API-Key": agent_key},
+        )
+        self.assertEqual(heartbeat.status_code, 401, heartbeat.get_data(as_text=True))
+
+    def test_agent_action_queue_poll_and_ack_flow(self):
+        register = self.client.post(
+            "/api/agent/register",
+            json={"host_id": "agent-action-host", "platform": "windows"},
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(register.status_code, 201, register.get_data(as_text=True))
+        agent_key = register.get_json()["api_key"]
+
+        queued = self.client.post(
+            "/api/agent/hosts/agent-action-host/actions",
+            json={
+                "action_type": "collect_diagnostics",
+                "reason": "triage test",
+                "payload": {"include": ["buffer", "host"]},
+            },
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(queued.status_code, 201, queued.get_data(as_text=True))
+        action = queued.get_json()["action"]
+        self.assertTrue(action["action_id"].startswith("act_"))
+        self.assertEqual(action["status"], "pending")
+
+        poll = self.client.get(
+            "/api/agent/actions",
+            headers={"X-NetGuard-Agent-Key": agent_key},
+        )
+        self.assertEqual(poll.status_code, 200, poll.get_data(as_text=True))
+        actions = poll.get_json()["actions"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["action_id"], action["action_id"])
+        self.assertEqual(actions[0]["status"], "leased")
+
+        ack = self.client.post(
+            f"/api/agent/actions/{action['action_id']}/ack",
+            json={"status": "succeeded", "result": {"buffer_pending": 0}},
+            headers={"X-NetGuard-Agent-Key": agent_key},
+        )
+        self.assertEqual(ack.status_code, 200, ack.get_data(as_text=True))
+        self.assertEqual(ack.get_json()["action"]["status"], "succeeded")
+
+        listed = self.client.get(
+            "/api/agent/hosts/agent-action-host/actions",
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(listed.status_code, 200, listed.get_data(as_text=True))
+        self.assertEqual(listed.get_json()["actions"][0]["status"], "succeeded")
+
+    def test_guarded_agent_action_requires_policy_secret(self):
+        previous_secret = os.environ.pop("NETGUARD_RESPONSE_POLICY_SECRET", None)
+        try:
+            register = self.client.post(
+                "/api/agent/register",
+                json={"host_id": "agent-guarded-no-policy", "platform": "windows"},
+                headers=self._admin_headers(),
+            )
+            self.assertEqual(register.status_code, 201, register.get_data(as_text=True))
+
+            blocked = self.client.post(
+                "/api/agent/hosts/agent-guarded-no-policy/actions",
+                json={"action_type": "isolate_host", "reason": "test destructive deny"},
+                headers=self._admin_headers(),
+            )
+            self.assertEqual(blocked.status_code, 403, blocked.get_data(as_text=True))
+            self.assertEqual(blocked.get_json()["error"], "destructive_actions_disabled")
+        finally:
+            if previous_secret is not None:
+                os.environ["NETGUARD_RESPONSE_POLICY_SECRET"] = previous_secret
+
+    def test_guarded_agent_action_accepts_short_lived_signed_policy(self):
+        from server.response_policy import sign_response_policy
+
+        previous_secret = os.environ.get("NETGUARD_RESPONSE_POLICY_SECRET")
+        secret = "policy-test-secret-" + uuid.uuid4().hex
+        os.environ["NETGUARD_RESPONSE_POLICY_SECRET"] = secret
+        try:
+            host_id = "agent-guarded-signed-policy"
+            register = self.client.post(
+                "/api/agent/register",
+                json={"host_id": host_id, "platform": "windows"},
+                headers=self._admin_headers(),
+            )
+            self.assertEqual(register.status_code, 201, register.get_data(as_text=True))
+
+            invalid = self.client.post(
+                f"/api/agent/hosts/{host_id}/actions",
+                json={
+                    "action_type": "isolate_host",
+                    "policy_nonce": uuid.uuid4().hex,
+                    "policy_expires_at": int(time.time()) + 120,
+                    "policy_signature": "bad-signature",
+                },
+                headers=self._admin_headers(),
+            )
+            self.assertEqual(invalid.status_code, 403, invalid.get_data(as_text=True))
+            self.assertEqual(invalid.get_json()["error"], "invalid_policy_signature")
+
+            expires_at = int(time.time()) + 120
+            nonce = uuid.uuid4().hex
+            signature = sign_response_policy(
+                secret,
+                tenant_id="admin",
+                host_id=host_id,
+                action_type="isolate_host",
+                nonce=nonce,
+                expires_at=expires_at,
+            )
+            queued = self.client.post(
+                f"/api/agent/hosts/{host_id}/actions",
+                json={
+                    "action_type": "isolate_host",
+                    "reason": "signed policy test",
+                    "policy_nonce": nonce,
+                    "policy_expires_at": expires_at,
+                    "policy_signature": signature,
+                },
+                headers=self._admin_headers(),
+            )
+            self.assertEqual(queued.status_code, 201, queued.get_data(as_text=True))
+            self.assertEqual(queued.get_json()["action"]["action_type"], "isolate_host")
+            self.assertEqual(queued.get_json()["action"]["status"], "pending")
+        finally:
+            if previous_secret is None:
+                os.environ.pop("NETGUARD_RESPONSE_POLICY_SECRET", None)
+            else:
+                os.environ["NETGUARD_RESPONSE_POLICY_SECRET"] = previous_secret
+
+    def test_agent_action_cancel_endpoint_prevents_future_leases(self):
+        register = self.client.post(
+            "/api/agent/register",
+            json={"host_id": "agent-action-cancel-host", "platform": "windows"},
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(register.status_code, 201, register.get_data(as_text=True))
+        agent_key = register.get_json()["api_key"]
+
+        queued = self.client.post(
+            "/api/agent/hosts/agent-action-cancel-host/actions",
+            json={"action_type": "flush_buffer", "reason": "queued by mistake"},
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(queued.status_code, 201, queued.get_data(as_text=True))
+        action_id = queued.get_json()["action"]["action_id"]
+
+        cancelled = self.client.post(
+            f"/api/agent/actions/{action_id}/cancel",
+            json={"reason": "operator cancelled before lease"},
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(cancelled.status_code, 200, cancelled.get_data(as_text=True))
+        self.assertEqual(cancelled.get_json()["action"]["status"], "cancelled")
+
+        poll = self.client.get(
+            "/api/agent/actions",
+            headers={"X-NetGuard-Agent-Key": agent_key},
+        )
+        self.assertEqual(poll.status_code, 200, poll.get_data(as_text=True))
+        self.assertEqual(poll.get_json()["actions"], [])

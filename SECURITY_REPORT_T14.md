@@ -308,3 +308,46 @@ Resultado: **36/36 passando** (34 anteriores + 2 novos T16). Nenhum WARN.
 python3 run_pentest_audit.py
 # === 36/36 passaram ===
 ```
+
+---
+
+## 10. Addendum T17 — Demo seed multi-tenant pro Operator Inbox
+
+### 10.1 Problema
+
+`/admin/inbox` fazia `list_tenants() → list_hosts(tenant) → events últimas 24h`. Sem agentes reais rodando, o seed legado (1 tenant + 350 eventos) deixava o inbox vazio porque:
+
+1. Eventos do seed eram datados em 0–30 dias atrás (`_rand_ts`), então o filtro `since = now - 24h` cortava tudo.
+2. O seed não populava `managed_hosts` — só inseria eventos. O inbox itera `managed_hosts` antes de cruzar com eventos.
+
+Resultado: demo aberta em apresentação mostrava inbox zerado, anti-clímax.
+
+### 10.2 Fix
+
+`demo_seed.py` ganhou `seed_multi_tenant_inbox(repo, n_tenants=20, hosts_per_tenant=3)` que:
+
+1. Cria N tenants `demo-mt-NN` com plano pro e tokens determinísticos `ng_DEMOMT01...` (idempotente — checa `get_tenant_by_id` antes de criar).
+2. Pra cada tenant, registra 2–3 hosts em `managed_hosts` via `HostRepository.register_host` (com `enrollment_method="demo_seed"` pra distinguir de agentes reais).
+3. Insere 1–2 eventos `CRITICAL` recentes (<24h, via `_rand_recent_ts`) amarrados a um host real do tenant. Pool de cenários `MT_CRITICAL_SCENARIOS` cobre ransomware, exfiltração, malware C2, privesc, RCE.
+
+Cleanup via `clear_multi_tenant_inbox(repo)` apaga tudo com prefix `demo-mt-`.
+
+CLI:
+
+```bash
+python demo_seed.py --multi-tenant 20 --hosts-per-tenant 3
+python demo_seed.py --clear-mt
+```
+
+### 10.3 Regressão T17
+
+| ID  | O que valida |
+| --- | ------------ |
+| t17 | `seed_multi_tenant_inbox` existe com assinatura correta, usa `HostRepository.register_host` (não basta inserir evento), gera eventos `<24h` via `_rand_recent_ts`, tem cenários `CRITICAL`, é idempotente (`get_tenant_by_id`), tem cleanup function, expõe CLI `--multi-tenant` e `--clear-mt`, usa prefix `demo-mt-` isolado. |
+
+Resultado: **37/37 passando** (36 anteriores + 1 novo T17). Smoke test contra repo SQLite temporário confirma 8 tenants → 24 hosts → 9 ranqueados no inbox simulado.
+
+```bash
+python3 run_pentest_audit.py
+# === 37/37 passaram ===
+```

@@ -34,7 +34,7 @@ If you build a SOC for a small org and don't want to pay $30k/year for a SaaS th
 | **Operator Inbox** — cross-tenant ranking by risk | `/admin/inbox` |
 | Deterministic risk scoring + rule-based "next action" | `_host_risk_score`, `_host_next_action` in `app.py` |
 | World-map view of threat sources (GeoLite2 + prefix DB) | `admin.html` god-view, [T10](SECURITY_REPORT_2026-04-25.md) |
-| XDR-style endpoint ingest with strict event whitelist | `/api/xdr/events`, `/api/agent/events` |
+| XDR-style endpoint ingest with strict event whitelist | `/api/events`, `/api/xdr/events`, `/api/agent/events` |
 | Sigma-like YAML rules with aggregation windows | `rules/yaml/` + `rules/yaml_loader.py` |
 | Incident lifecycle (status, severity, assign, comments) | `engine/incident_engine.py` |
 | RBAC (admin / analyst / viewer) + audit log | `auth.py` + `audit.log()` calls across `app.py` |
@@ -102,7 +102,45 @@ python run_pentest_audit.py
 
 ## Endpoint agent
 
-The XDR collector lives in `netguard_agent/` and ships events with a host API key:
+NetGuard currently ships two agent tracks:
+
+- `agent/`: production-oriented Windows endpoint runtime, `agent.exe`, offline buffer, service mode, canonical `POST /api/events`
+- `netguard_agent/`: compatibility runtime used by older flows and demos
+
+The new Windows/runtime-focused agent lives in `agent/`:
+
+```bash
+cd agent
+python -m agent
+```
+
+Recommended secure enrollment flow:
+
+```bash
+# Admin/analyst creates a short-lived enrollment token.
+curl -X POST http://127.0.0.1:5000/api/agent/enrollment-token \
+  -H "X-API-Token: <admin-or-analyst-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_id":"default","expires_in_seconds":3600,"max_uses":1}'
+
+# Endpoint registers once with the nge_... token and receives a host key.
+curl -X POST http://127.0.0.1:5000/api/agent/register \
+  -H "Content-Type: application/json" \
+  -d '{"host_id":"lab-win-01","platform":"windows","enrollment_token":"nge_..."}'
+```
+
+The issued `nga_...` host key is stored by the agent in its local credential
+store for unattended restarts. Windows uses DPAPI when available.
+
+To build the standalone Windows binary:
+
+```powershell
+cd agent
+powershell -ExecutionPolicy Bypass -File .\build_agent.ps1 -Clean -WithService
+# -> dist\agent.exe
+```
+
+The compatibility XDR collector in `netguard_agent/` still ships events with a host API key:
 
 ```bash
 python -m netguard_agent \
@@ -127,9 +165,10 @@ python -m netguard_agent \
 ## Foundation already in place
 
 - Flask server with REST API and SOC dashboard
+- Modular `/agent` runtime with `agent.exe` build path and Windows service wrapper
 - Modular endpoint agent (`netguard_agent/`) with legacy and XDR transport modes
 - Host enrollment and inventory registry
-- Structured endpoint event ingest (`/api/agent/events` and `/api/xdr/events`)
+- Structured endpoint event ingest (`/api/events`, `/api/agent/events`, `/api/xdr/events`)
 - RBAC-aware auth model (`admin`, `analyst`, `viewer`)
 - Incident lifecycle API with status, severity, assignment, and comments
 - SQLite-first storage for local/demo, with repositories written to be PostgreSQL-ready
@@ -162,6 +201,7 @@ High-level flow:
 ```text
 netguard_agent / external producers
         |
+        +--> POST /api/events
         +--> POST /api/agent/register
         +--> POST /api/agent/heartbeat
         +--> POST /api/agent/events
@@ -186,8 +226,10 @@ netguard_agent / external producers
 
 Core building blocks:
 
-- `netguard_agent/`: modular endpoint collector and transport runtime
+- `agent/`: Windows-first endpoint runtime, offline buffer, service wrapper, PyInstaller build
+- `netguard_agent/`: compatibility endpoint collector and transport runtime
 - `server/agent_service.py`: host enrollment and agent auth rules
+- `server/api.py`: modular API blueprint for `POST /api/events`
 - `storage/event_repository.py`: event/tenant storage abstraction
 - `storage/host_repository.py`: enrolled host registry and API key validation
 - `storage/incident_repository.py`: incident lifecycle persistence
@@ -236,7 +278,15 @@ These rules support:
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
+| `/api/events` | `POST` | Canonical EDR ingest endpoint secured by `X-API-Key` |
+| `/api/agent/enrollment-token` | `POST` | Create a short-lived one-time/semi-bulk enrollment token |
+| `/api/agent/enrollment-token/revoke` | `POST` | Revoke an unused enrollment token by raw value |
 | `/api/agent/register` | `POST` | Enroll a host and issue a host API key |
+| `/api/agent/hosts/<host_id>/revoke` | `POST` | Revoke a host key while preserving telemetry/history |
+| `/api/agent/hosts/<host_id>/actions` | `POST` | Queue a response action for an enrolled host |
+| `/api/agent/actions/<action_id>/cancel` | `POST` | Cancel a pending/leased response action |
+| `/api/agent/actions` | `GET` | Agent polling endpoint for leased response actions |
+| `/api/agent/actions/<action_id>/ack` | `POST` | Agent ACK endpoint for completed/refused/failed actions |
 | `/api/agent/heartbeat` | `POST` | Update host liveness, version, and metadata |
 | `/api/agent/events` | `POST` | Ingest agent events using host key or token |
 | `/api/xdr/events` | `POST` | Generic structured endpoint event ingest |
@@ -255,6 +305,17 @@ These rules support:
 | `/api/incidents/<id>/assign` | `POST` | Assign an owner |
 | `/soc-preview` | `GET` | Public preview of the SOC experience |
 | `/soc/incidents` | `GET` | Authenticated incidents queue |
+| `/soc/hosts/<host_id>/actions` | `POST` | Queue safe host response actions from the SOC host detail view |
+| `/soc/hosts/<host_id>/actions/<action_id>/cancel` | `POST` | Cancel a pending/leased host response action from SOC |
+| `/soc/grid` | `GET` | Integrated EDR/SOC grid backed by the modular repository |
+
+SOC host detail currently exposes only safe response actions by default:
+`ping`, `collect_diagnostics`, and `flush_buffer`. Destructive endpoint
+actions such as isolation, process kill, IP block, and file deletion are
+blocked server-side unless an admin supplies a short-lived HMAC policy
+approval using `NETGUARD_RESPONSE_POLICY_SECRET`; the agent still refuses
+execution by default until endpoint-side destructive handlers are explicitly
+implemented and enabled.
 
 ### Platform
 
@@ -321,10 +382,12 @@ The new coverage adds checks for:
 - [x] Incident API with severity, status, assignment, and comments
 - [x] YAML rule loader with bundled examples
 - [x] Repository abstraction for hosts and incidents
+- [x] Persistent host-key credential store, short-lived enrollment tokens, and host key revocation
+- [x] Server-to-agent response action queue with polling, ACK, and safe agent executor
+- [x] Server-side signed policy gate for destructive response action queuing
 - [ ] Database migrations for production upgrades
-- [ ] Persistent host-key storage/rotation workflow for unattended agents
 - [ ] Agent packaging as service/daemon for Windows and Linux
-- [ ] Response actions executed by the endpoint agent, not only suggested by the server
+- [ ] Endpoint-side destructive response handlers with signed policy enforcement
 - [ ] Redis/shared cache options for multi-node production topologies
 - [ ] Tenant-scoped API tokens with narrower operational scopes
 

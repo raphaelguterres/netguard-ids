@@ -1,0 +1,67 @@
+# NetGuard Endpoint Agent — config example
+#
+# Em produção, prefira injetar api_key via env (NETGUARD_AGENT_API_KEY)
+# em vez de gravar em disco. Este arquivo serve de template.
+#
+# Override de qualquer campo via env:
+#   NETGUARD_AGENT_SERVER_URL
+#   NETGUARD_AGENT_API_KEY
+#   NETGUARD_AGENT_INTERVAL_SECONDS
+#   NETGUARD_AGENT_VERIFY_TLS
+#   NETGUARD_AGENT_TENANT_ID
+#   ...
+
+# URL do endpoint /api/events do servidor NetGuard.
+# Este exemplo usa loopback HTTP para demo local. Em produção, use HTTPS.
+server_url: "http://127.0.0.1:5000/api/events"
+
+# API key gerada por POST /api/agent/register (formato: nga_...).
+# CHANGE_ME = trava de segurança: o agente recusa subir com esse valor.
+api_key: "CHANGE_ME"
+
+# Intervalo entre ciclos de coleta (segundos). Mínimo: 5.
+# Estações com pouca CPU podem subir pra 60-120 sem perda significativa.
+interval_seconds: 10
+
+# Verificação TLS. Neste template local está false porque o endpoint é HTTP.
+# Em produção com HTTPS, manter true.
+verify_tls: false
+
+# Timeout do POST (segundos).
+request_timeout: 15
+
+# Eventos por batch — servidor recusa batches > 500 (HTTP 400 batch_too_large).
+batch_max_events: 200
+
+# Tamanho máximo do buffer offline (eventos). Quando estoura, mais
+# antigos são descartados.
+offline_buffer_max: 5000
+
+# Caminho do log. Vazio = default por OS:
+#   Windows: C:\ProgramData\NetGuard\agent.log
+#   Linux:   /var/log/netguard/agent.log
+log_path: ""
+
+# Caminho do credential store local. Vazio = default por OS:
+#   Windows: C:\ProgramData\NetGuard\credentials.json
+#   Linux:   /var/log/netguard/credentials.json
+credential_path: ""
+
+# Poll de response actions vindas do servidor. Acoes destrutivas ficam
+# recusadas por padrao ate existir politica assinada/controle explicito.
+enable_response_actions: true
+action_poll_interval_seconds: 30
+allow_destructive_response_actions: false
+
+# Se admin token for usado, pode pinar tenant aqui. Ignorado quando
+# autenticando como tenant ou agent (servidor força auth_ctx.tenant_id).
+tenant_id: ""
+
+# Tags arbitrárias mandadas no metadata.tags. Útil pra categorizar hosts
+# (ex: ["finance", "endpoint", "windows-11"]).
+tags: []
+
+# Toggles de coleta. Desligar reduz CPU/rede em hosts ruidosos.
+collect_processes: true
+collect_connections: true
+collect_security_indicators: true

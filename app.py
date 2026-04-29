@@ -880,15 +880,49 @@ def _get_ids(tid: str = None) -> "IDSEngine":
 
 # ── Event Repository (multi-tenant storage) ───────────────────────
 from storage.event_repository import EventRepository
+from storage.action_repository import AgentActionRepository
 from storage.host_repository import HostRepository
+from storage.repository import get_repository as get_modular_repository
 from server import AgentAuthContext, AgentService
+from server.api import build_blueprint as build_edr_api_blueprint
+from server.auth import EnvKeyStore
+from dashboard.soc_view import build_soc_blueprint as build_modular_soc_blueprint
 
 repo = EventRepository()
 app._repo = repo
 host_registry = HostRepository(db_path=getattr(repo, "db_path", None))
+agent_action_repository = AgentActionRepository(db_path=getattr(repo, "db_path", None))
 agent_service = AgentService(host_registry, repo)
 app._host_registry = host_registry
+app._agent_action_repository = agent_action_repository
 app._agent_service = agent_service
+_modular_edr_repo = None
+app._edr_repo = None
+
+
+def _get_modular_edr_repo():
+    global _modular_edr_repo
+    if _modular_edr_repo is not None:
+        return _modular_edr_repo
+
+    db_path = (
+        os.environ.get("NETGUARD_EDR_DB")
+        or str(pathlib.Path(__file__).parent / "netguard_edr.db")
+    )
+    _modular_edr_repo = get_modular_repository("sqlite", db_path=db_path)
+    _modular_edr_repo.init_schema()
+    app._edr_repo = _modular_edr_repo
+    return _modular_edr_repo
+
+
+def _get_edr_key_store():
+    raw = (os.environ.get("NETGUARD_AGENT_KEYS") or "").strip()
+    if raw:
+        return EnvKeyStore.from_env()
+    fallback = (os.environ.get("IDS_API_KEY") or "").strip()
+    if fallback:
+        return EnvKeyStore([fallback])
+    return EnvKeyStore([])
 
 # ── Auth ──────────────────────────────────────────────────────────
 # Nota: auth() importado de auth.py (token-based) tem prioridade.
@@ -1117,9 +1151,14 @@ def _get_agent_service() -> AgentService:
     return AgentService(_get_host_registry("default"), repo)
 
 
+def _get_agent_action_repository() -> AgentActionRepository:
+    return AgentActionRepository(db_path=getattr(repo, "db_path", None))
+
+
 def _extract_agent_key() -> str:
     explicit = (
         request.headers.get("X-NetGuard-Agent-Key", "").strip()
+        or request.headers.get("X-API-Key", "").strip()
         or request.headers.get("X-Agent-Key", "").strip()
     )
     if explicit:
@@ -1482,7 +1521,7 @@ def _format_soc_last_seen(dt_obj):
 
 
 def _build_soc_preview_context():
-    tenant_id = _resolve_tenant_id()
+    tenant_id = _current_request_tenant_id()
     summary = _build_xdr_summary_payload(query_limit=300, recent_limit=60, host_limit=50)
     registered_hosts = _get_host_registry(tenant_id).list_hosts(limit=200)
 
@@ -2309,7 +2348,26 @@ def _build_soc_host_detail_context(host_id: str, context: dict | None = None):
         }
     _, tenant_role = _resolve_tenant_with_role()
     can_update_incidents = (not AUTH_ENABLED) or tenant_role in {"analyst", "admin"}
-    registered_host = _get_host_registry().get_host(host_id)
+    effective_host_id = str(selected_host.get("host_id") or host_id)
+    registered_host = _get_host_registry().get_host(effective_host_id)
+    host_response_actions = []
+    try:
+        host_response_actions = _get_agent_action_repository().list_actions(
+            tenant_id=_current_request_tenant_id(),
+            host_id=effective_host_id,
+            limit=12,
+        )
+    except Exception:
+        host_response_actions = []
+    host_response_action_stats = {
+        "pending": sum(1 for item in host_response_actions if item.get("status") == "pending"),
+        "leased": sum(1 for item in host_response_actions if item.get("status") in {"leased", "running"}),
+        "terminal": sum(
+            1
+            for item in host_response_actions
+            if item.get("status") in {"succeeded", "failed", "refused", "expired", "cancelled"}
+        ),
+    }
 
     host_metadata = [
         ("Tenant", context["tenant_name"]),
@@ -2353,6 +2411,9 @@ def _build_soc_host_detail_context(host_id: str, context: dict | None = None):
         "host_events": filtered_host_events[:20],
         "host_incidents": incident_rows[:10],
         "host_lineage": lineage_blocks[:8],
+        "host_response_actions": host_response_actions,
+        "host_response_action_stats": host_response_action_stats,
+        "safe_response_actions": ["ping", "collect_diagnostics", "flush_buffer"],
         "host_attack_chains": attack_chains,
         "selected_chain_filter": selected_chain_filter,
         "selected_chain": selected_chain,
@@ -7113,6 +7174,7 @@ if "agent_api" not in app.blueprints:
             audit_fn=audit,
             authenticate_agent_request=_authenticate_agent_request,
             ensure_agent_writer=_ensure_agent_writer,
+            get_action_repository=_get_agent_action_repository,
             get_agent_service=_get_agent_service,
             sanitize_text=_sanitize_text,
             set_request_tenant_context=_set_request_tenant_context,
@@ -7128,6 +7190,16 @@ if "agent_api" not in app.blueprints:
             risk_engine=risk_engine,
             request_ctx=_request_ctx,
             logger=logger,
+        )
+    )
+
+if "netguard_edr" not in app.blueprints:
+    app.register_blueprint(
+        build_edr_api_blueprint(
+            _get_modular_edr_repo(),
+            _get_edr_key_store(),
+            url_prefix="/api",
+            include_read_endpoints=False,
         )
     )
 
@@ -9900,10 +9972,23 @@ if "soc_views" not in app.blueprints:
             build_soc_preview_context=_build_soc_preview_context,
             build_soc_incidents_context=_build_soc_incidents_context,
             build_soc_host_detail_context=_build_soc_host_detail_context,
+            get_action_repository=_get_agent_action_repository,
+            get_host_registry=_get_host_registry,
             get_playbook_engine=_get_playbook_engine,
             playbook_available=PLAYBOOK_AVAILABLE,
             current_request_tenant_id=_current_request_tenant_id,
             logger=logger,
+        )
+    )
+
+if "netguard_soc" not in app.blueprints:
+    app.register_blueprint(
+        build_modular_soc_blueprint(
+            _get_modular_edr_repo(),
+            view_token=os.environ.get("NETGUARD_SOC_VIEW_TOKEN"),
+            url_prefix="/soc/grid",
+            require_session_decorator=require_session,
+            require_role_decorator=require_role,
         )
     )
 

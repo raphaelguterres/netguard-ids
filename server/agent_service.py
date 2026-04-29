@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import secrets
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from security import hash_token, role_level
@@ -12,10 +13,15 @@ from security import hash_token, role_level
 logger = logging.getLogger("netguard.agent_service")
 
 _AGENT_KEY_PREFIX = "nga_"
+_ENROLLMENT_TOKEN_PREFIX = "nge_"
 
 
 def generate_agent_api_key() -> str:
     return _AGENT_KEY_PREFIX + secrets.token_urlsafe(32)
+
+
+def generate_enrollment_token() -> str:
+    return _ENROLLMENT_TOKEN_PREFIX + secrets.token_urlsafe(32)
 
 
 @dataclass(slots=True)
@@ -79,11 +85,72 @@ class AgentService:
             agent_version=agent_version,
             metadata=metadata or {},
             tags=tags or [],
-            enrollment_method="api_token",
+            enrollment_method=(
+                "enrollment_token" if auth_ctx.auth_type == "enrollment" else "api_token"
+            ),
             api_key_hash=hash_token(api_key),
             api_key_prefix=api_key[:16],
         )
         return host, api_key
+
+    def create_enrollment_token(
+        self,
+        *,
+        auth_ctx: AgentAuthContext,
+        tenant_id: str | None = None,
+        expires_in_seconds: int = 3600,
+        max_uses: int = 1,
+    ) -> tuple[dict, str]:
+        if not auth_ctx.can_manage_hosts:
+            raise PermissionError("agent enrollment token creation requires analyst or admin role")
+        effective_tenant_id = (
+            tenant_id if auth_ctx.auth_type == "admin" and tenant_id else auth_ctx.tenant_id
+        )
+        ttl = min(max(int(expires_in_seconds or 3600), 300), 7 * 24 * 3600)
+        uses = min(max(int(max_uses or 1), 1), 1000)
+        token = generate_enrollment_token()
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
+        record = self.host_repo.create_enrollment_token(
+            token_hash=hash_token(token),
+            token_prefix=token[:16],
+            tenant_id=effective_tenant_id,
+            created_by=f"{auth_ctx.auth_type}:{auth_ctx.tenant_id}",
+            expires_at=expires_at.isoformat().replace("+00:00", "Z"),
+            max_uses=uses,
+        )
+        return record, token
+
+    def verify_enrollment_token(self, token: str) -> AgentAuthContext | None:
+        if not token:
+            return None
+        record = self.host_repo.consume_enrollment_token(hash_token(token))
+        if not record:
+            return None
+        return AgentAuthContext(
+            tenant_id=str(record.get("tenant_id") or "default"),
+            role="analyst",
+            auth_type="enrollment",
+        )
+
+    def revoke_enrollment_token(
+        self,
+        *,
+        auth_ctx: AgentAuthContext,
+        token: str,
+    ) -> bool:
+        if not auth_ctx.can_manage_hosts:
+            raise PermissionError("agent enrollment token revocation requires analyst or admin role")
+        if not token:
+            return False
+        token_hash = hash_token(token)
+        record = self.host_repo.get_enrollment_token(token_hash=token_hash)
+        if (
+            record
+            and auth_ctx.auth_type != "admin"
+            and str(record.get("tenant_id") or "") != auth_ctx.tenant_id
+        ):
+            raise PermissionError("cannot revoke enrollment token from another tenant")
+        return self.host_repo.revoke_enrollment_token(token_hash)
 
     def rotate_host_api_key(
         self,
@@ -108,6 +175,23 @@ class AgentService:
             raise LookupError("host not found")
         host = self.host_repo.get_host(host_id, tenant_id=effective_tenant_id) or {}
         return host, api_key
+
+    def revoke_host_api_key(
+        self,
+        *,
+        auth_ctx: AgentAuthContext,
+        host_id: str,
+        tenant_id: str | None = None,
+    ) -> dict:
+        if not auth_ctx.can_manage_hosts:
+            raise PermissionError("host key revocation requires analyst or admin role")
+        effective_tenant_id = (
+            tenant_id if auth_ctx.auth_type == "admin" and tenant_id else auth_ctx.tenant_id
+        )
+        ok = self.host_repo.revoke_host_key(host_id, tenant_id=effective_tenant_id)
+        if not ok:
+            raise LookupError("host not found")
+        return self.host_repo.get_host(host_id, tenant_id=effective_tenant_id) or {}
 
     def verify_agent_key(self, api_key: str) -> dict | None:
         if not api_key:

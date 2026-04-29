@@ -139,6 +139,21 @@ class TestSocPreviewRoutes(unittest.TestCase):
         _app.app.config["TESTING"] = True
         cls.client = _app.app.test_client()
 
+    def _unique_host_id(self, suffix: str) -> str:
+        return f"host-soc-{suffix}-{int(time.time() * 1000000)}"
+
+    def _register_host(self, host_id: str) -> None:
+        import app as _app
+
+        _app._get_host_registry("admin").register_host(
+            tenant_id="admin",
+            host_id=host_id,
+            display_name=host_id,
+            enrollment_method="test",
+            agent_version="1.0.0-test",
+            platform="windows",
+        )
+
     def test_overview_preview_renders(self):
         resp = self.client.get("/soc-preview")
         self.assertEqual(resp.status_code, 200)
@@ -259,6 +274,105 @@ class TestSocPreviewRoutes(unittest.TestCase):
         self.assertTrue(context["host_incidents"])
         self.assertTrue(context["host_attack_chains"])
         self.assertTrue(any(item["techniques"] for item in context["host_attack_chains"]))
+
+    def test_host_detail_context_includes_response_actions(self):
+        import app as _app
+        from auth import get_or_create_token
+
+        host_id = self._unique_host_id("response-context")
+        self._register_host(host_id)
+        token = get_or_create_token()
+        headers = {"X-API-Token": token}
+        _app._get_agent_action_repository().create_action(
+            tenant_id="admin",
+            host_id=host_id,
+            action_type="ping",
+            requested_by="test",
+            reason="context coverage",
+        )
+
+        self.client.post(
+            "/api/xdr/events",
+            json={
+                "events": [
+                    {
+                        "host_id": host_id,
+                        "event_type": "process_execution",
+                        "severity": "medium",
+                        "timestamp": "2026-04-13T16:00:00Z",
+                        "process_name": "powershell.exe",
+                        "command_line": "powershell.exe -nop -enc ZQBjAGgAbwA=",
+                        "parent_process": "winword.exe",
+                        "pid": 6262,
+                        "source": "agent",
+                        "platform": "windows",
+                        "details": {},
+                    }
+                ]
+            },
+            headers=headers,
+        )
+
+        with _app.app.test_request_context(f"/soc/hosts/{host_id}", headers=headers):
+            _app._set_request_tenant_context("admin", "admin")
+            context = _app._build_soc_host_detail_context(
+                host_id,
+                context=_app._build_soc_preview_context(),
+            )
+
+        self.assertIsNotNone(context)
+        self.assertEqual(context["host_response_action_stats"]["pending"], 1)
+        self.assertTrue(any(item["action_type"] == "ping" for item in context["host_response_actions"]))
+        self.assertIn("collect_diagnostics", context["safe_response_actions"])
+
+    def test_soc_host_action_endpoint_queues_safe_actions_only(self):
+        import app as _app
+        from auth import get_or_create_token
+
+        host_id = self._unique_host_id("response-endpoint")
+        self._register_host(host_id)
+        token = get_or_create_token()
+        headers = {"X-API-Token": token}
+
+        queued = self.client.post(
+            f"/soc/hosts/{host_id}/actions",
+            json={
+                "action_type": "collect_diagnostics",
+                "reason": "analyst requested triage bundle",
+            },
+            headers=headers,
+        )
+        self.assertEqual(queued.status_code, 201)
+        queued_data = queued.get_json()
+        self.assertTrue(queued_data["ok"])
+        self.assertEqual(queued_data["action"]["action_type"], "collect_diagnostics")
+        self.assertEqual(queued_data["action"]["status"], "pending")
+
+        cancelled = self.client.post(
+            f"/soc/hosts/{host_id}/actions/{queued_data['action']['action_id']}/cancel",
+            json={"reason": "analyst cancelled duplicate request"},
+            headers=headers,
+        )
+        self.assertEqual(cancelled.status_code, 200, cancelled.get_data(as_text=True))
+        self.assertTrue(cancelled.get_json()["ok"])
+        self.assertEqual(cancelled.get_json()["action"]["status"], "cancelled")
+
+        actions = _app._get_agent_action_repository().list_actions(
+            tenant_id="admin",
+            host_id=host_id,
+            limit=5,
+        )
+        self.assertTrue(any(item["action_id"] == queued_data["action"]["action_id"] for item in actions))
+
+        rejected = self.client.post(
+            f"/soc/hosts/{host_id}/actions",
+            json={"action_type": "isolate_host"},
+            headers=headers,
+        )
+        self.assertEqual(rejected.status_code, 400)
+        rejected_data = rejected.get_json()
+        self.assertFalse(rejected_data["ok"])
+        self.assertEqual(rejected_data["error"], "unsupported_action_type")
 
     def test_host_detail_context_can_filter_timeline_by_attack_chain(self):
         import app as _app

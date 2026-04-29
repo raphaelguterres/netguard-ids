@@ -635,7 +635,7 @@ class IDSEngine:
     @staticmethod
     def _gen_id(text, salt):
         return hashlib.sha256(
-            f"{salt}:{text}:{_utc_iso()}".encode()
+            f"{salt}:{text}:{time.time_ns()}:{threading.get_ident()}:{os.urandom(8).hex()}".encode()
         ).hexdigest()[:12]
 
 

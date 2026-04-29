@@ -49,6 +49,24 @@ CREATE INDEX IF NOT EXISTS idx_managed_hosts_status
     ON managed_hosts(tenant_id, status);
 CREATE INDEX IF NOT EXISTS idx_managed_hosts_api_key_hash
     ON managed_hosts(api_key_hash);
+
+CREATE TABLE IF NOT EXISTS agent_enrollment_tokens (
+    token_hash   TEXT PRIMARY KEY,
+    token_prefix TEXT NOT NULL,
+    tenant_id    TEXT NOT NULL DEFAULT 'default',
+    created_by   TEXT NOT NULL DEFAULT '',
+    expires_at   TEXT NOT NULL,
+    max_uses     INTEGER NOT NULL DEFAULT 1,
+    uses         INTEGER NOT NULL DEFAULT 0,
+    revoked_at   TEXT,
+    last_used_at TEXT,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_enrollment_tenant
+    ON agent_enrollment_tokens(tenant_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_agent_enrollment_prefix
+    ON agent_enrollment_tokens(token_prefix);
 """
 
 _DDL_POSTGRES = """
@@ -77,6 +95,24 @@ CREATE INDEX IF NOT EXISTS idx_managed_hosts_status
     ON managed_hosts(tenant_id, status);
 CREATE INDEX IF NOT EXISTS idx_managed_hosts_api_key_hash
     ON managed_hosts(api_key_hash);
+
+CREATE TABLE IF NOT EXISTS agent_enrollment_tokens (
+    token_hash   TEXT PRIMARY KEY,
+    token_prefix TEXT NOT NULL,
+    tenant_id    TEXT NOT NULL DEFAULT 'default',
+    created_by   TEXT NOT NULL DEFAULT '',
+    expires_at   TIMESTAMPTZ NOT NULL,
+    max_uses     INTEGER NOT NULL DEFAULT 1,
+    uses         INTEGER NOT NULL DEFAULT 0,
+    revoked_at   TIMESTAMPTZ,
+    last_used_at TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_enrollment_tenant
+    ON agent_enrollment_tokens(tenant_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_agent_enrollment_prefix
+    ON agent_enrollment_tokens(token_prefix);
 """
 
 
@@ -177,8 +213,16 @@ class HostRepository:
         host["tags"] = self._json_load(host.get("tags"), default=[])
         host.pop("api_key_hash", None)
         last_seen = _parse_ts(host.get("last_seen"))
+        if str(host.get("status") or "").lower() == "revoked":
+            host["status"] = "revoked"
+            host["last_seen_age_seconds"] = (
+                None
+                if last_seen is None
+                else max(0, int((datetime.now(timezone.utc) - last_seen).total_seconds()))
+            )
+            return host
         if last_seen is None:
-            host["status"] = "enrolled"
+            host["status"] = host.get("status") or "enrolled"
             host["last_seen_age_seconds"] = None
             return host
         age_seconds = max(
@@ -188,6 +232,23 @@ class HostRepository:
         host["last_seen_age_seconds"] = age_seconds
         host["status"] = "online" if age_seconds <= 180 else "offline"
         return host
+
+    def _serialize_enrollment_token(self, row: Optional[dict]) -> Optional[dict]:
+        if not row:
+            return None
+        item = dict(row)
+        item.pop("token_hash", None)
+        expires_at = _parse_ts(item.get("expires_at"))
+        revoked_at = _parse_ts(item.get("revoked_at"))
+        item["expired"] = bool(
+            expires_at and expires_at <= datetime.now(timezone.utc)
+        )
+        item["revoked"] = bool(revoked_at)
+        item["remaining_uses"] = max(
+            0,
+            int(item.get("max_uses") or 0) - int(item.get("uses") or 0),
+        )
+        return item
 
     def _fetch_host_row(
         self,
@@ -408,6 +469,23 @@ class HostRepository:
         self._write_host(existing)
         return True
 
+    def revoke_host_key(
+        self,
+        host_id: str,
+        *,
+        tenant_id: str | None = None,
+    ) -> bool:
+        tid = tenant_id or self.tenant_id
+        existing = self._fetch_host_row(host_id, tenant_id=tid)
+        if not existing:
+            return False
+        existing["api_key_hash"] = None
+        existing["api_key_prefix"] = None
+        existing["status"] = "revoked"
+        existing["updated_at"] = _utc_now()
+        self._write_host(existing)
+        return True
+
     def verify_api_key(self, api_key_hash: str) -> Optional[dict]:
         if not api_key_hash:
             return None
@@ -426,6 +504,180 @@ class HostRepository:
             (api_key_hash,),
         ).fetchone()
         return self._serialize_host(dict(row) if row else None)
+
+    def create_enrollment_token(
+        self,
+        *,
+        token_hash: str,
+        token_prefix: str,
+        tenant_id: str,
+        created_by: str = "",
+        expires_at: str,
+        max_uses: int = 1,
+    ) -> dict:
+        now = _utc_now()
+        ph = self._placeholder()
+        params = (
+            token_hash,
+            token_prefix,
+            tenant_id or self.tenant_id,
+            created_by or "",
+            expires_at,
+            max(1, int(max_uses)),
+            0,
+            None,
+            None,
+            now,
+            now,
+        )
+        with self._lock:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"""
+                    INSERT INTO agent_enrollment_tokens (
+                        token_hash, token_prefix, tenant_id, created_by,
+                        expires_at, max_uses, uses, revoked_at, last_used_at,
+                        created_at, updated_at
+                    ) VALUES (
+                        {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph},
+                        {ph}, {ph}, {ph}, {ph}
+                    )
+                    ON CONFLICT (token_hash) DO UPDATE SET
+                        token_prefix=EXCLUDED.token_prefix,
+                        tenant_id=EXCLUDED.tenant_id,
+                        created_by=EXCLUDED.created_by,
+                        expires_at=EXCLUDED.expires_at,
+                        max_uses=EXCLUDED.max_uses,
+                        uses=EXCLUDED.uses,
+                        revoked_at=EXCLUDED.revoked_at,
+                        last_used_at=EXCLUDED.last_used_at,
+                        updated_at=EXCLUDED.updated_at
+                    """,
+                    params,
+                )
+                self._conn().commit()
+                cur.close()
+            else:
+                self._conn().execute(
+                    f"""
+                    INSERT OR REPLACE INTO agent_enrollment_tokens (
+                        token_hash, token_prefix, tenant_id, created_by,
+                        expires_at, max_uses, uses, revoked_at, last_used_at,
+                        created_at, updated_at
+                    ) VALUES (
+                        {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph},
+                        {ph}, {ph}, {ph}, {ph}
+                    )
+                    """,
+                    params,
+                )
+                self._conn().commit()
+        return self.get_enrollment_token(token_hash=token_hash) or {}
+
+    def get_enrollment_token(
+        self,
+        *,
+        token_hash: str | None = None,
+        token_prefix: str | None = None,
+    ) -> Optional[dict]:
+        ph = self._placeholder()
+        if token_hash:
+            where = f"token_hash={ph}"
+            params = (token_hash,)
+        elif token_prefix:
+            where = f"token_prefix={ph}"
+            params = (token_prefix,)
+        else:
+            return None
+        if USE_POSTGRES:
+            cur = self._conn().cursor()
+            cur.execute(f"SELECT * FROM agent_enrollment_tokens WHERE {where} LIMIT 1", params)
+            row = cur.fetchone()
+            cur.close()
+            return self._serialize_enrollment_token(dict(row) if row else None)
+        row = self._conn().execute(
+            f"SELECT * FROM agent_enrollment_tokens WHERE {where} LIMIT 1",
+            params,
+        ).fetchone()
+        return self._serialize_enrollment_token(dict(row) if row else None)
+
+    def consume_enrollment_token(self, token_hash: str) -> Optional[dict]:
+        if not token_hash:
+            return None
+        ph = self._placeholder()
+        now = _utc_now()
+        with self._lock:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"SELECT * FROM agent_enrollment_tokens WHERE token_hash={ph} FOR UPDATE",
+                    (token_hash,),
+                )
+                row = cur.fetchone()
+                if not row or not _enrollment_row_usable(dict(row)):
+                    self._conn().rollback()
+                    cur.close()
+                    return None
+                cur.execute(
+                    f"""
+                    UPDATE agent_enrollment_tokens
+                    SET uses=uses+1, last_used_at={ph}, updated_at={ph}
+                    WHERE token_hash={ph}
+                    """,
+                    (now, now, token_hash),
+                )
+                self._conn().commit()
+                cur.close()
+            else:
+                row = self._conn().execute(
+                    f"SELECT * FROM agent_enrollment_tokens WHERE token_hash={ph}",
+                    (token_hash,),
+                ).fetchone()
+                row_dict = dict(row) if row else None
+                if not row_dict or not _enrollment_row_usable(row_dict):
+                    return None
+                self._conn().execute(
+                    f"""
+                    UPDATE agent_enrollment_tokens
+                    SET uses=uses+1, last_used_at={ph}, updated_at={ph}
+                    WHERE token_hash={ph}
+                    """,
+                    (now, now, token_hash),
+                )
+                self._conn().commit()
+        return self.get_enrollment_token(token_hash=token_hash)
+
+    def revoke_enrollment_token(self, token_hash: str) -> bool:
+        if not token_hash:
+            return False
+        ph = self._placeholder()
+        now = _utc_now()
+        with self._lock:
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(
+                    f"""
+                    UPDATE agent_enrollment_tokens
+                    SET revoked_at={ph}, updated_at={ph}
+                    WHERE token_hash={ph} AND revoked_at IS NULL
+                    """,
+                    (now, now, token_hash),
+                )
+                changed = bool(cur.rowcount)
+                self._conn().commit()
+                cur.close()
+                return changed
+            cur = self._conn().execute(
+                f"""
+                UPDATE agent_enrollment_tokens
+                SET revoked_at={ph}, updated_at={ph}
+                WHERE token_hash={ph} AND revoked_at IS NULL
+                """,
+                (now, now, token_hash),
+            )
+            self._conn().commit()
+            return bool(cur.rowcount)
 
     def _write_host(self, record: dict[str, Any]) -> None:
         ph = self._placeholder()
@@ -508,3 +760,14 @@ class HostRepository:
                 params,
             )
             self._conn().commit()
+
+
+def _enrollment_row_usable(row: dict[str, Any]) -> bool:
+    if not row:
+        return False
+    if row.get("revoked_at"):
+        return False
+    expires_at = _parse_ts(row.get("expires_at"))
+    if expires_at is None or expires_at <= datetime.now(timezone.utc):
+        return False
+    return int(row.get("uses") or 0) < int(row.get("max_uses") or 0)
