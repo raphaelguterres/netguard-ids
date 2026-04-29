@@ -97,6 +97,8 @@ class TestBootstrapContract(unittest.TestCase):
         body = response.get_json()
         self.assertTrue(body["ok"])
         self.assertIn("summary", body)
+        self.assertIn("agent_status_counts", body)
+        self.assertIn("online_hosts", body["summary"])
 
     def test_modular_soc_grid_rules_route_available(self):
         client = app_module.app.test_client()

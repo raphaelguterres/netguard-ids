@@ -43,6 +43,38 @@ def _hours_ago_iso(hours: int) -> str:
     return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat().replace("+00:00", "Z")
 
 
+def agent_liveness_from_last_seen(
+    last_seen: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Classify endpoint liveness from heartbeat/ingest freshness."""
+
+    observed = _parse_iso(last_seen)
+    if observed is None:
+        return {
+            "agent_status": "offline",
+            "last_seen_age_seconds": None,
+            "last_seen_age_label": "never seen",
+        }
+
+    reference = now or datetime.now(timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    age_seconds = max(0, int((reference - observed).total_seconds()))
+    if age_seconds <= 300:
+        status = "online"
+    elif age_seconds <= 1800:
+        status = "stale"
+    else:
+        status = "offline"
+    return {
+        "agent_status": status,
+        "last_seen_age_seconds": age_seconds,
+        "last_seen_age_label": _age_label(age_seconds),
+    }
+
+
 def build_soc_blueprint(
     repo: Repository,
     *,
@@ -96,6 +128,12 @@ def build_soc_blueprint(
         _check_token()
         since = _hours_ago_iso(24)
         hosts = repo.list_hosts(limit=200)
+        host_rows = [_host_row(host) for host in hosts]
+        status_counts = {
+            "online": sum(1 for item in host_rows if item["agent_status"] == "online"),
+            "stale": sum(1 for item in host_rows if item["agent_status"] == "stale"),
+            "offline": sum(1 for item in host_rows if item["agent_status"] == "offline"),
+        }
         sev_counts = repo.alert_counts_by_severity(since_iso=since)
         top_tech = repo.top_mitre_techniques(since_iso=since, limit=10)
 
@@ -111,15 +149,19 @@ def build_soc_blueprint(
                 "alert_count_24h": sum(sev_counts.values()),
                 "critical_24h": sev_counts.get("critical", 0),
                 "high_24h": sev_counts.get("high", 0),
+                "online_hosts": status_counts["online"],
+                "stale_hosts": status_counts["stale"],
+                "offline_hosts": status_counts["offline"],
                 "avg_risk": _avg([h.risk_score for h in hosts]),
                 "max_risk": max([h.risk_score for h in hosts], default=0),
             },
+            "agent_status_counts": status_counts,
             "severity_counts": sev_counts,
             "top_techniques": [
                 {"technique": t, "count": c} for t, c in top_tech
             ],
             "hosts": sorted(
-                [h.to_dict() for h in hosts],
+                host_rows,
                 key=lambda x: x["risk_score"], reverse=True,
             ),
             "timeline_24h": timeline,
@@ -150,7 +192,7 @@ def build_soc_blueprint(
         recent_events = repo.list_events(host_id=host_id, limit=100)
         return jsonify({
             "ok": True,
-            "host": host.to_dict(),
+            "host": _host_row(host),
             "alerts": [a.to_dict() for a in recent_alerts],
             "events": [e.to_dict() for e in recent_events],
         })
@@ -165,6 +207,35 @@ def _avg(xs: list[int]) -> float:
     if not xs:
         return 0.0
     return round(sum(xs) / len(xs), 1)
+
+
+def _parse_iso(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _age_label(age_seconds: int) -> str:
+    if age_seconds < 60:
+        return f"{age_seconds}s ago"
+    if age_seconds < 3600:
+        return f"{age_seconds // 60}m ago"
+    if age_seconds < 86400:
+        return f"{age_seconds // 3600}h ago"
+    return f"{age_seconds // 86400}d ago"
+
+
+def _host_row(host) -> dict[str, Any]:
+    row = host.to_dict()
+    row.update(agent_liveness_from_last_seen(str(row.get("last_seen") or "")))
+    return row
 
 
 def _bucket_per_hour(alerts) -> list[dict]:

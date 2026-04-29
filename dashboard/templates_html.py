@@ -59,7 +59,7 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
     }
     .grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       gap: 14px;
       padding: 18px 22px;
     }
@@ -116,6 +116,30 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
     .sev.high     { background: rgba(255, 136, 0, 0.15); color: var(--high); border: 1px solid var(--high); }
     .sev.medium   { background: rgba(255, 221, 0, 0.15); color: var(--med);  border: 1px solid var(--med); }
     .sev.low      { background: rgba(0, 255, 170, 0.15); color: var(--low);  border: 1px solid var(--low); }
+    .agent-status {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .agent-status.online {
+      color: var(--ok);
+      border: 1px solid var(--ok);
+      background: rgba(29, 233, 182, 0.12);
+    }
+    .agent-status.stale {
+      color: var(--high);
+      border: 1px solid var(--high);
+      background: rgba(255, 136, 0, 0.12);
+    }
+    .agent-status.offline {
+      color: var(--crit);
+      border: 1px solid var(--crit);
+      background: rgba(255, 26, 75, 0.12);
+    }
     .risk-bar {
       width: 110px; height: 8px; background: var(--bg-2); border-radius: 4px;
       overflow: hidden; display: inline-block; vertical-align: middle;
@@ -219,6 +243,7 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
 
   <section class="grid" id="kpis">
     <div class="card"><div class="stat-label">Hosts</div><div class="stat" id="kpi-hosts">—</div></div>
+    <div class="card"><div class="stat-label">Online agents</div><div class="stat ok" id="kpi-online">—</div></div>
     <div class="card"><div class="stat-label">Alerts (24h)</div><div class="stat" id="kpi-alerts">—</div></div>
     <div class="card"><div class="stat-label">Critical</div><div class="stat crit" id="kpi-crit">—</div></div>
     <div class="card"><div class="stat-label">Avg risk</div><div class="stat" id="kpi-risk">—</div></div>
@@ -234,7 +259,7 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
     <table id="hosts-table">
       <thead>
         <tr>
-          <th>Host</th><th>Platform</th><th>Agent</th><th>Risk</th>
+          <th>Host</th><th>Status</th><th>Platform</th><th>Agent</th><th>Risk</th>
           <th>Last seen</th>
         </tr>
       </thead>
@@ -295,6 +320,7 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
 
   function render(d, ruleCatalog) {
     document.getElementById("kpi-hosts").textContent  = d.summary.host_count;
+    document.getElementById("kpi-online").textContent = d.summary.online_hosts || 0;
     document.getElementById("kpi-alerts").textContent = d.summary.alert_count_24h;
     document.getElementById("kpi-crit").textContent   = d.summary.critical_24h;
     document.getElementById("kpi-risk").textContent   = d.summary.avg_risk;
@@ -311,11 +337,15 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
 
     const tbody = document.querySelector("#hosts-table tbody");
     if (!d.hosts.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty">No hosts enrolled yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">No hosts enrolled yet.</td></tr>';
     } else {
       tbody.innerHTML = d.hosts.map(h => `
         <tr>
           <td><b>${escapeHtml(h.hostname || h.host_id)}</b><br><code>${escapeHtml(h.host_id.substring(0,8))}…</code></td>
+          <td>
+            <span class="agent-status ${escapeHtml(h.agent_status || 'offline')}">${escapeHtml(h.agent_status || 'offline')}</span>
+            <br><code>${escapeHtml(h.last_seen_age_label || '')}</code>
+          </td>
           <td>${escapeHtml(h.platform || '—')}</td>
           <td><code>${escapeHtml(h.agent_version || '—')}</code></td>
           <td>

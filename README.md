@@ -315,7 +315,7 @@ Operators can inspect loaded built-in and YAML detection content through `/api/d
 | `/soc/incidents` | `GET` | Authenticated incidents queue |
 | `/soc/hosts/<host_id>/actions` | `POST` | Queue safe host response actions from the SOC host detail view |
 | `/soc/hosts/<host_id>/actions/<action_id>/cancel` | `POST` | Cancel a pending/leased host response action from SOC |
-| `/soc/grid` | `GET` | Integrated EDR/SOC grid backed by the modular repository |
+| `/soc/grid` | `GET` | Integrated EDR/SOC grid with host risk, agent liveness, and modular repository data |
 | `/soc/grid/api/rules` | `GET` | SOC-grid detection coverage and YAML health feed |
 
 Incident creation is idempotent for active incidents linked to the same
