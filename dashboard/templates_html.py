@@ -151,10 +151,63 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
       font-size: 12px;
     }
     .mitre-tag b { color: var(--accent); }
+    .coverage-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      padding: 14px 16px;
+    }
+    .coverage-card {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 92px;
+    }
+    .coverage-card strong {
+      display: block;
+      font-size: 22px;
+      color: var(--text);
+    }
+    .coverage-card span {
+      color: var(--text-dim);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+    .coverage-list {
+      padding: 0 16px 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .coverage-pill {
+      background: rgba(0, 212, 255, 0.08);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 11px;
+    }
+    .coverage-pill.warn {
+      color: var(--high);
+      border-color: rgba(255, 136, 0, 0.65);
+      background: rgba(255, 136, 0, 0.08);
+    }
     code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; color: var(--text-dim); }
     .empty { padding: 22px; text-align: center; color: var(--text-dim); font-style: italic; }
     .footer {
       text-align: center; padding: 18px; color: var(--text-dim); font-size: 11px;
+    }
+    @media (max-width: 860px) {
+      .grid, .coverage-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 560px) {
+      header { align-items: flex-start; flex-direction: column; }
+      header .pill { margin-left: 0; }
+      .grid, .coverage-grid { grid-template-columns: 1fr; padding: 14px; }
+      .panel { margin: 0 14px 16px; }
+      th, td { padding: 8px; }
     }
   </style>
 </head>
@@ -194,6 +247,12 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
     <div class="mitre-grid" id="mitre"></div>
   </section>
 
+  <section class="panel">
+    <h2>Detection coverage</h2>
+    <div class="coverage-grid" id="coverage-cards"></div>
+    <div class="coverage-list" id="coverage-list"></div>
+  </section>
+
   <div class="footer">
     NetGuard EDR · refreshes every 30s ·
     <a href="https://attack.mitre.org" target="_blank" rel="noopener" style="color:var(--accent)">MITRE ATT&CK</a>
@@ -217,10 +276,15 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
 
   async function refresh() {
     try {
-      const resp = await fetch("api/overview" + tokenQS);
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
-      const data = await resp.json();
-      render(data);
+      const [overviewResp, rulesResp] = await Promise.all([
+        fetch("api/overview" + tokenQS),
+        fetch("api/rules" + tokenQS)
+      ]);
+      if (!overviewResp.ok) throw new Error("overview HTTP " + overviewResp.status);
+      if (!rulesResp.ok) throw new Error("rules HTTP " + rulesResp.status);
+      const data = await overviewResp.json();
+      const ruleCatalog = await rulesResp.json();
+      render(data, ruleCatalog);
       document.getElementById("last-refresh").textContent =
         "updated " + fmtDate(data.as_of);
     } catch (err) {
@@ -229,7 +293,7 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
     }
   }
 
-  function render(d) {
+  function render(d, ruleCatalog) {
     document.getElementById("kpi-hosts").textContent  = d.summary.host_count;
     document.getElementById("kpi-alerts").textContent = d.summary.alert_count_24h;
     document.getElementById("kpi-crit").textContent   = d.summary.critical_24h;
@@ -277,6 +341,40 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
         </a>`
       ).join("");
     }
+
+    renderCoverage(ruleCatalog);
+  }
+
+  function renderCoverage(catalog) {
+    const summary = (catalog && catalog.summary) || {};
+    const health = summary.yaml_health || {};
+    const coverage = summary.event_type_coverage || {};
+    const bySource = summary.by_source || {};
+    const cards = [
+      ["Total rules", summary.total_rules || 0],
+      ["Built-in", bySource.builtin || 0],
+      ["YAML/Sigma", bySource.yaml || 0],
+      ["YAML skipped", health.skipped_files || 0]
+    ];
+    document.getElementById("coverage-cards").innerHTML = cards.map(([label, value]) => `
+      <div class="coverage-card">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+      </div>
+    `).join("");
+
+    const covered = (coverage.covered || []).map(item =>
+      `<span class="coverage-pill">${escapeHtml(item)}</span>`
+    );
+    const missing = (coverage.missing || []).map(item =>
+      `<span class="coverage-pill warn">missing ${escapeHtml(item)}</span>`
+    );
+    const yamlErrors = (health.errors || []).slice(0, 3).map(item =>
+      `<span class="coverage-pill warn">${escapeHtml(item.source_path || 'yaml')} skipped</span>`
+    );
+    document.getElementById("coverage-list").innerHTML =
+      [...covered, ...missing, ...yamlErrors].join("") ||
+      '<span class="coverage-pill warn">No detection catalog loaded</span>';
   }
 
   refresh();

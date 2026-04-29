@@ -97,3 +97,13 @@ class TestBootstrapContract(unittest.TestCase):
         body = response.get_json()
         self.assertTrue(body["ok"])
         self.assertIn("summary", body)
+
+    def test_modular_soc_grid_rules_route_available(self):
+        client = app_module.app.test_client()
+        response = client.get("/soc/grid/api/rules")
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        body = response.get_json()
+        self.assertTrue(body["ok"])
+        self.assertIn("rules", body)
+        self.assertIn("summary", body)
+        self.assertIn("yaml_health", body["summary"])

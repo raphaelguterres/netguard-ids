@@ -12,6 +12,7 @@ Routes:
 
     GET  /soc                  HTML dashboard page
     GET  /soc/api/overview     JSON: summary, counts, top techniques, hosts
+    GET  /soc/api/rules        JSON: detection rule catalog and YAML health
     GET  /soc/api/host/<id>    JSON: host detail + recent alerts/events
 
 `?token=` query param OR `X-Soc-View-Token` header is required if a
@@ -27,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from storage.repository import Repository
+from xdr.rule_catalog import build_detection_rule_catalog
 
 from . import templates_html  # provides the embedded HTML template
 
@@ -122,6 +124,20 @@ def build_soc_blueprint(
             ),
             "timeline_24h": timeline,
         })
+
+    @bp.route("/api/rules", methods=["GET"])
+    @_protect
+    def api_rules():
+        _check_token()
+        source_filter = str(request.args.get("source") or "").strip().lower()
+        catalog = build_detection_rule_catalog()
+        if source_filter in {"builtin", "yaml"}:
+            catalog["rules"] = [
+                item for item in catalog["rules"]
+                if item.get("source") == source_filter
+            ]
+        catalog["summary"]["returned_rules"] = len(catalog["rules"])
+        return jsonify({"ok": True, **catalog})
 
     @bp.route("/api/host/<host_id>", methods=["GET"])
     @_protect

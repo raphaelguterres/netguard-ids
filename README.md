@@ -316,6 +316,7 @@ Operators can inspect loaded built-in and YAML detection content through `/api/d
 | `/soc/hosts/<host_id>/actions` | `POST` | Queue safe host response actions from the SOC host detail view |
 | `/soc/hosts/<host_id>/actions/<action_id>/cancel` | `POST` | Cancel a pending/leased host response action from SOC |
 | `/soc/grid` | `GET` | Integrated EDR/SOC grid backed by the modular repository |
+| `/soc/grid/api/rules` | `GET` | SOC-grid detection coverage and YAML health feed |
 
 SOC host detail currently exposes only safe response actions by default:
 `ping`, `collect_diagnostics`, and `flush_buffer`. Destructive endpoint
