@@ -208,6 +208,17 @@ load the issued key from `credential_path` instead of keeping it in config.
 | `collect_connections` | `true` | |
 | `collect_security_indicators` | `true` | |
 
+### Transport hardening
+
+The agent fails closed for unsafe production transport:
+
+- `http://` is allowed for loopback demo targets such as `127.0.0.1` and `localhost`.
+- Remote `http://` targets are rejected outside `NETGUARD_AGENT_ENV=dev|test|local|demo|ci`.
+- `verify_tls=false` with HTTPS is rejected in production.
+- Lab/self-signed testing can opt in with `NETGUARD_AGENT_ALLOW_INSECURE_TRANSPORT=true`.
+
+Production installs should use `https://.../api/events` with `verify_tls: true`.
+
 ---
 
 ## Event schema

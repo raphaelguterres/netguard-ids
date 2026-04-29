@@ -10,10 +10,15 @@
 #   NETGUARD_AGENT_VERIFY_TLS
 #   NETGUARD_AGENT_TENANT_ID
 #   ...
+# Hardening de transporte:
+#   NETGUARD_AGENT_ENV=production|dev|test|local|demo
+#   NETGUARD_AGENT_ALLOW_INSECURE_TRANSPORT=true  # somente lab/self-signed
 
 # URL do endpoint /api/events do servidor NetGuard.
 # Este exemplo usa loopback HTTP para demo local. Em produção, use HTTPS.
 server_url: "http://127.0.0.1:5000/api/events"
+# Producao: use HTTPS. HTTP para host remoto e verify_tls=false sao
+# recusados por padrao fora de dev/test/local sem opt-in de lab.
 
 # API key gerada por POST /api/agent/register (formato: nga_...).
 # CHANGE_ME = trava de segurança: o agente recusa subir com esse valor.
@@ -26,6 +31,8 @@ interval_seconds: 10
 # Verificação TLS. Neste template local está false porque o endpoint é HTTP.
 # Em produção com HTTPS, manter true.
 verify_tls: false
+# Producao HTTPS deve manter verify_tls=true. Use false somente em lab
+# com NETGUARD_AGENT_ALLOW_INSECURE_TRANSPORT=true ou env dev/test/local.
 
 # Timeout do POST (segundos).
 request_timeout: 15

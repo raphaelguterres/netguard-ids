@@ -23,7 +23,9 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 from pathlib import Path
+from urllib.parse import urlparse
 
 logger = logging.getLogger("netguard.agent.config")
 
@@ -35,6 +37,7 @@ _DEFAULT_CONFIG_FILES = [
 ]
 
 _ENV_PREFIX = "NETGUARD_AGENT_"
+_NON_PROD_ENVS = {"dev", "development", "test", "testing", "local", "demo", "ci"}
 
 
 @dataclass
@@ -65,6 +68,16 @@ class AgentConfig:
                 "server_url precisa começar com http:// ou https:// — "
                 f"recebido: {self.server_url!r}"
             )
+        environment = _agent_environment()
+        if self.server_url.startswith("http://") and not _insecure_transport_allowed(
+            self.server_url,
+            environment,
+        ):
+            raise ValueError(
+                "server_url HTTP recusado fora de dev/test/local. "
+                "Use HTTPS em producao ou defina "
+                "NETGUARD_AGENT_ALLOW_INSECURE_TRANSPORT=true apenas em lab."
+            )
         if self.api_key in ("", "CHANGE_ME"):
             raise ValueError(
                 "api_key não configurada. Defina via env "
@@ -76,6 +89,11 @@ class AgentConfig:
         if self.action_poll_interval_seconds < 10:
             raise ValueError("action_poll_interval_seconds < 10 e abusivo no servidor")
         if not self.verify_tls and self.server_url.startswith("https://"):
+            if not _insecure_transport_allowed(self.server_url, environment):
+                raise ValueError(
+                    "verify_tls=false recusado fora de dev/test/local. "
+                    "Mantenha validacao TLS ligada em producao."
+                )
             logger.warning(
                 "verify_tls=false com servidor HTTPS — vulnerável a MitM. "
                 "Use só em ambiente de teste."
@@ -95,6 +113,33 @@ def _coerce_int(val, default: int) -> int:
         return int(val)
     except (TypeError, ValueError):
         return default
+
+
+def _agent_environment() -> str:
+    return (
+        os.environ.get("NETGUARD_AGENT_ENV")
+        or os.environ.get("IDS_ENV")
+        or os.environ.get("ENVIRONMENT")
+        or "production"
+    ).strip().lower()
+
+
+def _insecure_transport_allowed(server_url: str, environment: str) -> bool:
+    if _coerce_bool(os.environ.get("NETGUARD_AGENT_ALLOW_INSECURE_TRANSPORT")):
+        return True
+    if environment in _NON_PROD_ENVS:
+        return True
+    return _is_loopback_url(server_url)
+
+
+def _is_loopback_url(server_url: str) -> bool:
+    host = (urlparse(server_url).hostname or "").strip().lower()
+    if host == "localhost":
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _load_yaml_or_json(path: Path) -> dict:

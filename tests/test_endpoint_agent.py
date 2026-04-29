@@ -15,9 +15,8 @@ from __future__ import annotations
 import os
 import re
 import sys
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -90,6 +89,65 @@ def test_config_validate_rejects_short_interval():
     cfg = AgentConfig(api_key="nga_real_key", interval_seconds=1)
     with pytest.raises(ValueError, match="interval_seconds"):
         cfg.validate()
+
+
+def test_config_rejects_plain_http_outside_local_or_lab(monkeypatch):
+    from agent.config import AgentConfig
+
+    monkeypatch.setenv("NETGUARD_AGENT_ENV", "production")
+    monkeypatch.delenv("NETGUARD_AGENT_ALLOW_INSECURE_TRANSPORT", raising=False)
+
+    cfg = AgentConfig(
+        server_url="http://soc.example.com/api/events",
+        api_key="nga_real_key",
+        interval_seconds=5,
+    )
+    with pytest.raises(ValueError, match="HTTP recusado"):
+        cfg.validate()
+
+
+def test_config_allows_plain_http_for_loopback_demo(monkeypatch):
+    from agent.config import AgentConfig
+
+    monkeypatch.setenv("NETGUARD_AGENT_ENV", "production")
+    cfg = AgentConfig(
+        server_url="http://127.0.0.1:5000/api/events",
+        api_key="nga_real_key",
+        interval_seconds=5,
+        verify_tls=False,
+    )
+
+    cfg.validate()
+
+
+def test_config_rejects_disabled_tls_outside_lab(monkeypatch):
+    from agent.config import AgentConfig
+
+    monkeypatch.setenv("NETGUARD_AGENT_ENV", "production")
+    monkeypatch.delenv("NETGUARD_AGENT_ALLOW_INSECURE_TRANSPORT", raising=False)
+
+    cfg = AgentConfig(
+        server_url="https://soc.example.com/api/events",
+        api_key="nga_real_key",
+        interval_seconds=5,
+        verify_tls=False,
+    )
+    with pytest.raises(ValueError, match="verify_tls=false"):
+        cfg.validate()
+
+
+def test_config_insecure_transport_requires_explicit_lab_override(monkeypatch):
+    from agent.config import AgentConfig
+
+    monkeypatch.setenv("NETGUARD_AGENT_ENV", "production")
+    monkeypatch.setenv("NETGUARD_AGENT_ALLOW_INSECURE_TRANSPORT", "true")
+
+    cfg = AgentConfig(
+        server_url="http://soc.lab.example/api/events",
+        api_key="nga_real_key",
+        interval_seconds=5,
+    )
+    cfg.validate()
 
 
 def test_config_env_override_wins(tmp_path, monkeypatch):
@@ -498,7 +556,7 @@ def test_sender_drain_stops_on_first_failure(tmp_path):
 
 def test_sender_does_not_log_full_api_key(tmp_path, caplog):
     """API key não pode aparecer inteira em log."""
-    from agent.sender import EventSender, _mask_key
+    from agent.sender import _mask_key
 
     secret = "nga_VERYSECRETkey_must_not_leak_1234567890"
     masked = _mask_key(secret)
