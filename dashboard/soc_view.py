@@ -34,6 +34,8 @@ from . import templates_html  # provides the embedded HTML template
 
 logger = logging.getLogger("netguard.dashboard.soc")
 
+_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -134,12 +136,16 @@ def build_soc_blueprint(
             "stale": sum(1 for item in host_rows if item["agent_status"] == "stale"),
             "offline": sum(1 for item in host_rows if item["agent_status"] == "offline"),
         }
-        sev_counts = repo.alert_counts_by_severity(since_iso=since)
+        sev_counts = _normalize_severity_counts(
+            repo.alert_counts_by_severity(since_iso=since),
+        )
         top_tech = repo.top_mitre_techniques(since_iso=since, limit=10)
 
         # Mini timeline: alert counts per hour (last 24h)
         alerts = repo.list_alerts(since_iso=since, limit=2000)
         timeline = _bucket_per_hour(alerts)
+        recent_alerts = repo.list_alerts(limit=12)
+        recent_events = repo.list_events(limit=12)
 
         return jsonify({
             "ok": True,
@@ -157,6 +163,7 @@ def build_soc_blueprint(
             },
             "agent_status_counts": status_counts,
             "severity_counts": sev_counts,
+            "severity_distribution": _severity_distribution(sev_counts),
             "top_techniques": [
                 {"technique": t, "count": c} for t, c in top_tech
             ],
@@ -165,6 +172,8 @@ def build_soc_blueprint(
                 key=lambda x: x["risk_score"], reverse=True,
             ),
             "timeline_24h": timeline,
+            "recent_alerts": [_alert_row(item) for item in recent_alerts],
+            "recent_events": [_event_row(item) for item in recent_events],
         })
 
     @bp.route("/api/rules", methods=["GET"])
@@ -235,6 +244,42 @@ def _age_label(age_seconds: int) -> str:
 def _host_row(host) -> dict[str, Any]:
     row = host.to_dict()
     row.update(agent_liveness_from_last_seen(str(row.get("last_seen") or "")))
+    return row
+
+
+def _normalize_severity(value: Any) -> str:
+    severity = str(value or "").strip().lower()
+    return severity if severity in _SEVERITY_ORDER else "info"
+
+
+def _normalize_severity_counts(counts: dict[str, int]) -> dict[str, int]:
+    normalized = {severity: 0 for severity in _SEVERITY_ORDER}
+    for severity, count in (counts or {}).items():
+        normalized[_normalize_severity(severity)] += int(count or 0)
+    return normalized
+
+
+def _severity_distribution(counts: dict[str, int]) -> list[dict[str, Any]]:
+    total = sum(int(count or 0) for count in counts.values())
+    return [
+        {
+            "severity": severity,
+            "count": int(counts.get(severity, 0) or 0),
+            "percentage": round((int(counts.get(severity, 0) or 0) / total) * 100, 1) if total else 0.0,
+        }
+        for severity in _SEVERITY_ORDER
+    ]
+
+
+def _alert_row(alert) -> dict[str, Any]:
+    row = alert.to_dict()
+    row["severity"] = _normalize_severity(row.get("severity"))
+    return row
+
+
+def _event_row(event) -> dict[str, Any]:
+    row = event.to_dict()
+    row["severity"] = _normalize_severity(row.get("severity"))
     return row
 
 

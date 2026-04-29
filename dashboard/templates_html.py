@@ -175,6 +175,89 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
       font-size: 12px;
     }
     .mitre-tag b { color: var(--accent); }
+    .severity-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      padding: 14px 16px;
+    }
+    .severity-card {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      min-height: 84px;
+      overflow: hidden;
+      padding: 12px;
+      position: relative;
+    }
+    .severity-card strong {
+      display: block;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+    .severity-card span {
+      color: var(--text-dim);
+      display: block;
+      font-size: 10.5px;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+    }
+    .severity-card .pct { margin-top: 6px; }
+    .severity-fill {
+      bottom: 0;
+      height: 3px;
+      left: 0;
+      position: absolute;
+    }
+    .severity-card.critical .severity-fill { background: var(--crit); }
+    .severity-card.high .severity-fill { background: var(--high); }
+    .severity-card.medium .severity-fill { background: var(--med); }
+    .severity-card.low .severity-fill { background: var(--low); }
+    .severity-card.info .severity-fill { background: var(--accent); }
+    .recent-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      padding: 14px 16px;
+    }
+    .feed-column {
+      background: rgba(26, 33, 45, 0.55);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .feed-title {
+      border-bottom: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 10.5px;
+      letter-spacing: 0.6px;
+      padding: 9px 12px;
+      text-transform: uppercase;
+    }
+    .feed-item {
+      border-bottom: 1px solid var(--border);
+      padding: 10px 12px;
+    }
+    .feed-item:last-child { border-bottom: 0; }
+    .feed-main {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+    }
+    .feed-meta {
+      color: var(--text-dim);
+      font-size: 11px;
+      margin-top: 4px;
+    }
+    .feed-evidence {
+      color: var(--text-dim);
+      font-size: 11.5px;
+      margin-top: 5px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .coverage-grid {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -224,12 +307,14 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
       text-align: center; padding: 18px; color: var(--text-dim); font-size: 11px;
     }
     @media (max-width: 860px) {
-      .grid, .coverage-grid { grid-template-columns: repeat(2, 1fr); }
+      .grid, .coverage-grid, .severity-grid { grid-template-columns: repeat(2, 1fr); }
+      .recent-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 560px) {
       header { align-items: flex-start; flex-direction: column; }
       header .pill { margin-left: 0; }
-      .grid, .coverage-grid { grid-template-columns: 1fr; padding: 14px; }
+      .grid, .coverage-grid, .severity-grid { grid-template-columns: 1fr; padding: 14px; }
+      .recent-grid { padding: 14px; }
       .panel { margin: 0 14px 16px; }
       th, td { padding: 8px; }
     }
@@ -255,6 +340,11 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
   </section>
 
   <section class="panel">
+    <h2>Severity by category (24h)</h2>
+    <div class="severity-grid" id="severity-cards"></div>
+  </section>
+
+  <section class="panel">
     <h2>Hosts by risk</h2>
     <table id="hosts-table">
       <thead>
@@ -270,6 +360,20 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
   <section class="panel">
     <h2>Top MITRE techniques</h2>
     <div class="mitre-grid" id="mitre"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Recent SOC activity</h2>
+    <div class="recent-grid">
+      <div class="feed-column">
+        <div class="feed-title">Recent alerts</div>
+        <div id="recent-alerts"></div>
+      </div>
+      <div class="feed-column">
+        <div class="feed-title">Recent events</div>
+        <div id="recent-events"></div>
+      </div>
+    </div>
   </section>
 
   <section class="panel">
@@ -335,6 +439,8 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
       tl.appendChild(el);
     });
 
+    renderSeverity(d.severity_distribution || []);
+
     const tbody = document.querySelector("#hosts-table tbody");
     if (!d.hosts.length) {
       tbody.innerHTML = '<tr><td colspan="6" class="empty">No hosts enrolled yet.</td></tr>';
@@ -372,7 +478,67 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
       ).join("");
     }
 
+    renderRecent(d.recent_alerts || [], d.recent_events || []);
     renderCoverage(ruleCatalog);
+  }
+
+  function renderSeverity(items) {
+    const rows = Array.isArray(items) ? items : [];
+    const cards = document.getElementById("severity-cards");
+    if (!rows.length) {
+      cards.innerHTML = '<div class="empty">No severity data yet.</div>';
+      return;
+    }
+    cards.innerHTML = rows.map(item => {
+      const severity = escapeHtml(item.severity || "info");
+      const count = Number(item.count || 0);
+      const pct = Number(item.percentage || 0);
+      return `
+        <div class="severity-card ${severity}">
+          <span>${severity}</span>
+          <strong>${count}</strong>
+          <span class="pct">${pct.toFixed(1)}% of alerts</span>
+          <div class="severity-fill" style="width:${Math.max(2, pct)}%"></div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function renderRecent(alerts, events) {
+    document.getElementById("recent-alerts").innerHTML = renderAlertFeed(alerts);
+    document.getElementById("recent-events").innerHTML = renderEventFeed(events);
+  }
+
+  function renderAlertFeed(alerts) {
+    if (!alerts.length) {
+      return '<div class="empty">No recent alerts.</div>';
+    }
+    return alerts.map(a => `
+      <div class="feed-item">
+        <div class="feed-main">
+          <b>${escapeHtml(a.title || a.rule_id || "Alert")}</b>
+          <span class="sev ${escapeHtml(a.severity || 'info')}">${escapeHtml(a.severity || 'info')}</span>
+        </div>
+        <div class="feed-meta">${fmtDate(a.timestamp)} | ${escapeHtml(a.host_id || '')} | ${escapeHtml(a.status || 'open')}</div>
+        <div class="feed-evidence">${escapeHtml(a.evidence || a.mitre_technique || a.rule_id || '')}</div>
+      </div>
+    `).join("");
+  }
+
+  function renderEventFeed(events) {
+    if (!events.length) {
+      return '<div class="empty">No recent events.</div>';
+    }
+    return events.map(e => `
+      <div class="feed-item">
+        <div class="feed-main">
+          <b>${escapeHtml(e.event_type || e.process_name || "Event")}</b>
+          <span class="sev ${escapeHtml(e.severity || 'info')}">${escapeHtml(e.severity || 'info')}</span>
+        </div>
+        <div class="feed-meta">${fmtDate(e.timestamp)} | ${escapeHtml(e.host_id || '')} | ${escapeHtml(e.process_name || '')}</div>
+        <div class="feed-evidence">${escapeHtml(e.evidence || e.command_line || e.dst_ip || '')}</div>
+      </div>
+    `).join("");
   }
 
   function renderCoverage(catalog) {

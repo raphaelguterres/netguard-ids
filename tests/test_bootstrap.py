@@ -98,6 +98,9 @@ class TestBootstrapContract(unittest.TestCase):
         self.assertTrue(body["ok"])
         self.assertIn("summary", body)
         self.assertIn("agent_status_counts", body)
+        self.assertIn("recent_alerts", body)
+        self.assertIn("recent_events", body)
+        self.assertIn("severity_distribution", body)
         self.assertIn("online_hosts", body["summary"])
 
     def test_modular_soc_grid_rules_route_available(self):
