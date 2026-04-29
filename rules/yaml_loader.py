@@ -202,18 +202,54 @@ class YamlRuleRegistry:
         return detections
 
 
+@dataclass(slots=True)
+class YamlRuleLoadError:
+    source_path: str
+    error: str
+
+
+@dataclass(slots=True)
+class YamlRuleLoadReport:
+    registry: YamlRuleRegistry
+    total_files: int = 0
+    loaded_files: int = 0
+    skipped_files: int = 0
+    errors: tuple[YamlRuleLoadError, ...] = ()
+
+
 def load_yaml_rules(directory: str | Path | None = None) -> YamlRuleRegistry:
+    return load_yaml_rule_report(directory).registry
+
+
+def load_yaml_rule_report(directory: str | Path | None = None) -> YamlRuleLoadReport:
     rules_dir = Path(directory or DEFAULT_RULES_DIR)
     if not rules_dir.exists():
-        return YamlRuleRegistry()
+        return YamlRuleLoadReport(registry=YamlRuleRegistry())
     loaded_rules: list[YamlDetectionRule] = []
-    for path in sorted(rules_dir.glob("*.y*ml")):
+    errors: list[YamlRuleLoadError] = []
+    rule_files = sorted(rules_dir.glob("*.y*ml"))
+    for path in rule_files:
+        display_path = _safe_source_path(path)
         try:
             payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            loaded_rules.append(_parse_rule(payload, source_path=str(path)))
+            loaded_rules.append(_parse_rule(payload, source_path=display_path))
         except Exception as exc:
             logger.warning("Skipping invalid YAML rule %s: %s", path, exc)
-    return YamlRuleRegistry(rules=tuple(loaded_rules))
+            errors.append(YamlRuleLoadError(source_path=display_path, error=str(exc)))
+    return YamlRuleLoadReport(
+        registry=YamlRuleRegistry(rules=tuple(loaded_rules)),
+        total_files=len(rule_files),
+        loaded_files=len(loaded_rules),
+        skipped_files=len(errors),
+        errors=tuple(errors),
+    )
+
+
+def _safe_source_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(Path.cwd().resolve())).replace("\\", "/")
+    except Exception:
+        return path.name
 
 
 def _parse_rule(payload: dict[str, Any], *, source_path: str) -> YamlDetectionRule:

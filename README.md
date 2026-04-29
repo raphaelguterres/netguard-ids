@@ -277,6 +277,8 @@ These rules support:
 
 The Sigma compatibility layer is intentionally conservative. It supports the subset needed for portable endpoint/process/network/auth rules while rejecting ambiguous mixed logical expressions instead of silently weakening detections.
 
+Operators can inspect loaded built-in and YAML detection content through `/api/detection/rules`, including MITRE coverage, event-type coverage, and YAML files skipped during validation.
+
 ## Main Endpoints
 
 ### Agent and ingest
@@ -296,6 +298,7 @@ The Sigma compatibility layer is intentionally conservative. It supports the sub
 | `/api/agent/events` | `POST` | Ingest agent events using host key or token |
 | `/api/xdr/events` | `POST` | Generic structured endpoint event ingest |
 | `/api/agent/status` | `GET` | Agent inventory status view |
+| `/api/detection/rules` | `GET` | Detection rule catalog, MITRE/event coverage, YAML load health |
 
 ### Incidents and SOC
 

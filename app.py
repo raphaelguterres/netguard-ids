@@ -4336,6 +4336,23 @@ def xdr_events_ingest():
         }), 500
 
 
+@app.route("/api/detection/rules", methods=["GET"])
+@auth
+def detection_rules_catalog():
+    """Expose rule coverage and YAML load health for SOC operators."""
+    from xdr.rule_catalog import build_detection_rule_catalog
+
+    source_filter = str(request.args.get("source") or "").strip().lower()
+    catalog = build_detection_rule_catalog()
+    if source_filter in {"builtin", "yaml"}:
+        catalog["rules"] = [
+            item for item in catalog["rules"]
+            if item.get("source") == source_filter
+        ]
+    catalog["summary"]["returned_rules"] = len(catalog["rules"])
+    return jsonify(catalog)
+
+
 @app.route("/api/xdr/summary", methods=["GET"])
 @auth
 def xdr_summary():
