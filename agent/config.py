@@ -54,6 +54,7 @@ class AgentConfig:
     enable_response_actions: bool = True
     action_poll_interval_seconds: int = 30
     allow_destructive_response_actions: bool = False
+    response_policy_secret: str = ""
     tenant_id: str = ""
     tags: list[str] = field(default_factory=list)
     # Coletor: quais módulos ativar. Default tudo on; operador pode
@@ -88,6 +89,11 @@ class AgentConfig:
             raise ValueError("interval_seconds < 5 é abusivo no servidor")
         if self.action_poll_interval_seconds < 10:
             raise ValueError("action_poll_interval_seconds < 10 e abusivo no servidor")
+        if self.allow_destructive_response_actions and len(self.response_policy_secret or "") < 32:
+            raise ValueError(
+                "response_policy_secret precisa ter 32+ caracteres quando "
+                "allow_destructive_response_actions=true"
+            )
         if not self.verify_tls and self.server_url.startswith("https://"):
             if not _insecure_transport_allowed(self.server_url, environment):
                 raise ValueError(
@@ -210,6 +216,7 @@ def _apply_env_overrides(cfg: AgentConfig) -> AgentConfig:
         "ENABLE_RESPONSE_ACTIONS": ("enable_response_actions", bool),
         "ACTION_POLL_INTERVAL_SECONDS": ("action_poll_interval_seconds", int),
         "ALLOW_DESTRUCTIVE_RESPONSE_ACTIONS": ("allow_destructive_response_actions", bool),
+        "RESPONSE_POLICY_SECRET": ("response_policy_secret", str),
         "TENANT_ID": ("tenant_id", str),
     }
     for env_suffix, (attr, kind) in mapping.items():

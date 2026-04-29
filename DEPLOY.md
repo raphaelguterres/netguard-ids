@@ -255,6 +255,7 @@ Operational recommendation:
 - use host key for already-approved hosts
 - rotate host keys after suspected exposure and during planned credential refresh windows
 - verify the `agent/` credential store on the endpoint after first enrollment
+- keep `NETGUARD_AGENT_ALLOW_DESTRUCTIVE_RESPONSE_ACTIONS=false` unless endpoint-side policy secrets and handlers are explicitly approved
 - keep the local event buffer on persistent disk
 
 ## SOC and detection verification

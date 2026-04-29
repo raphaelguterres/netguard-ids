@@ -15,6 +15,8 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -150,6 +152,41 @@ def test_config_insecure_transport_requires_explicit_lab_override(monkeypatch):
     cfg.validate()
 
 
+def test_config_rejects_destructive_actions_without_policy_secret(monkeypatch):
+    from agent.config import AgentConfig
+
+    monkeypatch.setenv("NETGUARD_AGENT_ENV", "production")
+    cfg = AgentConfig(
+        server_url="http://127.0.0.1:5000/api/events",
+        api_key="nga_real_key",
+        interval_seconds=5,
+        verify_tls=False,
+        allow_destructive_response_actions=True,
+    )
+
+    with pytest.raises(ValueError, match="response_policy_secret"):
+        cfg.validate()
+
+
+def test_config_response_policy_secret_env_override(tmp_path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        'server_url: "http://127.0.0.1:5000/api/events"\n'
+        'api_key: "nga_real_key"\n'
+        'response_policy_secret: "file-policy-secret-should-not-win"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(
+        "NETGUARD_AGENT_RESPONSE_POLICY_SECRET",
+        "env-policy-secret-" + ("x" * 32),
+    )
+
+    from agent.config import load_config
+
+    cfg = load_config(path=str(cfg_file))
+    assert cfg.response_policy_secret.startswith("env-policy-secret-")
+
+
 def test_config_env_override_wins(tmp_path, monkeypatch):
     """Env vars sobrescrevem o arquivo."""
     cfg_file = tmp_path / "config.yaml"
@@ -282,6 +319,7 @@ def test_action_url_derivation():
 def test_action_executor_collects_diagnostics_and_refuses_destructive(tmp_path):
     from agent.actions import AgentActionExecutor
     from agent.sender import EventSender
+    from server.response_policy import sign_response_policy
 
     sender = EventSender(
         server_url="http://127.0.0.1:5000/api/events",
@@ -303,6 +341,58 @@ def test_action_executor_collects_diagnostics_and_refuses_destructive(tmp_path):
     refused = executor.execute({"action_type": "isolate_host"})
     assert refused.status == "refused"
     assert refused.result["error"] == "destructive_actions_disabled"
+
+    guarded = AgentActionExecutor(
+        host_id="host-1",
+        host_facts={"hostname": "WIN-01", "platform": "windows", "user": "SYSTEM"},
+        sender=sender,
+        allow_destructive=True,
+        response_policy_secret="agent-policy-secret-" + ("x" * 32),
+    )
+    missing_policy = guarded.execute({
+        "action_type": "isolate_host",
+        "host_id": "host-1",
+        "tenant_id": "default",
+        "payload": {},
+    })
+    assert missing_policy.status == "refused"
+    assert missing_policy.result["error"] == "missing_response_policy"
+
+    secret = "agent-policy-secret-" + ("x" * 32)
+    expires_at = int(time.time()) + 120
+    nonce = uuid.uuid4().hex
+    signature = sign_response_policy(
+        secret,
+        tenant_id="default",
+        host_id="host-1",
+        action_type="isolate_host",
+        nonce=nonce,
+        expires_at=expires_at,
+    )
+    verified = AgentActionExecutor(
+        host_id="host-1",
+        host_facts={"hostname": "WIN-01", "platform": "windows", "user": "SYSTEM"},
+        sender=sender,
+        allow_destructive=True,
+        response_policy_secret=secret,
+    ).execute({
+        "action_type": "isolate_host",
+        "host_id": "host-1",
+        "tenant_id": "default",
+        "payload": {
+            "policy": {
+                "tenant_id": "default",
+                "host_id": "host-1",
+                "action_type": "isolate_host",
+                "nonce": nonce,
+                "expires_at": expires_at,
+                "signature": signature,
+            },
+        },
+    })
+    assert verified.status == "failed"
+    assert verified.result["error"] == "destructive_action_not_implemented"
+    assert verified.result["policy_verified"] is True
 
 
 def test_agent_poll_and_execute_actions_with_fake_client(tmp_path):

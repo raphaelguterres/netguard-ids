@@ -119,9 +119,11 @@ Guarded actions are intentionally refused by default:
 This keeps the response channel from becoming arbitrary remote execution.
 The server also fails closed before queueing guarded actions unless an admin
 request includes a short-lived HMAC policy approval signed with
-`NETGUARD_RESPONSE_POLICY_SECRET`. Keep destructive response disabled on
-endpoints until destructive handlers are implemented, tested, and covered by
-endpoint-side signed policy enforcement.
+`NETGUARD_RESPONSE_POLICY_SECRET`. If an endpoint operator explicitly enables
+guarded response, the agent independently verifies the queued policy with
+`NETGUARD_AGENT_RESPONSE_POLICY_SECRET` before reaching any guarded handler.
+Keep destructive response disabled until destructive handlers are implemented,
+tested, and approved for the environment.
 
 ---
 
@@ -211,7 +213,8 @@ load the issued key from `credential_path` instead of keeping it in config.
 | `credential_path` | `""` | Empty = OS default credential store. DPAPI is used on Windows when available. |
 | `enable_response_actions` | `true` | Poll server-side response action queue. |
 | `action_poll_interval_seconds` | `30` | Min `10`; server lease is longer than poll interval. |
-| `allow_destructive_response_actions` | `false` | Keep false until signed policy controls exist. |
+| `allow_destructive_response_actions` | `false` | Keep false until guarded handlers are approved. |
+| `response_policy_secret` | `""` | Required only when destructive response is explicitly enabled; prefer env `NETGUARD_AGENT_RESPONSE_POLICY_SECRET`. |
 | `tags` | `[]` | Free-form labels echoed back in dashboard. |
 | `collect_processes` | `true` | Toggle off to silence on noisy hosts. |
 | `collect_connections` | `true` | |

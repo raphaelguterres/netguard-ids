@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -13,6 +16,9 @@ logger = logging.getLogger("netguard.agent.actions")
 
 SAFE_ACTION_TYPES = {"ping", "collect_diagnostics", "flush_buffer"}
 GUARDED_ACTION_TYPES = {"isolate_host", "kill_process", "block_ip", "delete_file"}
+POLICY_MAX_TTL_SECONDS = 300
+MIN_POLICY_SECRET_LENGTH = 32
+MIN_POLICY_NONCE_LENGTH = 16
 
 
 @dataclass(slots=True)
@@ -33,6 +39,48 @@ def derive_actions_url(server_url: str) -> str:
     else:
         path += "/api/agent/actions"
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+
+def _canonical_response_policy_message(
+    *,
+    tenant_id: str,
+    host_id: str,
+    action_type: str,
+    nonce: str,
+    expires_at: int | str,
+) -> bytes:
+    return "\n".join(
+        [
+            "netguard-response-action-v1",
+            str(tenant_id or "").strip(),
+            str(host_id or "").strip(),
+            str(action_type or "").strip().lower(),
+            str(nonce or "").strip(),
+            str(int(expires_at)),
+        ]
+    ).encode("utf-8")
+
+
+def _sign_response_policy(
+    secret: str,
+    *,
+    tenant_id: str,
+    host_id: str,
+    action_type: str,
+    nonce: str,
+    expires_at: int | str,
+) -> str:
+    return hmac.new(
+        secret.encode("utf-8"),
+        _canonical_response_policy_message(
+            tenant_id=tenant_id,
+            host_id=host_id,
+            action_type=action_type,
+            nonce=nonce,
+            expires_at=expires_at,
+        ),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 class AgentActionClient:
@@ -103,11 +151,13 @@ class AgentActionExecutor:
         host_facts: dict[str, Any],
         sender: EventSender,
         allow_destructive: bool = False,
+        response_policy_secret: str = "",
     ):
         self.host_id = host_id
         self.host_facts = host_facts
         self.sender = sender
         self.allow_destructive = bool(allow_destructive)
+        self.response_policy_secret = str(response_policy_secret or "")
 
     def execute(self, action: dict[str, Any]) -> ActionExecutionResult:
         action_type = str(action.get("action_type") or "").strip().lower()
@@ -121,7 +171,7 @@ class AgentActionExecutor:
                 drained = self.sender.drain_once(max_batches=int(payload.get("max_batches") or 20))
                 return ActionExecutionResult("succeeded", {"drained_batches": drained})
             if action_type in GUARDED_ACTION_TYPES:
-                return self._guarded_refusal(action_type)
+                return self._handle_guarded_action(action_type, action)
             return ActionExecutionResult("failed", {"error": "unsupported_action_type"})
         except Exception as exc:
             logger.exception("action execution failed action_type=%s", action_type)
@@ -137,20 +187,93 @@ class AgentActionExecutor:
             "server_url": self.sender.server_url,
         }
 
-    def _guarded_refusal(self, action_type: str) -> ActionExecutionResult:
-        if self.allow_destructive:
+    def _handle_guarded_action(self, action_type: str, action: dict[str, Any]) -> ActionExecutionResult:
+        if not self.allow_destructive:
             return ActionExecutionResult(
-                "failed",
+                "refused",
                 {
-                    "error": "destructive_action_not_implemented",
+                    "error": "destructive_actions_disabled",
                     "action_type": action_type,
+                    "message": "Enable signed policy support before allowing destructive response.",
                 },
             )
+
+        policy_ok, reason = self._verify_guarded_policy(action_type, action)
+        if not policy_ok:
+            return ActionExecutionResult(
+                "refused",
+                {
+                    "error": reason,
+                    "action_type": action_type,
+                    "message": "Guarded response action rejected by endpoint policy verifier.",
+                },
+            )
+
         return ActionExecutionResult(
-            "refused",
+            "failed",
             {
-                "error": "destructive_actions_disabled",
+                "error": "destructive_action_not_implemented",
                 "action_type": action_type,
-                "message": "Enable signed policy support before allowing destructive response.",
+                "policy_verified": True,
             },
         )
+
+    def _verify_guarded_policy(
+        self,
+        action_type: str,
+        action: dict[str, Any],
+    ) -> tuple[bool, str]:
+        secret = self.response_policy_secret
+        if not secret or len(secret) < MIN_POLICY_SECRET_LENGTH:
+            return False, "destructive_actions_disabled"
+
+        payload = action.get("payload") if isinstance(action.get("payload"), dict) else {}
+        policy = payload.get("policy") if isinstance(payload.get("policy"), dict) else {}
+        if not policy:
+            return False, "missing_response_policy"
+
+        action_host_id = str(action.get("host_id") or self.host_id or "").strip()
+        policy_host_id = str(policy.get("host_id") or "").strip()
+        if not policy_host_id or policy_host_id != action_host_id:
+            return False, "policy_host_mismatch"
+        if self.host_id and policy_host_id != self.host_id:
+            return False, "policy_local_host_mismatch"
+
+        action_tenant_id = str(action.get("tenant_id") or "").strip()
+        policy_tenant_id = str(policy.get("tenant_id") or "").strip()
+        if action_tenant_id and policy_tenant_id != action_tenant_id:
+            return False, "policy_tenant_mismatch"
+
+        policy_action_type = str(policy.get("action_type") or "").strip().lower()
+        if policy_action_type != action_type:
+            return False, "policy_action_mismatch"
+
+        nonce = str(policy.get("nonce") or "").strip()
+        signature = str(policy.get("signature") or "").strip().lower()
+        if len(nonce) < MIN_POLICY_NONCE_LENGTH:
+            return False, "invalid_policy_nonce"
+        if not signature:
+            return False, "missing_policy_signature"
+
+        try:
+            expires_at = int(policy.get("expires_at"))
+        except (TypeError, ValueError):
+            return False, "invalid_policy_expiry"
+
+        now = int(time.time())
+        if expires_at <= now:
+            return False, "policy_expired"
+        if expires_at > now + POLICY_MAX_TTL_SECONDS:
+            return False, "policy_expiry_too_far"
+
+        expected = _sign_response_policy(
+            secret,
+            tenant_id=policy_tenant_id,
+            host_id=policy_host_id,
+            action_type=policy_action_type,
+            nonce=nonce,
+            expires_at=expires_at,
+        )
+        if not hmac.compare_digest(expected, signature):
+            return False, "invalid_policy_signature"
+        return True, "ok"

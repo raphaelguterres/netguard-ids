@@ -436,6 +436,7 @@ class TestAgentServerApi(unittest.TestCase):
                 headers=self._admin_headers(),
             )
             self.assertEqual(register.status_code, 201, register.get_data(as_text=True))
+            agent_key = register.get_json()["api_key"]
 
             invalid = self.client.post(
                 f"/api/agent/hosts/{host_id}/actions",
@@ -474,6 +475,20 @@ class TestAgentServerApi(unittest.TestCase):
             self.assertEqual(queued.status_code, 201, queued.get_data(as_text=True))
             self.assertEqual(queued.get_json()["action"]["action_type"], "isolate_host")
             self.assertEqual(queued.get_json()["action"]["status"], "pending")
+
+            poll = self.client.get(
+                "/api/agent/actions",
+                headers={"X-NetGuard-Agent-Key": agent_key},
+            )
+            self.assertEqual(poll.status_code, 200, poll.get_data(as_text=True))
+            leased_action = poll.get_json()["actions"][0]
+            policy = leased_action["payload"]["policy"]
+            self.assertEqual(policy["tenant_id"], "admin")
+            self.assertEqual(policy["host_id"], host_id)
+            self.assertEqual(policy["action_type"], "isolate_host")
+            self.assertEqual(policy["nonce"], nonce)
+            self.assertEqual(policy["expires_at"], expires_at)
+            self.assertEqual(policy["signature"], signature)
         finally:
             if previous_secret is None:
                 os.environ.pop("NETGUARD_RESPONSE_POLICY_SECRET", None)

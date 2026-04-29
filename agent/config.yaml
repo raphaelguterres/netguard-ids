@@ -59,6 +59,9 @@ credential_path: ""
 enable_response_actions: true
 action_poll_interval_seconds: 30
 allow_destructive_response_actions: false
+# Endpoint-side verifier for guarded response actions. Keep empty until
+# destructive handlers are explicitly implemented and approved.
+response_policy_secret: ""
 
 # Se admin token for usado, pode pinar tenant aqui. Ignorado quando
 # autenticando como tenant ou agent (servidor força auth_ctx.tenant_id).

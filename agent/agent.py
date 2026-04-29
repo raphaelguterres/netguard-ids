@@ -154,6 +154,7 @@ class NetGuardAgent:
             host_facts=self.host_facts,
             sender=self.sender,
             allow_destructive=self.config.allow_destructive_response_actions,
+            response_policy_secret=self.config.response_policy_secret,
         )
 
         logger.info(

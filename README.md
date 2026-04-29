@@ -337,9 +337,10 @@ SOC host detail currently exposes only safe response actions by default:
 `ping`, `collect_diagnostics`, and `flush_buffer`. Destructive endpoint
 actions such as isolation, process kill, IP block, and file deletion are
 blocked server-side unless an admin supplies a short-lived HMAC policy
-approval using `NETGUARD_RESPONSE_POLICY_SECRET`; the agent still refuses
-execution by default until endpoint-side destructive handlers are explicitly
-implemented and enabled.
+approval using `NETGUARD_RESPONSE_POLICY_SECRET`. The agent also verifies
+the queued policy with `NETGUARD_AGENT_RESPONSE_POLICY_SECRET` before any
+guarded handler can run; destructive handlers remain disabled/not implemented
+by default.
 
 ### Platform
 
@@ -411,11 +412,12 @@ The new coverage adds checks for:
 - [x] Persistent host-key credential store, short-lived enrollment tokens, and host key rotation/revocation
 - [x] Server-to-agent response action queue with polling, ACK, and safe agent executor
 - [x] Server-side signed policy gate for destructive response action queuing
+- [x] Endpoint-side signed policy verification before guarded response handlers
 - [x] Shared SQLite rate limiting for the modular EDR ingest API
 - [x] Versioned EDR storage migration metadata with checksums/status reporting
 - [ ] Full domain migrations for all legacy app tables
 - [ ] Agent packaging as service/daemon for Windows and Linux
-- [ ] Endpoint-side destructive response handlers with signed policy enforcement
+- [ ] Endpoint-side destructive response handlers beyond fail-closed stubs
 - [ ] Redis/shared cache options for multi-node production topologies
 - [ ] Tenant-scoped API tokens with narrower operational scopes
 

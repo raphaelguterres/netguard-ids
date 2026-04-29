@@ -303,6 +303,18 @@ def create_agent_api_blueprint(
                     "error": guarded_policy_error,
                     "message": "destructive response actions require admin and signed policy approval",
                 }), 403
+            if action_type in guarded_action_types:
+                payload = {
+                    **payload,
+                    "policy": {
+                        "tenant_id": tenant_id,
+                        "host_id": safe_host_id,
+                        "action_type": action_type,
+                        "nonce": str(data.get("policy_nonce") or "").strip(),
+                        "expires_at": int(data.get("policy_expires_at")),
+                        "signature": str(data.get("policy_signature") or "").strip().lower(),
+                    },
+                }
             action = get_action_repository().create_action(
                 tenant_id=tenant_id,
                 host_id=safe_host_id,
