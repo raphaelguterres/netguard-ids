@@ -312,6 +312,47 @@ class TestAgentServerApi(unittest.TestCase):
         )
         self.assertEqual(heartbeat.status_code, 401, heartbeat.get_data(as_text=True))
 
+    def test_rotated_host_key_invalidates_old_secret(self):
+        register = self.client.post(
+            "/api/agent/register",
+            json={"host_id": "agent-host-rotated", "platform": "windows"},
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(register.status_code, 201, register.get_data(as_text=True))
+        old_key = register.get_json()["api_key"]
+
+        agent_attempt = self.client.post(
+            "/api/agent/hosts/agent-host-rotated/rotate-key",
+            headers={"X-NetGuard-Agent-Key": old_key},
+        )
+        self.assertEqual(agent_attempt.status_code, 401, agent_attempt.get_data(as_text=True))
+
+        rotate = self.client.post(
+            "/api/agent/hosts/agent-host-rotated/rotate-key",
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(rotate.status_code, 200, rotate.get_data(as_text=True))
+        rotated = rotate.get_json()
+        new_key = rotated["api_key"]
+        self.assertTrue(new_key.startswith("nga_"))
+        self.assertNotEqual(new_key, old_key)
+        self.assertEqual(rotated["host"]["api_key_prefix"], new_key[:16])
+
+        old_heartbeat = self.client.post(
+            "/api/agent/heartbeat",
+            json={"host_id": "agent-host-rotated"},
+            headers={"X-NetGuard-Agent-Key": old_key},
+        )
+        self.assertEqual(old_heartbeat.status_code, 401, old_heartbeat.get_data(as_text=True))
+
+        new_heartbeat = self.client.post(
+            "/api/agent/heartbeat",
+            json={"host_id": "agent-host-rotated", "platform": "windows"},
+            headers={"X-NetGuard-Agent-Key": new_key},
+        )
+        self.assertEqual(new_heartbeat.status_code, 200, new_heartbeat.get_data(as_text=True))
+        self.assertEqual(new_heartbeat.get_json()["host"]["status"], "online")
+
     def test_agent_action_queue_poll_and_ack_flow(self):
         register = self.client.post(
             "/api/agent/register",

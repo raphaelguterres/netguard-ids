@@ -224,6 +224,44 @@ def create_agent_api_blueprint(
         except LookupError:
             return jsonify({"error": "host_nao_encontrado"}), 404
 
+    @bp.route("/api/agent/hosts/<path:host_id>/rotate-key", methods=["POST"])
+    def agent_rotate_host_key(host_id: str):
+        """Rotates a host API key and returns the new secret once."""
+        try:
+            auth_ctx = authenticate_agent_request(
+                allow_agent_key=False,
+                require_management=True,
+            )
+            data = request.get_json(silent=True) or {}
+            safe_host_id = sanitize_text(str(host_id or ""), max_len=128)
+            if not safe_host_id:
+                return jsonify({"error": "host_id obrigatorio"}), 400
+            tenant_override = sanitize_text(str(data.get("tenant_id") or ""), max_len=128)
+            host, api_key = get_agent_service().rotate_host_api_key(
+                auth_ctx=auth_ctx,
+                host_id=safe_host_id,
+                tenant_id=tenant_override or None,
+            )
+            set_request_tenant_context(str(host.get("tenant_id") or auth_ctx.tenant_id), "analyst")
+            audit_fn(
+                "AGENT_KEY_ROTATED",
+                actor=safe_host_id,
+                ip=request.remote_addr or "-",
+                detail=f"tenant={host.get('tenant_id')} prefix={api_key[:16]}",
+            )
+            return jsonify({
+                "ok": True,
+                "host": host,
+                "api_key": api_key,
+                "warning": "api_key exibida uma unica vez; atualize o credential store do endpoint",
+            })
+        except PermissionError as exc:
+            if str(exc) == "unauthorized":
+                return jsonify({"error": "Unauthorized"}), 401
+            return jsonify({"error": "Permissao insuficiente"}), 403
+        except LookupError:
+            return jsonify({"error": "host_nao_encontrado"}), 404
+
     @bp.route("/api/agent/hosts/<path:host_id>/actions", methods=["POST"])
     def agent_queue_host_action(host_id: str):
         """Queues a response action for a specific enrolled host."""

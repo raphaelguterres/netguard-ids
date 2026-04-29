@@ -465,6 +465,8 @@ class HostRepository:
             return False
         existing["api_key_hash"] = api_key_hash
         existing["api_key_prefix"] = api_key_prefix
+        existing["metadata"] = self._json_load(existing.get("metadata"), default={})
+        existing["tags"] = self._json_load(existing.get("tags"), default=[])
         existing["updated_at"] = _utc_now()
         self._write_host(existing)
         return True
@@ -481,6 +483,8 @@ class HostRepository:
             return False
         existing["api_key_hash"] = None
         existing["api_key_prefix"] = None
+        existing["metadata"] = self._json_load(existing.get("metadata"), default={})
+        existing["tags"] = self._json_load(existing.get("tags"), default=[])
         existing["status"] = "revoked"
         existing["updated_at"] = _utc_now()
         self._write_host(existing)

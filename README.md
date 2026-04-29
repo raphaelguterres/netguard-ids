@@ -132,6 +132,15 @@ curl -X POST http://127.0.0.1:5000/api/agent/register \
 The issued `nga_...` host key is stored by the agent in its local credential
 store for unattended restarts. Windows uses DPAPI when available.
 
+If an endpoint credential must be refreshed without deleting telemetry, rotate
+the host key and update the agent credential store with the returned one-time
+`nga_...` value:
+
+```bash
+curl -X POST http://127.0.0.1:5000/api/agent/hosts/lab-win-01/rotate-key \
+  -H "X-API-Token: <admin-or-analyst-token>"
+```
+
 To build the standalone Windows binary:
 
 ```powershell
@@ -290,6 +299,7 @@ Operators can inspect loaded built-in and YAML detection content through `/api/d
 | `/api/agent/enrollment-token` | `POST` | Create a short-lived one-time/semi-bulk enrollment token |
 | `/api/agent/enrollment-token/revoke` | `POST` | Revoke an unused enrollment token by raw value |
 | `/api/agent/register` | `POST` | Enroll a host and issue a host API key |
+| `/api/agent/hosts/<host_id>/rotate-key` | `POST` | Rotate a host key and return the new secret once |
 | `/api/agent/hosts/<host_id>/revoke` | `POST` | Revoke a host key while preserving telemetry/history |
 | `/api/agent/hosts/<host_id>/actions` | `POST` | Queue a response action for an enrolled host |
 | `/api/agent/actions/<action_id>/cancel` | `POST` | Cancel a pending/leased response action |
@@ -398,7 +408,7 @@ The new coverage adds checks for:
 - [x] Incident API with severity, status, assignment, and comments
 - [x] YAML rule loader with bundled examples
 - [x] Repository abstraction for hosts and incidents
-- [x] Persistent host-key credential store, short-lived enrollment tokens, and host key revocation
+- [x] Persistent host-key credential store, short-lived enrollment tokens, and host key rotation/revocation
 - [x] Server-to-agent response action queue with polling, ACK, and safe agent executor
 - [x] Server-side signed policy gate for destructive response action queuing
 - [x] Shared SQLite rate limiting for the modular EDR ingest API

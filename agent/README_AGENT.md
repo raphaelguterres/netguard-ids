@@ -80,6 +80,15 @@ Copy the returned `nga_...` value into `NETGUARD_AGENT_API_KEY` or
 `credentials.json` and can restart with `api_key: "CHANGE_ME"` as long as
 the credential store remains intact.
 
+To rotate a host key without deleting endpoint history, call the management
+endpoint, update the returned `nga_...` in the endpoint credential store, and
+restart the service:
+
+```powershell
+curl.exe -X POST http://127.0.0.1:5000/api/agent/hosts/lab-win-01/rotate-key `
+  -H "X-API-Token: <admin-or-analyst-token>"
+```
+
 To revoke a compromised endpoint key without deleting host history:
 
 ```powershell
