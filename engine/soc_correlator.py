@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
@@ -270,7 +270,7 @@ class SocCorrelator:
         event_ids: list[str],
     ) -> Alert:
         return Alert(
-            alert_id=str(uuid.uuid4()),
+            alert_id=_stable_correlation_alert_id(rule_id, host_id, event_ids),
             host_id=host_id,
             rule_id=rule_id,
             severity=severity,
@@ -283,3 +283,17 @@ class SocCorrelator:
             event_ids=list(event_ids),
             status="open",
         )
+
+
+def _stable_correlation_alert_id(
+    rule_id: str,
+    host_id: str,
+    event_ids: list[str],
+) -> str:
+    seed = "|".join([
+        "netguard:correlation",
+        rule_id,
+        host_id,
+        *sorted(str(item) for item in event_ids if item),
+    ])
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, seed))

@@ -7,10 +7,6 @@ Uses Flask test client; falls back gracefully if Flask isn't installed
 
 from __future__ import annotations
 
-import json
-import os
-import uuid
-
 import pytest
 
 from server.auth import (
@@ -166,6 +162,37 @@ def test_ingestion_persists_events_and_dedups(tmp_path):
     # Replay → no new events
     r2 = pipe.process(payload)
     assert r2.new_events == 0
+
+
+def test_ingestion_replay_does_not_duplicate_detection_alerts(tmp_path):
+    repo = _repo(tmp_path)
+    pipe = IngestionPipeline(repo)
+    payload = {
+        "host_id": "h-retry",
+        "hostname": "WIN-RETRY",
+        "agent_version": "1.0.0",
+        "events": [
+            {
+                "event_id": "ev-retry-ps",
+                "timestamp": "2026-04-27T12:00:00Z",
+                "event_type": "process_execution",
+                "process_name": "powershell.exe",
+                "command_line": "powershell -enc SQB3AHIAaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            },
+        ],
+    }
+
+    first = pipe.process(payload)
+    second = pipe.process(payload)
+
+    assert first.alerts
+    assert second.alerts
+    assert first.alerts[0].alert_id == second.alerts[0].alert_id
+    stored = [
+        item for item in repo.list_alerts(host_id="h-retry", limit=20)
+        if item.rule_id == "NG-EXEC-PS-ENC-001"
+    ]
+    assert len(stored) == 1
 
 
 def test_ingestion_runs_detection(tmp_path):

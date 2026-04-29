@@ -421,7 +421,7 @@ class DetectionEngine:
     def _build_alert(self, rule: Rule, ev: Event, evidence: str) -> Alert:
         tactic = mitre_mapper.tactic_for(rule.mitre_technique)
         return Alert(
-            alert_id=str(uuid.uuid4()),
+            alert_id=_stable_alert_id(rule.rule_id, ev.host_id, ev.event_id),
             host_id=ev.host_id,
             rule_id=rule.rule_id,
             severity=rule.severity,
@@ -437,6 +437,11 @@ class DetectionEngine:
 
 
 # ── Convenience module-level functions ──────────────────────────────
+
+def _stable_alert_id(rule_id: str, host_id: str, event_id: str) -> str:
+    seed = f"netguard:detection:{rule_id}:{host_id}:{event_id}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, seed))
+
 
 _default_engine = DetectionEngine()
 

@@ -104,5 +104,26 @@ def test_correlator_dedups_minute_bucket():
     assert len(burst) == 1
 
 
+def test_correlator_uses_stable_ids_for_same_source_alerts():
+    ps = _alert(
+        rule="NG-EXEC-PS-ENC-001",
+        technique="T1059.001",
+        tactic="Defense Evasion",
+        offset_s=0,
+    )
+    net = _alert(
+        rule="NG-NET-RARE-PORT-001",
+        technique="T1071",
+        tactic="Command and Control",
+        offset_s=60,
+    )
+    first = SocCorrelator().correlate([ps, net])
+    second = SocCorrelator().correlate([ps, net])
+
+    assert first
+    assert second
+    assert first[0].alert_id == second[0].alert_id
+
+
 def test_empty_input_returns_empty():
     assert SocCorrelator().correlate([]) == []
