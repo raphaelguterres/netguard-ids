@@ -12,6 +12,7 @@ O tenant é identificado pelo token do agente (mapeado em app.py).
 
 import os
 import json
+import hashlib
 import logging
 import threading
 import time
@@ -136,6 +137,56 @@ _DDL_MIGRATION_POSTGRES = """
     ALTER TABLE tenants ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'analyst';
     ALTER TABLE tenants ADD COLUMN IF NOT EXISTS scopes TEXT NOT NULL DEFAULT '';
 """
+
+_LEGACY_MIGRATION_COMPONENT = "event_repository"
+_LEGACY_MIGRATIONS = [
+    {
+        "version": 1,
+        "name": "tenant_scoped_security_columns",
+        "description": (
+            "Add tenant_id propagation columns plus tenant token hashing, "
+            "RBAC role, and scoped-token metadata to legacy event storage."
+        ),
+        "columns": {
+            "events": [
+                ("tenant_id", "TEXT NOT NULL DEFAULT 'default'"),
+            ],
+            "baselines": [
+                ("tenant_id", "TEXT NOT NULL DEFAULT 'default'"),
+            ],
+            "event_stats": [
+                ("tenant_id", "TEXT NOT NULL DEFAULT 'default'"),
+            ],
+            "tenants": [
+                ("email", "TEXT DEFAULT ''"),
+                ("stripe_customer_id", "TEXT DEFAULT ''"),
+                ("stripe_subscription_id", "TEXT DEFAULT ''"),
+                ("token_hash", "TEXT"),
+                ("token_prefix", "TEXT"),
+                ("role", "TEXT NOT NULL DEFAULT 'analyst'"),
+                ("scopes", "TEXT NOT NULL DEFAULT ''"),
+            ],
+        },
+    },
+]
+
+
+def _legacy_migration_checksum(item: dict) -> str:
+    seed = json.dumps(
+        {
+            "version": item["version"],
+            "name": item["name"],
+            "description": item.get("description") or "",
+            "columns": item.get("columns") or {},
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()
+
+
+for _legacy_item in _LEGACY_MIGRATIONS:
+    _legacy_item["checksum"] = _legacy_migration_checksum(_legacy_item)
 
 _DDL_POSTGRES = """
     CREATE TABLE IF NOT EXISTS events (
@@ -284,6 +335,7 @@ class EventRepository:
             conn.commit()
             conn.close()
         # Aplica migrations (adiciona colunas novas em bancos pré-existentes)
+        self._ensure_legacy_migration_table()
         self._migrate_schema()
         self._ensure_aux_tables()
         self._harden_tenant_tokens()
@@ -1100,52 +1152,200 @@ class EventRepository:
 
     # ── Migrations (adiciona colunas novas em DBs existentes) ─────
 
+    def _ensure_legacy_migration_table(self):
+        applied_type = "TIMESTAMPTZ NOT NULL" if USE_POSTGRES else "TEXT NOT NULL"
+        ddl = f"""
+            CREATE TABLE IF NOT EXISTS legacy_schema_migrations (
+                component   TEXT NOT NULL,
+                version     INTEGER NOT NULL,
+                name        TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                checksum    TEXT NOT NULL DEFAULT '',
+                status      TEXT NOT NULL DEFAULT 'applied',
+                error       TEXT NOT NULL DEFAULT '',
+                applied_at  {applied_type},
+                PRIMARY KEY (component, version)
+            )
+        """
+        if USE_POSTGRES:
+            cur = self._conn().cursor()
+            cur.execute(ddl)
+            self._conn().commit()
+            cur.close()
+        else:
+            self._conn().execute(ddl)
+            self._conn().commit()
+
+    def _legacy_migration_applied_at(self):
+        if USE_POSTGRES:
+            return datetime.now(timezone.utc)
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def _column_exists(self, table: str, column: str) -> bool:
+        if USE_POSTGRES:
+            cur = self._conn().cursor()
+            cur.execute(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = %s
+                  AND column_name = %s
+                """,
+                (table, column),
+            )
+            found = cur.fetchone() is not None
+            cur.close()
+            return found
+        rows = self._conn().execute(f"PRAGMA table_info({table})").fetchall()
+        return any(str(row["name"]) == column for row in rows)
+
+    def _apply_column_migration(self, table: str, column: str, definition: str) -> bool:
+        if self._column_exists(table, column):
+            return False
+        if USE_POSTGRES:
+            cur = self._conn().cursor()
+            cur.execute(
+                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}"
+            )
+            self._conn().commit()
+            cur.close()
+        else:
+            self._conn().execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+            )
+            self._conn().commit()
+        return True
+
+    def _record_legacy_migration(self, item: dict, *, status: str, error: str = ""):
+        ph = self._placeholder()
+        sql = f"""
+            INSERT INTO legacy_schema_migrations (
+                component, version, name, description, checksum, status, error, applied_at
+            ) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
+            ON CONFLICT(component, version) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                checksum = excluded.checksum,
+                status = excluded.status,
+                error = excluded.error,
+                applied_at = excluded.applied_at
+        """
+        params = (
+            _LEGACY_MIGRATION_COMPONENT,
+            int(item["version"]),
+            item["name"],
+            item.get("description") or "",
+            item["checksum"],
+            status,
+            (error or "")[:500],
+            self._legacy_migration_applied_at(),
+        )
+        if USE_POSTGRES:
+            cur = self._conn().cursor()
+            cur.execute(sql, params)
+            self._conn().commit()
+            cur.close()
+        else:
+            self._conn().execute(sql, params)
+            self._conn().commit()
+
+    def legacy_migration_history(self) -> list[dict]:
+        try:
+            self._ensure_legacy_migration_table()
+            ph = self._placeholder()
+            sql = f"""
+                SELECT component, version, name, description, checksum, status, error, applied_at
+                FROM legacy_schema_migrations
+                WHERE component={ph}
+                ORDER BY version ASC
+            """
+            if USE_POSTGRES:
+                cur = self._conn().cursor()
+                cur.execute(sql, (_LEGACY_MIGRATION_COMPONENT,))
+                rows = cur.fetchall()
+                cur.close()
+                return [dict(row) for row in rows]
+            rows = self._conn().execute(sql, (_LEGACY_MIGRATION_COMPONENT,)).fetchall()
+            return [dict(row) for row in rows]
+        except Exception as exc:
+            logger.debug("legacy_migration_history unavailable: %s", exc)
+            return []
+
+    def legacy_migration_status(self) -> dict:
+        expected = {int(item["version"]): item for item in _LEGACY_MIGRATIONS}
+        history = self.legacy_migration_history()
+        applied = {int(item["version"]): item for item in history}
+        pending = [
+            dict(item)
+            for version, item in expected.items()
+            if version not in applied
+        ]
+        failed = [
+            dict(item)
+            for item in history
+            if str(item.get("status") or "").lower() != "applied"
+        ]
+        mismatched = []
+        for version, item in applied.items():
+            expected_item = expected.get(version)
+            if not expected_item:
+                continue
+            if item.get("checksum") != expected_item["checksum"]:
+                mismatched.append({
+                    "version": version,
+                    "expected": expected_item["checksum"],
+                    "actual": item.get("checksum") or "",
+                    "name": item.get("name") or expected_item["name"],
+                })
+        unknown = [
+            dict(item)
+            for version, item in applied.items()
+            if version not in expected
+        ]
+        latest_version = max(expected) if expected else 0
+        current_version = max(applied) if applied else 0
+        return {
+            "ok": not pending and not failed and not mismatched and not unknown,
+            "component": _LEGACY_MIGRATION_COMPONENT,
+            "schema_version": current_version,
+            "latest_version": latest_version,
+            "pending": pending,
+            "failed": failed,
+            "mismatched": mismatched,
+            "unknown": unknown,
+            "history": history,
+        }
+
     def _migrate_schema(self):
         """
         Adiciona colunas ausentes em bancos pré-existentes.
-        Seguro de rodar múltiplas vezes — ignora colunas que já existem.
+        Seguro de rodar múltiplas vezes, mas registra status e falhas reais.
         """
-        migrations = {
-            # tabela: [(coluna, definição), ...]
-            "events": [
-                ("tenant_id",    "TEXT NOT NULL DEFAULT 'default'"),
-            ],
-            "baselines": [
-                ("tenant_id",    "TEXT NOT NULL DEFAULT 'default'"),
-            ],
-            "event_stats": [
-                ("tenant_id",    "TEXT NOT NULL DEFAULT 'default'"),
-            ],
-            "tenants": [
-                ("email",                  "TEXT DEFAULT ''"),
-                ("stripe_customer_id",     "TEXT DEFAULT ''"),
-                ("stripe_subscription_id", "TEXT DEFAULT ''"),
-                # Security migrations — token hashing e RBAC
-                ("token_hash",             "TEXT"),
-                ("token_prefix",           "TEXT"),
-                ("role",                   "TEXT NOT NULL DEFAULT 'analyst'"),
-                ("scopes",                 "TEXT NOT NULL DEFAULT ''"),
-            ],
-        }
-
-        for table, cols in migrations.items():
-            for col, definition in cols:
-                try:
-                    if USE_POSTGRES:
-                        cur = self._conn().cursor()
-                        cur.execute(
-                            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {definition}"
-                        )
-                        self._conn().commit()
-                        cur.close()
-                    else:
-                        self._conn().execute(
-                            f"ALTER TABLE {table} ADD COLUMN {col} {definition}"
-                        )
-                        self._conn().commit()
-                    logger.debug("Migration OK: %s.%s", table, col)
-                except Exception:
-                    pass  # Coluna já existe ou tabela não existe ainda — ignorar
+        for item in _LEGACY_MIGRATIONS:
+            try:
+                changed = []
+                for table, cols in (item.get("columns") or {}).items():
+                    for col, definition in cols:
+                        if self._apply_column_migration(table, col, definition):
+                            changed.append(f"{table}.{col}")
+                self._record_legacy_migration(item, status="applied")
+                if changed:
+                    logger.info(
+                        "Legacy migration applied: %s v%s changed=%s",
+                        _LEGACY_MIGRATION_COMPONENT,
+                        item["version"],
+                        ",".join(changed),
+                    )
+            except Exception as exc:
+                self._record_legacy_migration(item, status="failed", error=str(exc))
+                logger.error(
+                    "Legacy migration failed: %s v%s %s",
+                    _LEGACY_MIGRATION_COMPONENT,
+                    item["version"],
+                    exc,
+                )
+                raise
 
     def _upgrade_legacy_tenant_token(self, tenant_id: str, token: str) -> bool:
         """Migra um tenant legado de plaintext para referência opaca + hash."""

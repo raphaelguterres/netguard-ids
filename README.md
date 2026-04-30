@@ -428,6 +428,7 @@ The new coverage adds checks for:
 - [x] Versioned EDR storage migration metadata with checksums/status reporting
 - [x] Tenant-scoped API tokens with narrower operational scopes for agent flows
 - [x] Redis rate-limit backend for multi-node EDR ingest deployments
+- [x] Legacy event/tenant repository migration metadata with checksum/status reporting
 - [ ] Full domain migrations for all legacy app tables
 - [x] Agent packaging as service/daemon for Windows and Linux
 - [ ] Endpoint-side destructive response handlers beyond fail-closed stubs

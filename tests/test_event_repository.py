@@ -92,6 +92,22 @@ class TestEventRepositoryTokenStorage(unittest.TestCase):
         self.assertEqual(tenant["role"], "viewer")
         self.assertEqual(tenant["scopes"], ["events:write"])
 
+    def test_legacy_schema_migration_status_is_recorded(self):
+        repo = self._repo()
+
+        status = repo.legacy_migration_status()
+
+        self.assertTrue(status["ok"], status)
+        self.assertEqual(status["component"], "event_repository")
+        self.assertEqual(status["schema_version"], status["latest_version"])
+        self.assertEqual(status["pending"], [])
+        self.assertEqual(status["failed"], [])
+        self.assertEqual(status["mismatched"], [])
+        self.assertEqual(status["unknown"], [])
+        self.assertGreaterEqual(len(status["history"]), 1)
+        self.assertEqual(status["history"][0]["status"], "applied")
+        self.assertTrue(status["history"][0]["checksum"])
+
     def test_update_tenant_token_scrubs_plaintext_and_preserves_lookup(self):
         repo = self._repo()
         tenant_id = "tenant-rotate"
