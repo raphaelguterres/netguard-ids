@@ -348,6 +348,11 @@ the queued policy with `NETGUARD_AGENT_RESPONSE_POLICY_SECRET` before any
 guarded handler can run; destructive handlers remain disabled/not implemented
 by default.
 
+`collect_diagnostics` is intentionally non-destructive: it returns runtime
+health, buffer state, collection toggles, transport posture, and response-action
+configuration without echoing API keys, policy secrets, query strings, or URL
+userinfo.
+
 ### Platform
 
 | Endpoint | Method | Purpose |

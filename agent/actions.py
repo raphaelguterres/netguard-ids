@@ -7,7 +7,7 @@ import hmac
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from agent.sender import EventSender
@@ -152,12 +152,14 @@ class AgentActionExecutor:
         sender: EventSender,
         allow_destructive: bool = False,
         response_policy_secret: str = "",
+        diagnostics_provider: Callable[[], dict[str, Any]] | None = None,
     ):
         self.host_id = host_id
         self.host_facts = host_facts
         self.sender = sender
         self.allow_destructive = bool(allow_destructive)
         self.response_policy_secret = str(response_policy_secret or "")
+        self.diagnostics_provider = diagnostics_provider
 
     def execute(self, action: dict[str, Any]) -> ActionExecutionResult:
         action_type = str(action.get("action_type") or "").strip().lower()
@@ -178,14 +180,33 @@ class AgentActionExecutor:
             return ActionExecutionResult("failed", {"error": exc.__class__.__name__})
 
     def _collect_diagnostics(self) -> dict[str, Any]:
-        return {
+        diagnostics = {
             "host_id": self.host_id,
             "hostname": self.host_facts.get("hostname", ""),
             "platform": self.host_facts.get("platform", ""),
+            "platform_version": self.host_facts.get("platform_version", ""),
             "agent_user": self.host_facts.get("user", ""),
             "buffer_pending": self.sender.buffer.size(),
-            "server_url": self.sender.server_url,
+            "buffer_path": str(self.sender.buffer.db_path),
+            "server_url": _redact_url(self.sender.server_url),
+            "transport": {
+                "server_url": _redact_url(self.sender.server_url),
+                "verify_tls": self.sender.verify_tls,
+                "timeout_seconds": self.sender.timeout,
+                "max_retries": self.sender.max_retries,
+                "backoff_factor": self.sender.backoff_factor,
+            },
+            "generated_at": int(time.time()),
         }
+        if self.diagnostics_provider:
+            try:
+                extra = self.diagnostics_provider()
+                if isinstance(extra, dict):
+                    diagnostics.update(extra)
+            except Exception as exc:
+                logger.warning("diagnostics provider failed: %s", exc)
+                diagnostics["diagnostics_provider_error"] = exc.__class__.__name__
+        return diagnostics
 
     def _handle_guarded_action(self, action_type: str, action: dict[str, Any]) -> ActionExecutionResult:
         if not self.allow_destructive:
@@ -277,3 +298,13 @@ class AgentActionExecutor:
         if not hmac.compare_digest(expected, signature):
             return False, "invalid_policy_signature"
         return True, "ok"
+
+
+def _redact_url(value: str) -> str:
+    """Remove query/fragment/userinfo before echoing endpoint URLs in ACKs."""
+    try:
+        parts = urlsplit(value or "")
+    except ValueError:
+        return ""
+    safe_netloc = parts.netloc.rsplit("@", 1)[-1]
+    return urlunsplit((parts.scheme, safe_netloc, parts.path, "", ""))

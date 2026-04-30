@@ -322,6 +322,11 @@ def test_agent_setup_loads_api_key_from_credential_store(tmp_path, monkeypatch):
     assert agent.config.api_key == secret
     assert agent.sender is not None
     assert agent.sender.api_key == secret
+    diagnostics = agent._runtime_diagnostics()
+    assert diagnostics["runtime"]["agent_version"]
+    assert diagnostics["buffer"]["pending"] == 0
+    assert diagnostics["collection"]["interval_seconds"] == 5
+    assert diagnostics["response_actions"]["destructive_enabled"] is False
 
 
 def test_action_url_derivation():
@@ -343,21 +348,35 @@ def test_action_executor_collects_diagnostics_and_refuses_destructive(tmp_path):
     from server.response_policy import sign_response_policy
 
     sender = EventSender(
-        server_url="http://127.0.0.1:5000/api/events",
+        server_url="http://agent:secret@127.0.0.1:5000/api/events?token=secret",
         api_key="nga_test",
         verify_tls=False,
         buffer_path=tmp_path / "buf.db",
     )
     executor = AgentActionExecutor(
         host_id="host-1",
-        host_facts={"hostname": "WIN-01", "platform": "windows", "user": "SYSTEM"},
+        host_facts={
+            "hostname": "WIN-01",
+            "platform": "windows",
+            "platform_version": "10.0",
+            "user": "SYSTEM",
+        },
         sender=sender,
+        diagnostics_provider=lambda: {
+            "runtime": {"agent_version": "1.0.0-test", "uptime_seconds": 42},
+            "collection": {"processes": True, "connections": False},
+        },
     )
 
     diagnostics = executor.execute({"action_type": "collect_diagnostics"})
     assert diagnostics.status == "succeeded"
     assert diagnostics.result["host_id"] == "host-1"
     assert diagnostics.result["buffer_pending"] == 0
+    assert diagnostics.result["platform_version"] == "10.0"
+    assert diagnostics.result["runtime"]["uptime_seconds"] == 42
+    assert diagnostics.result["collection"]["connections"] is False
+    assert diagnostics.result["transport"]["server_url"] == "http://127.0.0.1:5000/api/events"
+    assert "secret" not in str(diagnostics.result)
 
     refused = executor.execute({"action_type": "isolate_host"})
     assert refused.status == "refused"

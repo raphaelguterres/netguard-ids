@@ -108,8 +108,10 @@ action to `/api/agent/actions/<action_id>/ack`.
 Safe actions enabled by default:
 
 - `ping`
-- `collect_diagnostics`
-- `flush_buffer`
+- `collect_diagnostics`: returns host/runtime state, buffer health, collection
+  toggles, transport settings, and response-action posture. API keys, policy
+  secrets, query strings, and URL userinfo are not returned.
+- `flush_buffer`: asks the agent to drain pending offline telemetry batches.
 
 Guarded actions are intentionally refused by default:
 

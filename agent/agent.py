@@ -117,6 +117,7 @@ class NetGuardAgent:
         self._drain_thread: threading.Thread | None = None
         self._last_presence_post = 0.0
         self._last_action_poll = 0.0
+        self._started_at = time.time()
 
     # ──────────────────────────────────────────────────────────────
     # Lifecycle
@@ -155,6 +156,7 @@ class NetGuardAgent:
             sender=self.sender,
             allow_destructive=self.config.allow_destructive_response_actions,
             response_policy_secret=self.config.response_policy_secret,
+            diagnostics_provider=self._runtime_diagnostics,
         )
 
         logger.info(
@@ -270,6 +272,37 @@ class NetGuardAgent:
                 outcome.status,
             )
         return completed
+
+    def _runtime_diagnostics(self) -> dict:
+        buffer_path = ""
+        buffer_pending = 0
+        if self.sender:
+            buffer_path = str(self.sender.buffer.db_path)
+            buffer_pending = self.sender.buffer.size()
+        return {
+            "runtime": {
+                "agent_version": __version__,
+                "uptime_seconds": max(0, int(time.time() - self._started_at)),
+                "host_id": self.host_id,
+            },
+            "buffer": {
+                "pending": buffer_pending,
+                "path": buffer_path,
+                "offline_buffer_max": self.config.offline_buffer_max,
+            },
+            "collection": {
+                "processes": bool(self.config.collect_processes),
+                "connections": bool(self.config.collect_connections),
+                "security_indicators": bool(self.config.collect_security_indicators),
+                "interval_seconds": int(self.config.interval_seconds),
+                "batch_max_events": int(self.config.batch_max_events),
+            },
+            "response_actions": {
+                "enabled": bool(self.config.enable_response_actions),
+                "poll_interval_seconds": int(self.config.action_poll_interval_seconds),
+                "destructive_enabled": bool(self.config.allow_destructive_response_actions),
+            },
+        }
 
     def run(self) -> int:
         """Loop principal — bloqueia até stop(). Retorna exit code."""
