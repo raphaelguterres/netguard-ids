@@ -10,7 +10,11 @@ from flask import Flask
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+os.environ.setdefault("IDS_ENV", "test")
+os.environ.setdefault("TOKEN_SIGNING_SECRET", "auth-test-signing-key")
+
 import auth  # noqa: E402
+from security import normalize_token_scopes, token_has_scope  # noqa: E402
 
 
 class TestAuthCsrfFlow(unittest.TestCase):
@@ -158,6 +162,24 @@ class TestStartupGuards(unittest.TestCase):
         self.assertTrue(auth.is_loopback_bind("[::1]"))
         self.assertFalse(auth.is_loopback_bind("0.0.0.0"))
         self.assertFalse(auth.is_loopback_bind("example.com"))
+
+
+class TestTokenScopes(unittest.TestCase):
+
+    def test_legacy_scopes_are_derived_from_role(self):
+        scopes = normalize_token_scopes("", role="analyst")
+        self.assertIn("events:write", scopes)
+        self.assertIn("hosts:manage", scopes)
+        self.assertTrue(token_has_scope(scopes, "events:write"))
+        self.assertTrue(token_has_scope(["hosts:*"], "hosts:manage"))
+
+    def test_explicit_empty_scope_has_no_permissions(self):
+        self.assertEqual(normalize_token_scopes("[]", role="admin"), [])
+        self.assertFalse(token_has_scope([], "events:write", role="admin"))
+
+    def test_scope_normalizer_rejects_malformed_values(self):
+        scopes = normalize_token_scopes(["events:write", "bad", "hosts:*"])
+        self.assertEqual(scopes, ["events:write", "hosts:*"])
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from security import hash_token, role_level
+from security import hash_token, role_level, token_has_scope
 
 logger = logging.getLogger("netguard.agent_service")
 
@@ -30,14 +30,38 @@ class AgentAuthContext:
     role: str
     auth_type: str
     host_id: str = ""
+    scopes: tuple[str, ...] | None = None
+
+    def has_scope(self, scope: str) -> bool:
+        if self.auth_type == "admin":
+            return True
+        return token_has_scope(self.scopes if self.scopes is not None else "", scope, role=self.role)
 
     @property
     def can_manage_hosts(self) -> bool:
-        return self.auth_type == "admin" or role_level(self.role) >= role_level("analyst")
+        return (
+            self.auth_type == "admin"
+            or (
+                role_level(self.role) >= role_level("analyst")
+                and self.has_scope("hosts:manage")
+            )
+        )
 
     @property
     def can_push_events(self) -> bool:
-        return self.auth_type in {"admin", "tenant", "agent"}
+        return self.auth_type in {"admin", "agent"} or (
+            self.auth_type == "tenant" and self.has_scope("events:write")
+        )
+
+    @property
+    def can_queue_response_actions(self) -> bool:
+        return (
+            self.auth_type == "admin"
+            or (
+                role_level(self.role) >= role_level("analyst")
+                and self.has_scope("response:queue")
+            )
+        )
 
 
 class AgentService:
@@ -130,6 +154,7 @@ class AgentService:
             tenant_id=str(record.get("tenant_id") or "default"),
             role="analyst",
             auth_type="enrollment",
+            scopes=("hosts:manage",),
         )
 
     def revoke_enrollment_token(

@@ -252,6 +252,7 @@ python -m netguard_agent \
 Operational recommendation:
 
 - use bootstrap token for enrollment and controlled demos
+- use narrowly scoped tenant tokens for automation (`events:write` for ingest-only, not host management)
 - use host key for already-approved hosts
 - rotate host keys after suspected exposure and during planned credential refresh windows
 - verify the `agent/` credential store on the endpoint after first enrollment

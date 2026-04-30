@@ -34,7 +34,7 @@ class TestEventRepositoryTokenStorage(unittest.TestCase):
         conn.row_factory = sqlite3.Row
         try:
             row = conn.execute(
-                "SELECT tenant_id, token, token_hash, token_prefix FROM tenants WHERE tenant_id = ?",
+                "SELECT tenant_id, token, token_hash, token_prefix, scopes FROM tenants WHERE tenant_id = ?",
                 (tenant_id,),
             ).fetchone()
             return dict(row) if row else None
@@ -68,6 +68,29 @@ class TestEventRepositoryTokenStorage(unittest.TestCase):
         self.assertEqual(tenant["token"], token[:16])
         self.assertEqual(tenant["token_prefix"], token[:16])
         self.assertNotIn("token_hash", tenant)
+        self.assertIn("events:write", tenant["scopes"])
+        self.assertIn("hosts:manage", tenant["scopes"])
+
+    def test_create_tenant_can_persist_narrow_token_scopes(self):
+        repo = self._repo()
+        tenant_id = "tenant-scoped"
+        token = "ng_scoped_token_abcdefghijklmnopqrstuvwxyz123456"
+
+        ok = repo.create_tenant(
+            tenant_id=tenant_id,
+            name="Scoped Test",
+            token=token,
+            role="viewer",
+            scopes=["events:write"],
+        )
+
+        self.assertTrue(ok)
+        row = self._fetch_tenant_row(tenant_id)
+        self.assertEqual(row["scopes"], '["events:write"]')
+
+        tenant = repo.get_tenant_by_token(token)
+        self.assertEqual(tenant["role"], "viewer")
+        self.assertEqual(tenant["scopes"], ["events:write"])
 
     def test_update_tenant_token_scrubs_plaintext_and_preserves_lookup(self):
         repo = self._repo()

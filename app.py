@@ -683,6 +683,24 @@ def _resolve_tenant_with_role() -> tuple[str, str]:
 
 
 # ── App ───────────────────────────────────────────────────────────
+def _resolve_tenant_scopes(role: str = "viewer") -> list[str]:
+    if not AUTH_ENABLED:
+        return ["*"]
+    try:
+        token = _extract_token()
+        if token and AUTH_MODULE_OK:
+            result = verify_any_token(token, repo)
+            if result.get("type") == "admin":
+                return ["*"]
+            tenant = result.get("tenant") if result.get("valid") else None
+            if tenant:
+                t = dict(tenant) if not isinstance(tenant, dict) else tenant
+                return normalize_token_scopes(t.get("scopes"), role=str(t.get("role") or role))
+    except Exception:
+        pass
+    return normalize_token_scopes("", role=role)
+
+
 app = Flask(__name__)
 app.config.setdefault("NETGUARD_BOOTSTRAP_MODE", "singleton-module")
 
@@ -728,6 +746,7 @@ app.config["MAX_CONTENT_LENGTH"] = int(
 from security import (
         get_bf_guard, get_admin_rate_guard,
         require_role,
+        normalize_token_scopes,
         SensitiveDataFilter,
         validate_redirect_url, safe_filename,
         rotate_token,
@@ -1195,6 +1214,7 @@ def _authenticate_agent_request(
                 role="agent",
                 auth_type="agent",
                 host_id=str(host.get("host_id") or ""),
+                scopes=("events:write",),
             )
 
     token = _extract_token()
@@ -1205,12 +1225,14 @@ def _authenticate_agent_request(
                 tenant_id="admin",
                 role="admin",
                 auth_type="admin",
+                scopes=("*",),
             )
         tenant = result.get("tenant") or {}
         auth_ctx = AgentAuthContext(
             tenant_id=str(tenant.get("tenant_id") or "default"),
             role=str(tenant.get("role") or "viewer"),
             auth_type="tenant",
+            scopes=tuple(tenant.get("scopes") or ()),
         )
         if require_management and not auth_ctx.can_manage_hosts:
             raise PermissionError("insufficient_role")
@@ -3310,6 +3332,7 @@ def before():
     _request_ctx.tenant_id = _tid
     g.tenant_id   = _tid
     g.tenant_role = _role
+    g.tenant_scopes = _resolve_tenant_scopes(_role)
 
 @app.after_request
 def after(resp):
@@ -4422,7 +4445,7 @@ def xdr_summary():
 
 
 def _ensure_agent_writer(auth_ctx: AgentAuthContext) -> None:
-    if auth_ctx.auth_type == "tenant" and not auth_ctx.can_manage_hosts:
+    if not auth_ctx.can_push_events:
         raise PermissionError("insufficient_role")
 
 
@@ -8805,6 +8828,12 @@ def admin_tenants_create():
     name     = sanitize(data.get("name","").strip(), 200, "name")
     plan_key = data.get("plan", "pro")
     max_hosts = int(data.get("max_hosts", 10))
+    role = str(data.get("role", "analyst")).strip().lower()
+    if role not in {"admin", "analyst", "viewer"}:
+        role = "analyst"
+    scopes = data.get("scopes")
+    if not isinstance(scopes, (list, tuple, str, dict)):
+        scopes = None
     if not name:
         return jsonify({"error": "nome obrigatório"}), 400
     if plan_key not in ("free", "pro", "business", "enterprise"):
@@ -8813,11 +8842,19 @@ def admin_tenants_create():
     tenant_id = str(uuid.uuid4())
     try:
         repo.create_tenant(tenant_id=tenant_id, name=name, token=token,
-                           plan=plan_key, max_hosts=max_hosts)
+                           plan=plan_key, max_hosts=max_hosts, role=role,
+                           scopes=scopes)
+        created = repo.get_tenant_by_id(tenant_id) or {}
         audit("TENANT_CREATED", actor=tenant_id, ip=request.remote_addr or "-",
-              detail=f"plan={plan_key} name={name}")
+              detail=f"plan={plan_key} role={role} name={name}")
         _notify("TENANT_CREATED", tenant_id=tenant_id, name=name, plan=plan_key)
-        return jsonify({"ok": True, "tenant_id": tenant_id, "token": token}), 201
+        return jsonify({
+            "ok": True,
+            "tenant_id": tenant_id,
+            "token": token,
+            "role": created.get("role", role),
+            "scopes": created.get("scopes", []),
+        }), 201
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

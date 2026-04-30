@@ -111,6 +111,7 @@ _DDL_SQLITE = """
         token_hash             TEXT,
         token_prefix           TEXT,
         role                   TEXT NOT NULL DEFAULT 'analyst',
+        scopes                 TEXT NOT NULL DEFAULT '',
         plan                   TEXT NOT NULL DEFAULT 'free',
         max_hosts              INTEGER DEFAULT 1,
         created_at             TEXT DEFAULT (datetime('now')),
@@ -126,12 +127,14 @@ _DDL_MIGRATION_SQLITE = """
     ALTER TABLE tenants ADD COLUMN token_hash TEXT;
     ALTER TABLE tenants ADD COLUMN token_prefix TEXT;
     ALTER TABLE tenants ADD COLUMN role TEXT NOT NULL DEFAULT 'analyst';
+    ALTER TABLE tenants ADD COLUMN scopes TEXT NOT NULL DEFAULT '';
 """
 
 _DDL_MIGRATION_POSTGRES = """
     ALTER TABLE tenants ADD COLUMN IF NOT EXISTS token_hash TEXT;
     ALTER TABLE tenants ADD COLUMN IF NOT EXISTS token_prefix TEXT;
     ALTER TABLE tenants ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'analyst';
+    ALTER TABLE tenants ADD COLUMN IF NOT EXISTS scopes TEXT NOT NULL DEFAULT '';
 """
 
 _DDL_POSTGRES = """
@@ -195,6 +198,7 @@ _DDL_POSTGRES = """
         token_hash             TEXT,
         token_prefix           TEXT,
         role                   TEXT NOT NULL DEFAULT 'analyst',
+        scopes                 TEXT NOT NULL DEFAULT '',
         plan                   TEXT NOT NULL DEFAULT 'free',
         max_hosts              INTEGER DEFAULT 1,
         created_at             TIMESTAMPTZ DEFAULT NOW(),
@@ -332,12 +336,23 @@ class EventRepository:
         """Gera referência opaca determinística para manter compatibilidade do schema."""
         return f"tk_{token_hash}" if token_hash else ""
 
+    @staticmethod
+    def _scopes_json(scopes, *, role: str) -> str:
+        from security import normalize_token_scopes
+
+        return json.dumps(normalize_token_scopes(scopes, role=role))
+
     @classmethod
     def _sanitize_tenant_record(cls, tenant: Optional[dict]) -> Optional[dict]:
         """Remove materiais sensíveis de autenticação de objetos tenant retornados."""
         if not tenant:
             return None
         data = dict(tenant)
+        from security import normalize_token_scopes
+
+        role = str(data.get("role") or "analyst").strip().lower()
+        data["role"] = role
+        data["scopes"] = normalize_token_scopes(data.get("scopes"), role=role)
         prefix = data.get("token_prefix") or ""
         raw_token = data.get("token") or ""
         if not prefix and isinstance(raw_token, str) and raw_token.startswith("ng_"):
@@ -792,34 +807,37 @@ class EventRepository:
                       email: str = "",
                       stripe_customer_id: str = "",
                       stripe_subscription_id: str = "",
-                      role: str = "analyst") -> bool:
+                      role: str = "analyst",
+                      scopes=None) -> bool:
         ph = self._placeholder()
         try:
             from security import hash_token as _ht
 
+            normalized_role = str(role or "analyst").strip().lower()
             token_hash = _ht(token)
             token_ref = self._token_ref(token_hash)
             token_prefix = self._token_prefix(token)
+            scopes_json = self._scopes_json(scopes, role=normalized_role)
 
             if USE_POSTGRES:
                 cur = self._conn().cursor()
                 cur.execute(f"""
                     INSERT INTO tenants
-                        (tenant_id, name, token, token_hash, token_prefix, role, plan, max_hosts, email,
+                        (tenant_id, name, token, token_hash, token_prefix, role, scopes, plan, max_hosts, email,
                          stripe_customer_id, stripe_subscription_id)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
                     ON CONFLICT (tenant_id) DO NOTHING
-                """, (tenant_id, name, token_ref, token_hash, token_prefix, role, plan, max_hosts, email,
+                """, (tenant_id, name, token_ref, token_hash, token_prefix, normalized_role, scopes_json, plan, max_hosts, email,
                       stripe_customer_id, stripe_subscription_id))
                 self._conn().commit()
                 cur.close()
             else:
                 self._conn().execute(f"""
                     INSERT OR IGNORE INTO tenants
-                        (tenant_id, name, token, token_hash, token_prefix, role, plan, max_hosts, email,
+                        (tenant_id, name, token, token_hash, token_prefix, role, scopes, plan, max_hosts, email,
                          stripe_customer_id, stripe_subscription_id)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
-                """, (tenant_id, name, token_ref, token_hash, token_prefix, role, plan, max_hosts, email,
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+                """, (tenant_id, name, token_ref, token_hash, token_prefix, normalized_role, scopes_json, plan, max_hosts, email,
                       stripe_customer_id, stripe_subscription_id))
                 self._conn().commit()
             return True
@@ -1106,6 +1124,7 @@ class EventRepository:
                 ("token_hash",             "TEXT"),
                 ("token_prefix",           "TEXT"),
                 ("role",                   "TEXT NOT NULL DEFAULT 'analyst'"),
+                ("scopes",                 "TEXT NOT NULL DEFAULT ''"),
             ],
         }
 

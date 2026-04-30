@@ -229,6 +229,69 @@ class TestAgentServerApi(unittest.TestCase):
         self.assertEqual(response.status_code, 403, response.get_data(as_text=True))
         self.assertIn("Permissao", response.get_json()["error"])
 
+    def test_scoped_ingest_token_can_write_events_but_not_manage_hosts(self):
+        tenant_token = "ng_ingest_scoped_test_token_1234567890"
+        self.repo.create_tenant(
+            tenant_id="tenant-ingest",
+            name="Ingest Scoped Tenant",
+            token=tenant_token,
+            role="viewer",
+            scopes=["events:write"],
+            max_hosts=5,
+        )
+
+        heartbeat = self.client.post(
+            "/api/agent/heartbeat",
+            json={
+                "host_id": "scoped-ingest-host",
+                "display_name": "Scoped Ingest Host",
+                "platform": "windows",
+            },
+            headers={"Authorization": f"Bearer {tenant_token}"},
+        )
+        self.assertEqual(heartbeat.status_code, 200, heartbeat.get_data(as_text=True))
+        self.assertEqual(heartbeat.get_json()["host"]["tenant_id"], "tenant-ingest")
+
+        register = self.client.post(
+            "/api/agent/register",
+            json={"host_id": "scoped-register-blocked", "platform": "windows"},
+            headers={"Authorization": f"Bearer {tenant_token}"},
+        )
+        self.assertEqual(register.status_code, 403, register.get_data(as_text=True))
+
+        create_token = self.client.post(
+            "/api/agent/enrollment-token",
+            json={"tenant_id": "tenant-ingest"},
+            headers={"Authorization": f"Bearer {tenant_token}"},
+        )
+        self.assertEqual(create_token.status_code, 403, create_token.get_data(as_text=True))
+
+    def test_response_actions_require_response_queue_scope(self):
+        tenant_token = "ng_host_manage_no_response_scope_1234567890"
+        self.repo.create_tenant(
+            tenant_id="tenant-host-manager",
+            name="Host Manager Tenant",
+            token=tenant_token,
+            role="analyst",
+            scopes=["hosts:manage"],
+            max_hosts=5,
+        )
+
+        register = self.client.post(
+            "/api/agent/register",
+            json={"host_id": "scope-action-host", "platform": "windows"},
+            headers={"Authorization": f"Bearer {tenant_token}"},
+        )
+        self.assertEqual(register.status_code, 201, register.get_data(as_text=True))
+
+        queued = self.client.post(
+            "/api/agent/hosts/scope-action-host/actions",
+            json={"action_type": "ping", "reason": "scope regression"},
+            headers={"Authorization": f"Bearer {tenant_token}"},
+        )
+        self.assertEqual(queued.status_code, 403, queued.get_data(as_text=True))
+        self.assertEqual(queued.get_json()["error"], "insufficient_scope")
+
     def test_agent_key_cannot_write_other_host(self):
         register = self.client.post(
             "/api/agent/register",

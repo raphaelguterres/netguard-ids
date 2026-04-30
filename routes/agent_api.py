@@ -280,6 +280,8 @@ def create_agent_api_blueprint(
                     "error": "invalid_action_type",
                     "allowed": sorted(valid_action_types),
                 }), 400
+            if not auth_ctx.can_queue_response_actions:
+                return jsonify({"error": "insufficient_scope", "scope": "response:queue"}), 403
             payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
             tenant_id = _effective_action_tenant(auth_ctx, data)
             host = get_agent_service().host_repo.get_host(safe_host_id, tenant_id=tenant_id)

@@ -20,13 +20,14 @@ from __future__ import annotations
 import functools
 import hashlib
 import hmac
+import json
 import logging
 import os
 import re
 import sqlite3
 import threading
 import time
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger("netguard.security")
 
@@ -414,6 +415,81 @@ ROLES = {
     "analyst":  {"level": 50,  "label": "Analista SOC"},
     "viewer":   {"level": 10,  "label": "Observador"},
 }
+
+DEFAULT_TOKEN_SCOPES = {
+    "admin": {"*"},
+    "analyst": {
+        "dashboard:read",
+        "events:read",
+        "events:write",
+        "hosts:read",
+        "hosts:manage",
+        "incidents:read",
+        "incidents:write",
+        "response:queue",
+        "rules:read",
+        "rules:write",
+    },
+    "viewer": {
+        "dashboard:read",
+        "events:read",
+        "hosts:read",
+        "incidents:read",
+        "rules:read",
+    },
+}
+
+
+def default_token_scopes_for_role(role: str) -> list[str]:
+    """Escopos herdados por tokens legados ou criados sem escopo explícito."""
+    normalized_role = str(role or "viewer").strip().lower()
+    scopes = DEFAULT_TOKEN_SCOPES.get(normalized_role, DEFAULT_TOKEN_SCOPES["viewer"])
+    return sorted(scopes)
+
+
+def normalize_token_scopes(scopes: Any, *, role: str = "viewer") -> list[str]:
+    """
+    Normaliza escopos de token vindos do DB/API.
+
+    Compatibilidade: valor ausente/"" significa token legado, então herda os
+    escopos padrão do role. Valor explícito `[]` permanece sem privilégios.
+    """
+    if scopes is None or scopes == "":
+        return default_token_scopes_for_role(role)
+    raw = scopes
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return default_token_scopes_for_role(role)
+        try:
+            raw = json.loads(text)
+        except json.JSONDecodeError:
+            raw = [part.strip() for part in text.split(",")]
+    if isinstance(raw, dict):
+        raw = [key for key, enabled in raw.items() if enabled]
+    if not isinstance(raw, (list, tuple, set)):
+        return []
+
+    normalized: list[str] = []
+    for item in raw:
+        scope = str(item or "").strip().lower()
+        if not scope:
+            continue
+        if scope == "*" or re.match(r"^[a-z][a-z0-9_-]*:(\*|[a-z0-9_-]+)$", scope):
+            normalized.append(scope)
+    return sorted(dict.fromkeys(normalized))
+
+
+def token_has_scope(scopes: Any, required_scope: str, *, role: str = "viewer") -> bool:
+    """Retorna True quando o token possui o escopo exato, wildcard global ou namespace:*."""
+    required = str(required_scope or "").strip().lower()
+    if not required:
+        return True
+    normalized = set(normalize_token_scopes(scopes, role=role))
+    if "*" in normalized or required in normalized:
+        return True
+    namespace = required.split(":", 1)[0]
+    return f"{namespace}:*" in normalized
 
 # Mapa de endpoint → role mínima necessária
 # Endpoints não listados aqui requerem apenas autenticação (qualquer role)

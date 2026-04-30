@@ -17,6 +17,12 @@ O servidor tem dois níveis de acesso mutuamente exclusivos:
 Um token tenant **não consegue** acessar endpoints admin (decorator
 `@_admin_only`). Um token admin acessa ambos.
 
+Tenant tokens também podem ter escopos explícitos além do RBAC. Tokens sem
+`scopes` continuam herdando o default do `role` para compatibilidade. Tokens
+com escopos explícitos podem ser estreitos: `events:write` permite ingest do
+agent, `hosts:manage` permite enrollment/rotação/revogação de host key, e
+`response:queue` permite enfileirar response actions.
+
 ### Kill switch de autenticação
 
 `IDS_AUTH=false` desativa **toda** a autenticação. Uso **somente em dev local**

@@ -261,6 +261,11 @@ RBAC is enforced across sensitive flows:
 - `analyst`: operational access to incidents, hosts, and agent enrollment
 - `viewer`: read-oriented access, no host enrollment or incident mutation
 
+Tenant tokens can also carry explicit scopes. Missing scopes preserve the
+legacy role defaults; explicit scopes allow narrower tokens such as
+`events:write` for ingest-only automation, `hosts:manage` for enrollment/key
+lifecycle, and `response:queue` for server-to-agent actions.
+
 Sensitive actions emit audit entries, and incident changes are timeline-backed.
 
 ## Detection and Rule Model
@@ -415,11 +420,11 @@ The new coverage adds checks for:
 - [x] Endpoint-side signed policy verification before guarded response handlers
 - [x] Shared SQLite rate limiting for the modular EDR ingest API
 - [x] Versioned EDR storage migration metadata with checksums/status reporting
+- [x] Tenant-scoped API tokens with narrower operational scopes for agent flows
 - [ ] Full domain migrations for all legacy app tables
 - [ ] Agent packaging as service/daemon for Windows and Linux
 - [ ] Endpoint-side destructive response handlers beyond fail-closed stubs
 - [ ] Redis/shared cache options for multi-node production topologies
-- [ ] Tenant-scoped API tokens with narrower operational scopes
 
 ## License
 
