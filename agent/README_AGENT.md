@@ -26,6 +26,8 @@ built with PyInstaller.
   also enviado por compatibilidade com o ingest legado), masked in logs.
 - **Windows service mode** — installs as `NetGuardAgent` SCM service via
   pywin32. Survives logoff, starts at boot.
+- **Linux systemd mode** - installs as `netguard-agent.service` with
+  persistent state/log paths and conservative systemd hardening.
 - **Single binary** — `agent.exe` from `build_agent.ps1`.
 
 ---
@@ -190,6 +192,38 @@ processes / network connections). To run under a service account:
 ```powershell
 sc.exe config NetGuardAgent obj= "DOMAIN\soc-agent" password= "..."
 ```
+
+---
+
+## Installing as a Linux systemd Service
+
+```bash
+# from the repository's agent/ directory on the endpoint
+sudo sh ./install_agent.sh --start
+
+# verify
+systemctl status netguard-agent
+journalctl -u netguard-agent -n 100 --no-pager
+
+# uninstall, preserving identity/credential/buffer state
+sudo sh ./uninstall_agent.sh --keep-state --keep-config
+```
+
+`install_agent.sh` copies the `agent` Python package to `/opt/netguard`,
+copies `config.yaml`, creates `/var/lib/netguard` and `/var/log/netguard`,
+writes `/etc/netguard/agent.env`, and installs
+`/etc/systemd/system/netguard-agent.service`.
+
+The generated unit runs `python3 -m agent --config /opt/netguard/config.yaml`,
+restarts on failure, waits for `network-online.target`, and uses conservative
+hardening controls such as `NoNewPrivileges=true`, `ProtectSystem=full`,
+`ProtectHome=read-only`, `PrivateTmp=true`, and explicit state/log
+`ReadWritePaths`.
+
+Root is the default service user because full process/network visibility often
+requires elevated privileges. If your Linux telemetry requirements are narrower,
+install with `--user netguard` after creating that user and validating collector
+coverage on the target distro.
 
 ---
 

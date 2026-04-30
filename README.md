@@ -174,7 +174,7 @@ python -m netguard_agent \
 ## Foundation already in place
 
 - Flask server with REST API and SOC dashboard
-- Modular `/agent` runtime with `agent.exe` build path and Windows service wrapper
+- Modular `/agent` runtime with `agent.exe`, Windows service, and Linux systemd install paths
 - Modular endpoint agent (`netguard_agent/`) with legacy and XDR transport modes
 - Host enrollment and inventory registry
 - Structured endpoint event ingest (`/api/events`, `/api/agent/events`, `/api/xdr/events`)
@@ -424,7 +424,7 @@ The new coverage adds checks for:
 - [x] Tenant-scoped API tokens with narrower operational scopes for agent flows
 - [x] Redis rate-limit backend for multi-node EDR ingest deployments
 - [ ] Full domain migrations for all legacy app tables
-- [ ] Agent packaging as service/daemon for Windows and Linux
+- [x] Agent packaging as service/daemon for Windows and Linux
 - [ ] Endpoint-side destructive response handlers beyond fail-closed stubs
 
 ## License

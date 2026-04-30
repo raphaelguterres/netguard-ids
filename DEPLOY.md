@@ -238,6 +238,14 @@ cd agent
 powershell -ExecutionPolicy Bypass -File .\build_agent.ps1 -Clean -WithService
 ```
 
+Install the Python agent as a Linux systemd service:
+
+```bash
+cd agent
+sudo sh ./install_agent.sh --start
+systemctl status netguard-agent
+```
+
 The compatibility collector remains useful for demos and older automation.
 Bootstrap it with an admin or tenant token:
 

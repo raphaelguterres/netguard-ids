@@ -258,6 +258,27 @@ def test_windows_service_install_scripts_are_packaged():
     assert "SetEnvironmentVariable" in uninstall_text
 
 
+def test_linux_systemd_install_scripts_are_packaged():
+    root = Path(__file__).resolve().parents[1]
+    install_script = root / "agent" / "install_agent.sh"
+    uninstall_script = root / "agent" / "uninstall_agent.sh"
+
+    install_text = install_script.read_text(encoding="utf-8")
+    uninstall_text = uninstall_script.read_text(encoding="utf-8")
+
+    assert "netguard-agent" in install_text
+    assert "/etc/systemd/system" in install_text
+    assert "NETGUARD_AGENT_CONFIG" in install_text
+    assert "NETGUARD_AGENT_HOME" in install_text
+    assert "ExecStart=${PYTHON_BIN} -m agent --config" in install_text
+    assert "NoNewPrivileges=true" in install_text
+    assert "ProtectSystem=full" in install_text
+    assert "ReadWritePaths=${STATE_DIR} ${LOG_DIR}" in install_text
+    assert "systemctl daemon-reload" in uninstall_text
+    assert "--keep-state" in uninstall_text
+    assert "--keep-config" in uninstall_text
+
+
 def test_credential_store_roundtrip_without_plaintext(tmp_path, monkeypatch):
     monkeypatch.setenv("NETGUARD_AGENT_DISABLE_DPAPI", "true")
 
