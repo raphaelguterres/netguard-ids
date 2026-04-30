@@ -199,8 +199,19 @@ NETGUARD_RATE_LIMIT_RATE_PER_SEC=20
 NETGUARD_RATE_LIMIT_BURST=40
 ```
 
-O default continua em memoria para dev/local. Para multi-node real, use
-um backend externo compartilhado como proximo passo arquitetural.
+Para multi-node real, use Redis para que todos os nos compartilhem o mesmo
+orcamento de ingest:
+
+```dotenv
+NETGUARD_RATE_LIMIT_BACKEND=redis
+NETGUARD_RATE_LIMIT_REDIS_URL=redis://redis.internal:6379/0
+NETGUARD_RATE_LIMIT_REDIS_PREFIX=netguard:rate_limit
+NETGUARD_RATE_LIMIT_RATE_PER_SEC=20
+NETGUARD_RATE_LIMIT_BURST=40
+```
+
+O default continua em memoria para dev/local. Em producao, um backend invalido
+falha de forma explicita em vez de voltar silenciosamente para memoria local.
 
 ---
 
@@ -292,7 +303,8 @@ configurada.
 
 - Implementação atual: SQLite compartilhado por host (IDS_ADMIN_RL_DB)
 - Compatível com múltiplos workers no mesmo host
-- Limitação remanescente: multi-node ainda pede backend compartilhado externo
+- Para multi-node, use Redis no ingest modular `/api/events`; o rate limit
+  admin segue por host ate existir um backend externo equivalente
 
 ### Audit log
 

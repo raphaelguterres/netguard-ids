@@ -5,6 +5,8 @@ Token-bucket rate limiters for the modular EDR API.
 `SqliteTokenBucketLimiter` persists buckets in a shared SQLite file so
 multiple WSGI workers on the same host enforce the same budget without
 adding Redis as a dependency.
+`RedisTokenBucketLimiter` is the production option for multi-node
+deployments where several app instances must share the same budget.
 
 Usage:
 
@@ -24,6 +26,7 @@ Design notes:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import sqlite3
@@ -45,6 +48,44 @@ CREATE TABLE IF NOT EXISTS rate_limit_buckets (
 );
 CREATE INDEX IF NOT EXISTS ix_rate_limit_updated
     ON rate_limit_buckets(updated_at);
+"""
+
+_REDIS_TOKEN_BUCKET_SCRIPT = """
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local rate = tonumber(ARGV[2])
+local capacity = tonumber(ARGV[3])
+local cost = tonumber(ARGV[4])
+local ttl = tonumber(ARGV[5])
+
+local data = redis.call("HMGET", key, "tokens", "updated_at")
+local tokens = tonumber(data[1])
+local updated_at = tonumber(data[2])
+
+if tokens == nil then
+    tokens = capacity
+end
+if updated_at == nil then
+    updated_at = now
+end
+
+local elapsed = math.max(0, now - updated_at)
+tokens = math.min(capacity, tokens + (elapsed * rate))
+
+local allowed = 0
+local retry_after = 0
+if tokens >= cost then
+    allowed = 1
+    tokens = tokens - cost
+else
+    if rate > 0 then
+        retry_after = (cost - tokens) / rate
+    end
+end
+
+redis.call("HSET", key, "tokens", tokens, "updated_at", now)
+redis.call("EXPIRE", key, ttl)
+return { allowed, tokens, retry_after }
 """
 
 
@@ -251,6 +292,81 @@ class SqliteTokenBucketLimiter:
         )
 
 
+class RedisTokenBucketLimiter:
+    """
+    Shared token bucket backed by Redis.
+
+    Redis is intended for horizontally scaled API nodes. Bucket updates are
+    performed through one Lua script so allow/deny decisions stay atomic even
+    when multiple Flask/Gunicorn instances receive agent telemetry at once.
+    """
+
+    def __init__(
+        self,
+        redis_url: str = "redis://127.0.0.1:6379/0",
+        *,
+        prefix: str = "netguard:rate_limit",
+        rate_per_sec: float = 20.0,
+        burst: int = 40,
+        idle_purge_s: float = 3600.0,
+        client=None,
+        time_fn=None,
+    ):
+        if rate_per_sec <= 0 or burst <= 0:
+            raise ValueError("rate_per_sec and burst must be positive")
+        self.redis_url = (redis_url or "redis://127.0.0.1:6379/0").strip()
+        self.prefix = (prefix or "netguard:rate_limit").strip().strip(":")
+        self.rate = float(rate_per_sec)
+        self.capacity = float(burst)
+        self.idle_purge_s = float(idle_purge_s)
+        self._client = client or _build_redis_client(self.redis_url)
+        self._time_fn = time_fn or time.time
+
+    def allow(self, key: str, cost: float = 1.0) -> bool:
+        if not key:
+            return True
+        try:
+            result = self._client.eval(
+                _REDIS_TOKEN_BUCKET_SCRIPT,
+                1,
+                self._redis_key(key),
+                float(self._time_fn()),
+                self.rate,
+                self.capacity,
+                float(cost),
+                max(1, int(self.idle_purge_s)),
+            )
+            return bool(int(_redis_scalar(result, 0, 0)))
+        except Exception as exc:  # pragma: no cover - exercised with real Redis outages.
+            logger.error("redis rate-limit check failed closed: %s", exc)
+            return False
+
+    def remaining(self, key: str) -> float:
+        if not key:
+            return self.capacity
+        redis_key = self._redis_key(key)
+        try:
+            tokens, updated_at = self._client.hmget(redis_key, "tokens", "updated_at")
+        except Exception as exc:  # pragma: no cover - exercised with real Redis outages.
+            logger.error("redis rate-limit remaining check failed: %s", exc)
+            return 0.0
+        if tokens is None or updated_at is None:
+            return self.capacity
+        token_value = _redis_float(tokens, self.capacity)
+        updated_value = _redis_float(updated_at, float(self._time_fn()))
+        elapsed = max(0.0, float(self._time_fn()) - updated_value)
+        return min(self.capacity, token_value + elapsed * self.rate)
+
+    def reset(self, key: str | None = None) -> None:
+        if key is None:
+            raise ValueError("RedisTokenBucketLimiter.reset() requires a key")
+        self._client.delete(self._redis_key(key))
+
+    def _redis_key(self, key: str) -> str:
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        return f"{self.prefix}:{digest}"
+
+
 def _default_sqlite_rate_limit_path() -> Path:
     explicit = (os.environ.get("NETGUARD_RATE_LIMIT_DB") or "").strip()
     if explicit:
@@ -267,12 +383,15 @@ def build_rate_limiter_from_env(
     *,
     rate_per_sec: float = 20.0,
     burst: int = 40,
-) -> TokenBucketLimiter | SqliteTokenBucketLimiter:
+    redis_client=None,
+) -> TokenBucketLimiter | SqliteTokenBucketLimiter | RedisTokenBucketLimiter:
     """
     Build the API limiter from env.
 
-    NETGUARD_RATE_LIMIT_BACKEND=memory|sqlite
+    NETGUARD_RATE_LIMIT_BACKEND=memory|sqlite|redis
     NETGUARD_RATE_LIMIT_DB=/var/lib/netguard/netguard_rate_limit.db
+    NETGUARD_RATE_LIMIT_REDIS_URL=redis://127.0.0.1:6379/0
+    NETGUARD_RATE_LIMIT_REDIS_PREFIX=netguard:rate_limit
     NETGUARD_RATE_LIMIT_RATE_PER_SEC=20
     NETGUARD_RATE_LIMIT_BURST=40
     """
@@ -285,6 +404,16 @@ def build_rate_limiter_from_env(
             rate_per_sec=rate,
             burst=burst_value,
         )
+    if backend in {"redis", "cache", "shared-cache"}:
+        return RedisTokenBucketLimiter(
+            _env_str("NETGUARD_RATE_LIMIT_REDIS_URL", "redis://127.0.0.1:6379/0"),
+            prefix=_env_str("NETGUARD_RATE_LIMIT_REDIS_PREFIX", "netguard:rate_limit"),
+            rate_per_sec=rate,
+            burst=burst_value,
+            client=redis_client,
+        )
+    if backend not in {"", "memory", "local", "in-memory", "in_memory"}:
+        raise ValueError(f"unsupported NETGUARD_RATE_LIMIT_BACKEND={backend!r}")
     return TokenBucketLimiter(rate_per_sec=rate, burst=burst_value)
 
 
@@ -300,6 +429,41 @@ def _env_int(name: str, default: int) -> int:
         return int(os.environ.get(name, default))
     except (TypeError, ValueError):
         return int(default)
+
+
+def _env_str(name: str, default: str) -> str:
+    value = (os.environ.get(name) or "").strip()
+    return value or default
+
+
+def _build_redis_client(redis_url: str):
+    try:
+        import redis  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError(
+            "NETGUARD_RATE_LIMIT_BACKEND=redis requires the 'redis' package"
+        ) from exc
+    return redis.Redis.from_url(
+        redis_url,
+        socket_connect_timeout=2.0,
+        socket_timeout=2.0,
+    )
+
+
+def _redis_scalar(result, index: int, default):
+    try:
+        return result[index]
+    except (IndexError, TypeError):
+        return default
+
+
+def _redis_float(value, default: float) -> float:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 _default = TokenBucketLimiter()

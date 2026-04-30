@@ -22,6 +22,7 @@ from server.ingestion import (
     ValidationError,
 )
 from server.rate_limit import (
+    RedisTokenBucketLimiter,
     SqliteTokenBucketLimiter,
     TokenBucketLimiter,
     build_rate_limiter_from_env,
@@ -33,6 +34,41 @@ def _repo(tmp_path) -> SqliteRepository:
     repo = SqliteRepository(db_path=tmp_path / "edr_api.db")
     repo.init_schema()
     return repo
+
+
+class _FakeRedis:
+    def __init__(self):
+        self.buckets = {}
+        self.ttl = {}
+
+    def eval(self, _script, _num_keys, key, now, rate, capacity, cost, ttl):
+        row = self.buckets.get(key, {})
+        tokens = row.get("tokens", capacity)
+        updated_at = row.get("updated_at", now)
+        elapsed = max(0.0, float(now) - float(updated_at))
+        tokens = min(float(capacity), float(tokens) + elapsed * float(rate))
+        allowed = tokens >= float(cost)
+        if allowed:
+            tokens -= float(cost)
+        self.buckets[key] = {"tokens": tokens, "updated_at": float(now)}
+        self.ttl[key] = int(ttl)
+        retry_after = 0.0 if allowed else (float(cost) - tokens) / float(rate)
+        return [1 if allowed else 0, tokens, retry_after]
+
+    def hmget(self, key, *fields):
+        row = self.buckets.get(key)
+        if row is None:
+            return [None for _ in fields]
+        return [row.get(field) for field in fields]
+
+    def delete(self, key):
+        self.buckets.pop(key, None)
+        self.ttl.pop(key, None)
+
+
+class _FailingRedis:
+    def eval(self, *_args, **_kwargs):
+        raise OSError("redis unavailable")
 
 
 # ── auth ─────────────────────────────────────────────────────────────
@@ -159,6 +195,73 @@ def test_rate_limiter_factory_uses_sqlite_backend(tmp_path, monkeypatch):
     assert isinstance(limiter, SqliteTokenBucketLimiter)
     assert limiter.allow("agent:factory")
     assert not limiter.allow("agent:factory")
+
+
+def test_redis_token_bucket_is_shared_and_hashes_keys():
+    clock = [1000.0]
+    redis = _FakeRedis()
+    first = RedisTokenBucketLimiter(
+        "redis://unit-test",
+        prefix="ng:test",
+        rate_per_sec=0.001,
+        burst=2,
+        client=redis,
+        time_fn=lambda: clock[0],
+    )
+    second = RedisTokenBucketLimiter(
+        "redis://unit-test",
+        prefix="ng:test",
+        rate_per_sec=0.001,
+        burst=2,
+        client=redis,
+        time_fn=lambda: clock[0],
+    )
+
+    assert first.allow("agent:shared")
+    assert second.allow("agent:shared")
+    assert not first.allow("agent:shared")
+    assert second.allow("agent:other")
+    stored_key = next(iter(redis.buckets))
+    assert stored_key.startswith("ng:test:")
+    assert "agent:shared" not in stored_key
+
+    first.reset("agent:shared")
+    assert first.allow("agent:shared")
+
+
+def test_rate_limiter_factory_uses_redis_backend(monkeypatch):
+    redis = _FakeRedis()
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_BACKEND", "redis")
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_REDIS_URL", "redis://cache:6379/4")
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_REDIS_PREFIX", "ng:prod")
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_RATE_PER_SEC", "0.001")
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_BURST", "1")
+
+    limiter = build_rate_limiter_from_env(redis_client=redis)
+
+    assert isinstance(limiter, RedisTokenBucketLimiter)
+    assert limiter.redis_url == "redis://cache:6379/4"
+    assert limiter.prefix == "ng:prod"
+    assert limiter.allow("agent:factory")
+    assert not limiter.allow("agent:factory")
+
+
+def test_redis_token_bucket_fails_closed_on_backend_error():
+    limiter = RedisTokenBucketLimiter(
+        "redis://unit-test",
+        rate_per_sec=1.0,
+        burst=1,
+        client=_FailingRedis(),
+    )
+
+    assert limiter.allow("agent:error") is False
+
+
+def test_rate_limiter_factory_rejects_unknown_backend(monkeypatch):
+    monkeypatch.setenv("NETGUARD_RATE_LIMIT_BACKEND", "typo")
+
+    with pytest.raises(ValueError, match="unsupported NETGUARD_RATE_LIMIT_BACKEND"):
+        build_rate_limiter_from_env()
 
 
 def test_ingestion_validates_host_id(tmp_path):

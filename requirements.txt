@@ -14,6 +14,7 @@ scapy==2.7.0
 
 # Config / utils
 pyyaml==6.0.1
+redis==5.0.8
 
 # Interface desktop (opcional, não necessário para SaaS headless)
 pystray==0.19.5

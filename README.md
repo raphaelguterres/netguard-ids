@@ -199,6 +199,7 @@ Important hardening already enforced:
 - Startup fails closed if `IDS_AUTH=false` is exposed outside loopback unless explicitly bypassed
 - Admin rate limiting uses shared SQLite storage per host
 - Modular `/api/events` can use a shared SQLite rate-limit bucket for multi-worker single-host deploys
+- Modular `/api/events` can use Redis for multi-node ingest rate limiting
 - Audit logs rotate and retain automatically
 - Background jobs do not autostart on import in WSGI/Gunicorn mode
 
@@ -421,10 +422,10 @@ The new coverage adds checks for:
 - [x] Shared SQLite rate limiting for the modular EDR ingest API
 - [x] Versioned EDR storage migration metadata with checksums/status reporting
 - [x] Tenant-scoped API tokens with narrower operational scopes for agent flows
+- [x] Redis rate-limit backend for multi-node EDR ingest deployments
 - [ ] Full domain migrations for all legacy app tables
 - [ ] Agent packaging as service/daemon for Windows and Linux
 - [ ] Endpoint-side destructive response handlers beyond fail-closed stubs
-- [ ] Redis/shared cache options for multi-node production topologies
 
 ## License
 
