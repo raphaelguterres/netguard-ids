@@ -1,27 +1,29 @@
 :root {
-  --soc-bg: #071018;
-  --soc-bg-elevated: #0d1823;
-  --soc-bg-panel: rgba(12, 20, 30, 0.92);
-  --soc-bg-soft: rgba(17, 28, 40, 0.88);
+  --soc-bg: #050810;
+  --soc-bg-elevated: #0a0f1c;
+  --soc-bg-panel: rgba(15, 22, 38, 0.92);
+  --soc-bg-soft: rgba(20, 28, 48, 0.88);
   --soc-border: rgba(141, 170, 196, 0.14);
-  --soc-border-strong: rgba(141, 170, 196, 0.24);
-  --soc-accent: #3dd4ff;
-  --soc-accent-2: #8fe7ff;
-  --soc-text: #f2f6fb;
-  --soc-text-muted: #9dafc2;
-  --soc-text-dim: #6f8091;
+  --soc-border-strong: rgba(212, 175, 55, 0.32);
+  --soc-accent: #d4af37;
+  --soc-accent-2: #f5d77c;
+  --soc-accent-cool: #5fd0ff;
+  --soc-text: #eaf0fb;
+  --soc-text-muted: #9aa6bd;
+  --soc-text-dim: #5d6982;
   --soc-critical: #ff5a6b;
   --soc-high: #ff9c41;
   --soc-medium: #f3c764;
   --soc-low: #7e8b98;
   --soc-success: #5fd3a6;
-  --soc-radius-lg: 22px;
-  --soc-radius-md: 16px;
+  --soc-radius-lg: 18px;
+  --soc-radius-md: 14px;
   --soc-radius-sm: 10px;
-  --soc-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
-  --soc-font-head: "Bahnschrift", "Segoe UI Variable Display", "Trebuchet MS", sans-serif;
-  --soc-font-body: "Segoe UI", "Trebuchet MS", sans-serif;
-  --soc-font-mono: "Consolas", "Lucida Console", monospace;
+  --soc-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  --soc-glow: 0 0 38px rgba(212, 175, 55, 0.18);
+  --soc-font-head: "Inter", "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  --soc-font-body: "Inter", "Segoe UI", "Trebuchet MS", sans-serif;
+  --soc-font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
 }
 
 *,
@@ -35,9 +37,11 @@ body {
   margin: 0;
   min-height: 100%;
   background:
-    radial-gradient(circle at top left, rgba(61, 212, 255, 0.12), transparent 28%),
-    radial-gradient(circle at 85% 12%, rgba(255, 255, 255, 0.04), transparent 16%),
-    linear-gradient(180deg, #071018 0%, #03080d 100%);
+    linear-gradient(rgba(120, 150, 200, 0.04) 1px, transparent 1px) 0 0/48px 48px,
+    linear-gradient(90deg, rgba(120, 150, 200, 0.04) 1px, transparent 1px) 0 0/48px 48px,
+    radial-gradient(circle at top left, rgba(212, 175, 55, 0.12), transparent 32%),
+    radial-gradient(circle at 88% 8%, rgba(95, 208, 255, 0.08), transparent 28%),
+    linear-gradient(180deg, #060a14 0%, #03060d 100%);
   color: var(--soc-text);
   font-family: var(--soc-font-body);
 }
@@ -1061,4 +1065,441 @@ body.soc-shell {
   .soc-chain-grid {
     grid-template-columns: 1fr;
   }
+}
+
+
+/* ──────────────────────────────────────────────────────────────
+   LIGHT THEME — Apple Pro day for SOC views
+   ────────────────────────────────────────────────────────────── */
+
+[data-theme="light"], body.theme-light {
+  --soc-bg: #f5f5f7;
+  --soc-bg-elevated: #ffffff;
+  --soc-bg-panel: #ffffff;
+  --soc-bg-soft: #f7f7f9;
+  --soc-border: rgba(0, 0, 0, 0.08);
+  --soc-border-strong: rgba(184, 152, 63, 0.32);
+  --soc-accent: #b8983f;
+  --soc-accent-2: #c8a85a;
+  --soc-accent-cool: #0066cc;
+  --soc-text: #1d1d1f;
+  --soc-text-muted: rgba(60, 60, 67, 0.62);
+  --soc-text-dim: rgba(60, 60, 67, 0.40);
+  --soc-critical: #d70015;
+  --soc-high: #c93400;
+  --soc-medium: #9d8000;
+  --soc-low: #5b667e;
+  --soc-success: #248a3d;
+  --soc-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  --soc-glow: none;
+}
+
+[data-theme="light"] html,
+[data-theme="light"] body,
+body.theme-light html,
+body.theme-light body {
+  background: #f5f5f7 !important;
+  color: #1d1d1f !important;
+  background-image: none !important;
+}
+
+/* Sidebar / topbar / panels — solid white surfaces */
+[data-theme="light"] .soc-sidebar,
+body.theme-light .soc-sidebar,
+[data-theme="light"] .soc-topbar,
+body.theme-light .soc-topbar,
+[data-theme="light"] .soc-card,
+body.theme-light .soc-card,
+[data-theme="light"] .soc-panel,
+body.theme-light .soc-panel,
+[data-theme="light"] .soc-table-wrap,
+body.theme-light .soc-table-wrap,
+[data-theme="light"] .soc-stat-card,
+body.theme-light .soc-stat-card,
+[data-theme="light"] .soc-incident-row,
+body.theme-light .soc-incident-row,
+[data-theme="light"] .soc-host-card,
+body.theme-light .soc-host-card,
+[data-theme="light"] .soc-page,
+body.theme-light .soc-page,
+[data-theme="light"] .soc-preview-banner,
+body.theme-light .soc-preview-banner {
+  background: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  color: #1d1d1f !important;
+  box-shadow: none !important;
+}
+
+/* Sidebar nav items */
+[data-theme="light"] .soc-nav-link,
+body.theme-light .soc-nav-link {
+  color: rgba(60, 60, 67, 0.62) !important;
+}
+[data-theme="light"] .soc-nav-link:hover,
+body.theme-light .soc-nav-link:hover {
+  background: rgba(0, 0, 0, 0.04) !important;
+  color: #1d1d1f !important;
+}
+[data-theme="light"] .soc-nav-link.is-active,
+body.theme-light .soc-nav-link.is-active {
+  background: rgba(184, 152, 63, 0.08) !important;
+  color: #1d1d1f !important;
+}
+[data-theme="light"] .soc-nav-label,
+body.theme-light .soc-nav-label {
+  color: rgba(60, 60, 67, 0.40) !important;
+}
+
+[data-theme="light"] .soc-brand-title,
+body.theme-light .soc-brand-title {
+  color: #1d1d1f !important;
+}
+[data-theme="light"] .soc-brand-subtitle,
+body.theme-light .soc-brand-subtitle {
+  color: rgba(60, 60, 67, 0.62) !important;
+}
+
+/* Pills */
+[data-theme="light"] .soc-pill,
+body.theme-light .soc-pill {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  color: #1d1d1f !important;
+}
+
+/* Topbar links */
+[data-theme="light"] .soc-topbar-link,
+body.theme-light .soc-topbar-link {
+  color: rgba(60, 60, 67, 0.62) !important;
+}
+[data-theme="light"] .soc-topbar-link-primary,
+body.theme-light .soc-topbar-link-primary {
+  color: #b8983f !important;
+}
+
+/* Headings + body text */
+[data-theme="light"] h1,
+[data-theme="light"] h2,
+[data-theme="light"] h3,
+[data-theme="light"] .soc-stat-value,
+body.theme-light h1,
+body.theme-light h2,
+body.theme-light h3,
+body.theme-light .soc-stat-value {
+  color: #1d1d1f !important;
+}
+[data-theme="light"] p,
+[data-theme="light"] .soc-stat-label,
+[data-theme="light"] .soc-stat-help,
+[data-theme="light"] .soc-text-muted,
+body.theme-light p,
+body.theme-light .soc-stat-label,
+body.theme-light .soc-stat-help,
+body.theme-light .soc-text-muted {
+  color: rgba(60, 60, 67, 0.62) !important;
+}
+
+/* Buttons */
+[data-theme="light"] .soc-btn,
+[data-theme="light"] .soc-button,
+body.theme-light .soc-btn,
+body.theme-light .soc-button {
+  background: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.16) !important;
+  color: #1d1d1f !important;
+}
+[data-theme="light"] .soc-btn-primary,
+[data-theme="light"] .soc-button-primary,
+body.theme-light .soc-btn-primary,
+body.theme-light .soc-button-primary {
+  background: #b8983f !important;
+  border-color: #b8983f !important;
+  color: #ffffff !important;
+}
+
+/* Inputs */
+[data-theme="light"] input,
+[data-theme="light"] select,
+[data-theme="light"] textarea,
+body.theme-light input,
+body.theme-light select,
+body.theme-light textarea {
+  background: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  color: #1d1d1f !important;
+}
+
+/* Status pills with severity */
+[data-theme="light"] .soc-severity-critical,
+body.theme-light .soc-severity-critical { color: #d70015 !important; }
+[data-theme="light"] .soc-severity-high,
+body.theme-light .soc-severity-high { color: #c93400 !important; }
+[data-theme="light"] .soc-severity-medium,
+body.theme-light .soc-severity-medium { color: #9d8000 !important; }
+[data-theme="light"] .soc-severity-low,
+body.theme-light .soc-severity-low { color: rgba(60, 60, 67, 0.62) !important; }
+
+/* Tables */
+[data-theme="light"] table,
+body.theme-light table {
+  background: #ffffff !important;
+}
+[data-theme="light"] thead,
+body.theme-light thead {
+  background: #f7f7f9 !important;
+  color: rgba(60, 60, 67, 0.62) !important;
+}
+[data-theme="light"] tbody tr,
+body.theme-light tbody tr {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
+  color: #1d1d1f !important;
+}
+[data-theme="light"] tbody tr:hover,
+body.theme-light tbody tr:hover {
+  background: rgba(0, 0, 0, 0.025) !important;
+}
+
+/* Theme toggle button styling for SOC pages */
+.theme-toggle {
+  width: 32px; height: 32px; border-radius: 8px;
+  border: 1px solid var(--soc-border);
+  background: transparent;
+  color: var(--soc-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+.theme-toggle:hover {
+  border-color: var(--soc-accent);
+  color: var(--soc-accent);
+}
+[data-theme="light"] .theme-toggle:hover,
+body.theme-light .theme-toggle:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+.theme-toggle svg {
+  width: 16px; height: 16px;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+}
+.theme-toggle .icon-sun  { display: none; }
+.theme-toggle .icon-moon { display: block; }
+[data-theme="light"] .theme-toggle .icon-sun,
+body.theme-light .theme-toggle .icon-sun  { display: block; }
+[data-theme="light"] .theme-toggle .icon-moon,
+body.theme-light .theme-toggle .icon-moon { display: none; }
+
+
+/* extra coverage — banners/headers/dropdown lists */
+[data-theme="light"] .soc-page-header,
+body.theme-light .soc-page-header,
+[data-theme="light"] .soc-preview-banner,
+body.theme-light .soc-preview-banner,
+[data-theme="light"] .soc-banner,
+body.theme-light .soc-banner,
+[data-theme="light"] .soc-section,
+body.theme-light .soc-section,
+[data-theme="light"] .soc-filter-bar,
+body.theme-light .soc-filter-bar {
+  background: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  color: #1d1d1f !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+/* sidebar gradient → solid white */
+[data-theme="light"] .soc-sidebar,
+body.theme-light .soc-sidebar {
+  background: #ffffff !important;
+  border-right: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+/* topbar pills row */
+[data-theme="light"] .soc-topbar,
+body.theme-light .soc-topbar {
+  background: #ffffff !important;
+  backdrop-filter: none !important;
+}
+
+/* page-header title and copy text */
+[data-theme="light"] .soc-page-title,
+body.theme-light .soc-page-title { color: #1d1d1f !important; }
+[data-theme="light"] .soc-page-copy,
+body.theme-light .soc-page-copy { color: rgba(60,60,67,0.62) !important; }
+
+/* preview banner kicker */
+[data-theme="light"] .soc-preview-banner-kicker,
+body.theme-light .soc-preview-banner-kicker { color: #b8983f !important; }
+[data-theme="light"] .soc-preview-banner-copy,
+body.theme-light .soc-preview-banner-copy { color: rgba(60,60,67,0.62) !important; }
+
+/* breadcrumbs */
+[data-theme="light"] .soc-breadcrumbs,
+[data-theme="light"] .soc-topbar-caption,
+body.theme-light .soc-breadcrumbs,
+body.theme-light .soc-topbar-caption {
+  color: rgba(60, 60, 67, 0.40) !important;
+}
+
+/* count pills (Visible 2 / Open 1 etc) */
+[data-theme="light"] .soc-count-pill,
+body.theme-light .soc-count-pill,
+[data-theme="light"] .soc-pill,
+body.theme-light .soc-pill {
+  background: rgba(0, 0, 0, 0.05) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  color: #1d1d1f !important;
+}
+
+/* clear filters link */
+[data-theme="light"] a,
+body.theme-light a { color: #b8983f; }
+
+/* ensure SOC body is light gray */
+body.theme-light.soc-shell,
+[data-theme="light"] body.soc-shell {
+  background: #f5f5f7 !important;
+  background-image: none !important;
+}
+
+/* status badges */
+[data-theme="light"] .soc-status-pill,
+body.theme-light .soc-status-pill {
+  background: rgba(0, 0, 0, 0.05) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  color: #1d1d1f !important;
+}
+
+/* Action buttons (Investigate / Mark Open / etc) */
+[data-theme="light"] .soc-action-button,
+body.theme-light .soc-action-button {
+  background: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.16) !important;
+  color: #1d1d1f !important;
+}
+[data-theme="light"] .soc-action-button:hover,
+body.theme-light .soc-action-button:hover {
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* sidebar status card */
+[data-theme="light"] .soc-sidebar-status,
+body.theme-light .soc-sidebar-status {
+  background: rgba(0, 0, 0, 0.04) !important;
+  color: #1d1d1f !important;
+}
+
+/* data-theme-slot just inherits, no need */
+
+
+/* ── extra extra: nav, brand-mark, sidebar-status (catch-all) ──── */
+[data-theme="light"] .soc-nav,
+body.theme-light .soc-nav,
+[data-theme="light"] .soc-sidebar-status,
+body.theme-light .soc-sidebar-status {
+  background: transparent !important;
+  color: inherit !important;
+}
+[data-theme="light"] .soc-brand-mark,
+body.theme-light .soc-brand-mark {
+  background: rgba(184, 152, 63, 0.10) !important;
+  border-color: rgba(184, 152, 63, 0.30) !important;
+  color: #b8983f !important;
+}
+/* every direct child of sidebar with dark bg → transparent */
+[data-theme="light"] .soc-sidebar > *,
+body.theme-light .soc-sidebar > * {
+  background-color: transparent !important;
+}
+/* sidebar status block */
+[data-theme="light"] .soc-sidebar > div:last-child,
+body.theme-light .soc-sidebar > div:last-child {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-radius: 10px !important;
+}
+
+
+/* ── light: action buttons + status pills with better contrast ─── */
+[data-theme="light"] .soc-action-button,
+body.theme-light .soc-action-button,
+[data-theme="light"] .soc-button-secondary,
+body.theme-light .soc-button-secondary {
+  background: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.18) !important;
+  color: #1d1d1f !important;
+  font-weight: 500 !important;
+}
+[data-theme="light"] .soc-action-button:hover,
+body.theme-light .soc-action-button:hover {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-color: rgba(0, 0, 0, 0.32) !important;
+}
+[data-theme="light"] .soc-action-button-primary,
+body.theme-light .soc-action-button-primary {
+  background: #b8983f !important;
+  border-color: #b8983f !important;
+  color: #ffffff !important;
+}
+
+/* "In Progress" / status pills — darker bg + dark text on white */
+[data-theme="light"] .soc-status-pill,
+body.theme-light .soc-status-pill,
+[data-theme="light"] .urgency-pill,
+body.theme-light .urgency-pill,
+[data-theme="light"] .band-pill,
+body.theme-light .band-pill,
+[data-theme="light"] .badge,
+body.theme-light .badge {
+  background: rgba(0, 0, 0, 0.06) !important;
+  border: 1px solid rgba(0, 0, 0, 0.14) !important;
+  color: #1d1d1f !important;
+  font-weight: 500 !important;
+}
+
+/* Severity badges — strong contrast in light */
+[data-theme="light"] .soc-severity-chip.critical,
+body.theme-light .soc-severity-chip.critical,
+[data-theme="light"] [class*="critical" i],
+body.theme-light [class*="critical" i] {
+  color: #d70015 !important;
+}
+
+/* Score badge (80/100 etc.) */
+[data-theme="light"] .soc-score-badge,
+body.theme-light .soc-score-badge {
+  background: rgba(0, 0, 0, 0.06) !important;
+  border: 1px solid rgba(0, 0, 0, 0.14) !important;
+  color: #1d1d1f !important;
+}
+
+/* Technique tags */
+[data-theme="light"] .soc-technique,
+body.theme-light .soc-technique,
+[data-theme="light"] [class*="technique" i],
+body.theme-light [class*="technique" i] {
+  background: rgba(184, 152, 63, 0.12) !important;
+  border: 1px solid rgba(184, 152, 63, 0.32) !important;
+  color: #806320 !important;
+}
+
+/* Execution / kill chain stage tags */
+[data-theme="light"] [class*="execution" i],
+body.theme-light [class*="execution" i] {
+  background: rgba(214, 0, 21, 0.06) !important;
+  border-color: rgba(214, 0, 21, 0.20) !important;
+  color: #a30010 !important;
+}
+
+/* Sidebar nav active state — visible in light */
+[data-theme="light"] .soc-nav-link.is-active,
+body.theme-light .soc-nav-link.is-active {
+  background: rgba(184, 152, 63, 0.10) !important;
+  color: #1d1d1f !important;
+  border-color: rgba(184, 152, 63, 0.25) !important;
+  font-weight: 500 !important;
 }

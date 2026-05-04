@@ -4,7 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NetGuard IDS | Planos enterprise</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="/static/enterprise.css">
+  <link rel="stylesheet" href="/static/css/netguard.css">
+  <script src="/static/js/theme-toggle.js"></script>
 </head>
 <body class="pricing-page">
   <header class="site-header">
@@ -22,6 +27,7 @@
         <a href="#faq">FAQ</a>
       </nav>
       <div class="site-actions">
+        <span class="live-badge">Trial 14d</span>
         <a class="ghost-link" href="/login">Entrar</a>
         <a class="button-primary" href="#plans">Selecionar plano</a>
       </div>
@@ -32,20 +38,20 @@
     <section class="section">
       <div class="page-frame hero-grid">
         <div class="hero-copy">
-          <span class="eyebrow">COMMERCIAL READY | TRIAL SEM CARTAO | POSICIONAMENTO SENIOR</span>
-          <h1 class="display">Planos desenhados para produto premium, nao para parecer hobby.</h1>
+          <span class="eyebrow">Commercial &middot; trial sem cart&atilde;o</span>
+          <h1 class="display">Planos para <span class="gradient">produto premium</span>, n&atilde;o pra parecer hobby.</h1>
           <p class="lead">
-            O pricing agora conversa com buyer tecnico, operacao e lideranca. Mais clareza comercial,
-            mais peso enterprise e um caminho de conversao mais confiavel para trial, paid e partner.
+            O pricing conversa com buyer t&eacute;cnico, opera&ccedil;&atilde;o e lideran&ccedil;a. Mais clareza comercial,
+            mais peso enterprise e um caminho de convers&atilde;o mais confi&aacute;vel para trial, paid e partner.
           </p>
           <div class="button-row">
-            <a class="button-primary" href="#plans">Comparar planos</a>
-            <a class="button-secondary" href="/demo">Ver demonstracao</a>
+            <a class="button-primary" href="#plans">Comparar planos &rarr;</a>
+            <a class="button-secondary" href="/demo">Ver demonstra&ccedil;&atilde;o</a>
           </div>
         </div>
 
         <aside class="hero-card">
-          <span class="panel-kicker">COMMERCIAL SNAPSHOT</span>
+          <span class="panel-kicker">Commercial snapshot</span>
           <div class="hero-stat-grid">
             <div class="hero-stat">
               <span class="card-kicker">Trial</span>
@@ -423,5 +429,6 @@
       history.replaceState({}, '', location.pathname + (params.toString() ? '?' + params.toString() : ''));
     })();
   </script>
+<script src="/static/js/netguard-ui.js" defer></script>
 </body>
 </html>

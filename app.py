@@ -21,10 +21,11 @@ except ImportError:
     psutil = None
     PSUTIL_OK = False
     logging.getLogger("ids.api").warning("psutil não instalado — instale com: pip install psutil")
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request, Response, make_response, redirect
 from flask_cors import CORS
 from ids_engine import IDSEngine, LogProcessor
+from services.recommendation_service import get_recommended_route
 
 # SOC Detection Engine — arquivo único, sem subpacotes
 try:
@@ -146,6 +147,7 @@ try:
         verify_any_token, _extract_token, require_session, DASHBOARD_AUTH,
         csrf_protect, rotate_admin_token, _get_or_set_csrf_cookie,
         ensure_safe_startup,
+        get_or_create_token,
         totp_is_enabled, totp_verify, totp_generate_secret, totp_disable,
         totp_provisioning_uri, totp_get_secret,
     )
@@ -162,6 +164,7 @@ except Exception as _auth_err:
     def totp_disable(): return False
     def totp_provisioning_uri(secret_b32=None, account=None, issuer=None): return ""
     def totp_get_secret(): return ""
+    def get_or_create_token(): return "local-dev-token-unavailable"
     AUTH_ENABLED    = False
     DASHBOARD_AUTH  = False
     AUTH_MODULE_OK  = False
@@ -1544,6 +1547,10 @@ def _format_soc_last_seen(dt_obj):
 
 def _build_soc_preview_context():
     tenant_id = _current_request_tenant_id()
+    try:
+        _, tenant_role = _resolve_tenant_with_role()
+    except Exception:
+        tenant_role = "analyst"
     summary = _build_xdr_summary_payload(query_limit=300, recent_limit=60, host_limit=50)
     registered_hosts = _get_host_registry(tenant_id).list_hosts(limit=200)
 
@@ -1658,6 +1665,7 @@ def _build_soc_preview_context():
         key=lambda item: (item["risk_score"], item["active_alerts"], item["host_name"]),
         reverse=True,
     )
+    latest_seen_dt = next((item.get("last_seen_ts") for item in host_list if item.get("last_seen_ts")), None)
     for item in host_list:
         item.pop("last_seen_ts", None)
 
@@ -1675,16 +1683,42 @@ def _build_soc_preview_context():
     online_agents = sum(1 for item in host_list if item.get("status") == "online")
     enrolled_agents = sum(1 for item in host_list if item.get("agent_enrolled"))
     offline_agents = sum(1 for item in host_list if item.get("status") == "offline")
+    critical_hosts = sum(
+        1
+        for item in host_list
+        if int(item.get("risk_score") or 0) >= 80
+        or str(item.get("highest_severity") or "").lower() == "critical"
+    )
+    tenant_ids = {
+        str(item.get("tenant_id") or tenant_id).strip()
+        for item in registered_hosts
+        if str(item.get("tenant_id") or tenant_id).strip()
+    }
+    now_hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    timeline_seed = [(now_hour - timedelta(hours=hour)).strftime("%H:00") for hour in range(23, -1, -1)]
+    timeline_counts = {hour: 0 for hour in timeline_seed}
+    for alert in alert_rows:
+        alert_dt = _parse_soc_timestamp(alert.get("timestamp"))
+        if not alert_dt or (now_hour - alert_dt) > timedelta(hours=24):
+            continue
+        timeline_counts[alert_dt.replace(minute=0, second=0, microsecond=0).strftime("%H:00")] = (
+            timeline_counts.get(alert_dt.replace(minute=0, second=0, microsecond=0).strftime("%H:00"), 0) + 1
+        )
+    tenant_name = "Admin Workspace" if tenant_id == "admin" else tenant_id
 
     overview = {
+        "total_tenants": max(1, len(tenant_ids)),
         "monitored_hosts": len(host_list),
         "registered_agents": enrolled_agents,
         "online_agents": online_agents,
         "offline_agents": offline_agents,
+        "events_24h": len(summary["recent_events"]),
         "active_alerts": len(alert_rows),
         "critical_alerts": severity_counts["critical"],
+        "critical_hosts": critical_hosts,
         "open_incidents": incident_counts["open"],
         "in_progress_incidents": incident_counts["in_progress"],
+        "last_agent_heartbeat": _format_soc_last_seen(latest_seen_dt) if latest_seen_dt else "unknown",
         "average_risk": int(sum(item["risk_score"] for item in host_list) / len(host_list)) if host_list else 0,
         "severity_critical": severity_counts["critical"],
         "severity_high": severity_counts["high"],
@@ -1692,10 +1726,22 @@ def _build_soc_preview_context():
         "severity_low": severity_counts["low"],
         "recent_detections": alert_rows[:8],
         "host_risks": host_list[:8],
+        "top_tenants": [
+            {
+                "tenant": tenant_name,
+                "criticality": severity_counts["critical"] + critical_hosts,
+                "open_incidents": incident_counts["open"],
+                "risk": int(sum(item["risk_score"] for item in host_list) / len(host_list)) if host_list else 0,
+            }
+        ],
+        "timeline_24h": [{"hour": hour, "count": count} for hour, count in timeline_counts.items()],
     }
 
-    return {
-        "tenant_name": "Admin Workspace" if tenant_id == "admin" else tenant_id,
+    context = {
+        "tenant_name": tenant_name,
+        "current_role": tenant_role,
+        "environment_name": os.environ.get("NETGUARD_ENV") or os.environ.get("IDS_ENV") or "local",
+        "system_status": "System healthy",
         "current_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
         "monitored_hosts": len(host_list),
         "overview": overview,
@@ -1709,6 +1755,9 @@ def _build_soc_preview_context():
             "enrolled": enrolled_agents,
         },
     }
+    context["recommendation"] = get_recommended_route(context)
+    overview["recommendation"] = context["recommendation"]
+    return context
 
 
 def _soc_pretty_alert_type(value: str) -> str:
@@ -2133,6 +2182,12 @@ def _soc_collect_incidents(tenant_name: str, host_id: str | None = None, limit: 
                 seen_incidents.add(incident_id)
                 chain_summary = _soc_chain_summary(trigger_event.get("alert_type") or trigger_event.get("threat_name"), trigger_event)
                 threat_name = str(trigger_event.get("threat_name") or "").strip()
+                comments_raw = incident.get("comments") or incident.get("notes") or []
+                comments_count = (
+                    len(comments_raw)
+                    if isinstance(comments_raw, list)
+                    else (1 if str(comments_raw or "").strip() else 0)
+                )
                 incident_rows.append(
                     {
                         "incident_id": incident_id,
@@ -2140,8 +2195,10 @@ def _soc_collect_incidents(tenant_name: str, host_id: str | None = None, limit: 
                         "playbook_label": ((incident.get("playbook_meta") or {}).get("label") or _soc_labelize(incident.get("playbook"))),
                         "severity": str(incident.get("severity") or "high").lower(),
                         "status": str(incident.get("status") or "open").lower(),
+                        "assigned_to": str(incident.get("assigned_to") or incident.get("owner") or "unassigned"),
                         "opened_at": str(incident.get("opened_at") or ""),
                         "updated_at": str(incident.get("updated_at") or ""),
+                        "comments_count": comments_count,
                         "chain_summary": chain_summary,
                         "chain_filter": _soc_chain_filter_key(chain_summary, threat_name),
                         "technique": str(trigger_event.get("technique") or ""),
@@ -5398,7 +5455,55 @@ def login_page():
                 from flask import redirect as _redir
                 _next = validate_redirect_url(request.args.get("next", "/dashboard"))
                 return _redir(_next)
-    return render_template("login.html")
+    resp = make_response(render_template(
+        "login.html",
+        local_mode=not AUTH_ENABLED,
+        dashboard_auth=DASHBOARD_AUTH,
+    ))
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    try:
+        _get_or_set_csrf_cookie(resp)
+    except Exception:
+        pass
+    return resp
+
+
+def _is_loopback_request() -> bool:
+    try:
+        remote_addr = (request.remote_addr or "").strip()
+        return bool(remote_addr) and ipaddress.ip_address(remote_addr).is_loopback
+    except Exception:
+        return False
+
+
+@app.route("/api/auth/local-session", methods=["POST"])
+@_limit_login
+def auth_local_session():
+    """Create a local dashboard session when API auth is intentionally disabled."""
+    if AUTH_ENABLED:
+        return jsonify({"valid": False, "error": "local_session_disabled"}), 403
+    if not _is_loopback_request():
+        audit("LOCAL_SESSION_DENIED", actor="local", ip=request.remote_addr or "-", detail="non_loopback")
+        return jsonify({"valid": False, "error": "local_session_loopback_only"}), 403
+
+    token = get_or_create_token()
+    next_url = validate_redirect_url((request.get_json(silent=True) or {}).get("next") or "/dashboard")
+    resp = make_response(jsonify({
+        "valid": True,
+        "mode": "local",
+        "redirect_to": next_url,
+    }))
+    _clear_preview_cookies(resp)
+    resp.set_cookie(
+        "netguard_token",
+        token,
+        httponly=True,
+        samesite="Strict",
+        max_age=8 * 3600,
+        secure=_HTTPS_ONLY,
+    )
+    audit("LOCAL_SESSION_START", actor="admin", ip=request.remote_addr or "-", detail="loopback")
+    return resp
 
 
 @app.route("/api/auth/login", methods=["POST"])
@@ -7730,6 +7835,15 @@ def admin_overview():
     Apenas acessível com token de admin (IDS_AUTH=true).
     """
     return jsonify(_build_admin_overview())
+
+
+@app.route("/api/recommended-route")
+@require_session
+def api_recommended_route():
+    """Return the next safe SOC route for the current operator session."""
+    context = _build_soc_preview_context()
+    recommendation = context.get("recommendation") or get_recommended_route(context)
+    return jsonify({"ok": True, "recommendation": recommendation})
 
 
 @app.route("/api/admin/tenant/<tenant_id>/feed")

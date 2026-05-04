@@ -68,8 +68,19 @@ def test_host_facts_returns_required_fields():
     from agent.host_identity import get_host_facts
 
     facts = get_host_facts()
-    for required in ("hostname", "platform", "user", "machine"):
+    for required in (
+        "hostname",
+        "platform",
+        "user",
+        "machine",
+        "local_ip",
+        "mac_address",
+        "default_gateway",
+        "default_gateway_mac",
+        "network_interfaces",
+    ):
         assert required in facts, f"host_facts sem {required!r}"
+    assert isinstance(facts["network_interfaces"], list)
 
 
 # ──────────────────────────────────────────────────────────────────

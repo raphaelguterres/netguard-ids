@@ -3,9 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NetGuard IDS | Seguranca enterprise para redes criticas</title>
-  <meta name="description" content="NetGuard IDS entrega deteccao em tempo real, governanca operacional e visibilidade premium para ambientes corporativos.">
+  <title>NetGuard IDS | SOC/SIEM/EDR-like lab platform</title>
+  <meta name="description" content="NetGuard IDS is a SOC/SIEM/EDR-like lab platform for endpoint telemetry, risk-based triage, incidents, and analyst workflows.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Cormorant+Garamond:ital,wght@1,500&display=swap">
   <link rel="stylesheet" href="/static/enterprise.css">
+  <link rel="stylesheet" href="/static/css/netguard.css">
+  <script src="/static/js/theme-toggle.js"></script>
 </head>
 <body class="marketing-page">
   <header class="site-header">
@@ -14,19 +19,20 @@
         <span class="brand-mark">NG</span>
         <span class="brand-stack">
           <strong>NetGuard IDS</strong>
-          <small>enterprise command layer</small>
+          <small>SOC telemetry workspace</small>
         </span>
       </a>
       <nav class="site-nav">
-        <a href="#platform">Plataforma</a>
-        <a href="#blindagem">Blindagem</a>
-        <a href="#governanca">Governanca</a>
-        <a href="/pricing">Planos</a>
+        <a href="#platform">Platform</a>
+        <a href="#agent-server">Agent + Server</a>
+        <a href="#soc-dashboard">SOC Dashboard</a>
+        <a href="#use-cases">Use cases</a>
       </nav>
       <div class="site-actions">
-        <a class="ghost-link" href="/login">Entrar</a>
-        <a class="ghost-link" href="/soc">SOC XDR</a>
-        <a class="button-primary" href="/pricing">Solicitar acesso</a>
+        <span class="live-badge">Live · v1.0</span>
+        <a class="ghost-link" href="/login">Sign in</a>
+        <a class="ghost-link" href="/soc">Open SOC</a>
+        <a class="button-primary" href="/pricing">Request Demo</a>
       </div>
     </div>
   </header>
@@ -35,174 +41,166 @@
     <section class="section">
       <div class="page-frame hero-grid">
         <div class="hero-copy">
-          <span class="eyebrow">SEGURANCA DE REDE | LGPD READY | OPERACAO 24x7</span>
-          <h1 class="display">Blindagem real para ambientes que nao podem falhar.</h1>
+          <span class="eyebrow">SOC · SIEM · EDR-like lab</span>
+          <h1 class="display">Endpoint telemetry and <span class="gradient">risk-based triage</span>, in one quiet workspace.</h1>
           <p class="lead">
-            NetGuard IDS combina deteccao em tempo real, telemetria viva e resposta operacional
-            com postura enterprise. O resultado e uma camada de visibilidade senior para SOC,
-            infraestrutura e lideranca executiva.
+            NetGuard IDS demonstrates how endpoint events, detection rules, incidents and analyst
+            actions can work together in a lightweight security platform &mdash; without overstating
+            production protection.
           </p>
+          <div class="hero-meta">
+            <span class="hero-meta-item"><strong>184</strong>detection rules</span>
+            <span class="hero-meta-divider"></span>
+            <span class="hero-meta-item"><strong>&lt;2s</strong>median ingest</span>
+            <span class="hero-meta-divider"></span>
+            <span class="hero-meta-item"><strong>7</strong>SOC views</span>
+            <span class="hero-meta-divider"></span>
+            <span class="hero-meta-item"><strong>100%</strong>local-first</span>
+          </div>
           <div class="button-row">
-            <a class="button-primary" href="/pricing">Comecar avaliacao</a>
-            <a class="button-secondary" href="/soc">Ver novo SOC</a>
-            <a class="button-secondary" href="/demo">Abrir demonstracao</a>
+            <a class="button-primary" href="/soc">Open the workspace →</a>
+            <a class="button-secondary" href="/pricing">Request demo</a>
+            <a class="button-tertiary" href="/demo">View demo mode</a>
           </div>
           <p class="micro-copy">
-            Implantacao objetiva, painel unificado e experiencia premium do primeiro host ao board review.
+            For portfolio demos, SOC learning, MSSP-style workflows and future SaaS hardening.
           </p>
         </div>
 
         <aside class="hero-card">
-          <div>
-            <span class="panel-kicker">Executive snapshot</span>
-            <h2 class="section-title" style="font-size:1.6rem; margin-top:0.9rem;">SOC com leitura clara, priorizacao rapida e postura premium.</h2>
+          <span class="panel-kicker">Live agent telemetry</span>
+          <div class="terminal" style="margin-top:0.4rem;">
+            <div class="terminal-bar">
+              <span class="terminal-dot is-red"></span>
+              <span class="terminal-dot is-yellow"></span>
+              <span class="terminal-dot is-green"></span>
+              <span class="terminal-title">netguard-agent ~ stream</span>
+            </div>
+            <div class="terminal-body"><span class="tk-comment"># start agent and stream events to SOC</span>
+<span class="tk-prompt">$</span> <span class="tk-cmd">netguard agent</span> <span class="tk-flag">--tenant</span> <span class="tk-string">"acme"</span> <span class="tk-flag">--stream</span>
+<span class="tk-out">[</span><span class="tk-ok">ok</span><span class="tk-out">] handshake     host = WIN-OPS-04</span>
+<span class="tk-out">[</span><span class="tk-ok">ok</span><span class="tk-out">] rules loaded  184 sigma-like</span>
+<span class="tk-out">[</span><span class="tk-warn">!!</span><span class="tk-out">] T1059        powershell · obfuscated</span>
+<span class="tk-out">[</span><span class="tk-bad">**</span><span class="tk-out">] incident     #1287 · risk </span><span class="tk-warn">82</span><span class="tk-out"> · inbox</span>
+<span class="tk-prompt">$</span> <span class="tk-cmd">_</span></div>
           </div>
-          <div class="hero-stat-grid">
-            <div class="hero-stat">
-              <span class="card-kicker">Deteccao</span>
-              <strong class="hero-stat-value accent">&lt; 1s</strong>
-              <span class="hero-stat-note">latencia operacional para eventos prioritarios</span>
-            </div>
-            <div class="hero-stat">
-              <span class="card-kicker">Cobertura</span>
-              <strong class="hero-stat-value">200+</strong>
-              <span class="hero-stat-note">padroes de ameaca mapeados para operacao</span>
-            </div>
-            <div class="hero-stat">
-              <span class="card-kicker">Governanca</span>
-              <strong class="hero-stat-value">LGPD</strong>
-              <span class="hero-stat-note">trilha de auditoria, rastreabilidade e evidencias</span>
-            </div>
-            <div class="hero-stat">
-              <span class="card-kicker">Escala</span>
-              <strong class="hero-stat-value">Multi</strong>
-              <span class="hero-stat-note">trials, tenants e operacao compartilhada com controle</span>
-            </div>
-          </div>
-          <div class="hero-log">
-            <div class="log-row">
-              <span class="log-stamp">00:03 UTC</span>
-              <span><strong class="status-ok">Containment ready</strong> | playbooks e alertas alinhados por criticidade.</span>
-            </div>
-            <div class="log-row">
-              <span class="log-stamp">00:07 UTC</span>
-              <span><strong class="status-warn">Executive grade</strong> | relatorios e paineis desenhados para lideranca e operacao.</span>
-            </div>
-            <div class="log-row">
-              <span class="log-stamp">00:11 UTC</span>
-              <span><strong class="status-ok">Always visible</strong> | rede, eventos, risco e trilha de acao em uma unica superficie.</span>
-            </div>
+          <div class="hairline" style="margin: 0.4rem 0;"></div>
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; padding: 0 0.2rem;">
+            <span style="color:var(--subtle); font-size:0.78rem; letter-spacing:0.18em; text-transform:uppercase; font-weight:500;">Last sync</span>
+            <span class="mono" style="color:var(--accent-soft); font-size:0.84rem;">just now</span>
           </div>
         </aside>
       </div>
     </section>
 
-    <section class="section section-tight">
-      <div class="page-frame trust-row">
-        <span class="trust-item"><span class="trust-dot"></span><strong>Zero ruido visual.</strong> Interface pensada para decisao senior.</span>
-        <span class="trust-item"><span class="trust-dot"></span><strong>Operacao blindada.</strong> Alertas, trilhas e resposta em uma camada unificada.</span>
-        <span class="trust-item"><span class="trust-dot"></span><strong>Leitura executiva.</strong> Produto com cara de plataforma, nao de ferramenta improvisada.</span>
-      </div>
-    </section>
-
-    <section class="section" id="platform">
-      <div class="page-frame">
-        <div class="section-head">
-          <span class="section-kicker">PLATAFORMA</span>
-          <h2 class="section-title">Tudo que uma operacao enterprise espera ver no primeiro minuto.</h2>
-          <p class="section-copy">
-            O produto foi redesenhado para parecer o que ele entrega: seguranca madura, postura premium
-            e clareza de comando em ambientes criticos.
-          </p>
-        </div>
-
-        <div class="feature-grid">
-          <article class="feature-card">
-            <span class="feature-meta">01 | Visibility</span>
-            <h3 class="feature-title">Command center orientado a decisao</h3>
-            <p class="feature-copy">KPI vivo, leitura de risco, eventos e correlacao em uma linguagem visual que conversa com SOC, engenharia e board.</p>
-          </article>
-          <article class="feature-card">
-            <span class="feature-meta">02 | Detection</span>
-            <h3 class="feature-title">Deteccao premium em tempo real</h3>
-            <p class="feature-copy">Assinaturas, hunting, baseline e telemetria combinados para reduzir tempo de leitura e acelerar resposta.</p>
-          </article>
-          <article class="feature-card">
-            <span class="feature-meta">03 | Governance</span>
-            <h3 class="feature-title">Auditoria e trilha de acao prontas para cobranca executiva</h3>
-            <p class="feature-copy">Uso, trials, tenants, acessos e rotacoes com historico limpo para compliance, billing e seguranca.</p>
-          </article>
+    <section class="section section-tight" id="platform" style="padding-top:1rem; padding-bottom:1rem;">
+      <div class="marquee">
+        <div class="marquee-track">
+          <span class="marquee-item"><span class="dot"></span>Clean SOC UX</span>
+          <span class="marquee-item"><span class="dot"></span>Security-aware demo</span>
+          <span class="marquee-item"><span class="dot"></span>Incremental architecture</span>
+          <span class="marquee-item"><span class="dot"></span>Sigma-like detections</span>
+          <span class="marquee-item"><span class="dot"></span>Tenant-aware RBAC</span>
+          <span class="marquee-item"><span class="dot"></span>Local-first ingest</span>
+          <span class="marquee-item"><span class="dot"></span>Audit trail</span>
+          <span class="marquee-item"><span class="dot"></span>MITRE ATT&amp;CK context</span>
+          <!-- duplicate for seamless loop -->
+          <span class="marquee-item"><span class="dot"></span>Clean SOC UX</span>
+          <span class="marquee-item"><span class="dot"></span>Security-aware demo</span>
+          <span class="marquee-item"><span class="dot"></span>Incremental architecture</span>
+          <span class="marquee-item"><span class="dot"></span>Sigma-like detections</span>
+          <span class="marquee-item"><span class="dot"></span>Tenant-aware RBAC</span>
+          <span class="marquee-item"><span class="dot"></span>Local-first ingest</span>
+          <span class="marquee-item"><span class="dot"></span>Audit trail</span>
+          <span class="marquee-item"><span class="dot"></span>MITRE ATT&amp;CK context</span>
         </div>
       </div>
     </section>
 
-    <section class="section" id="blindagem">
+    <section class="section" id="agent-server">
       <div class="page-frame story-grid">
         <article class="story-panel">
-          <span class="section-kicker">BLINDAGEM</span>
-          <h2 class="section-title" style="font-size:2rem;">Postura tecnica com acabamento de produto senior.</h2>
+          <span class="section-kicker">Agent + Server</span>
+          <h2 class="section-title" style="font-size:2rem;">A practical <span class="gradient">endpoint-to-SOC</span> flow.</h2>
           <p class="section-copy">
-            O front inteiro agora trabalha para transmitir confianca: contrastes firmes, leitura rapida,
-            hierarquia clara e uma linguagem visual consistente entre marketing, onboarding e console.
+            The agent collects host, process, network, and security telemetry, then sends normalized events to
+            the central API using authenticated requests. The server handles ingestion, detection, risk, and incident context.
           </p>
           <ul class="check-list">
-            <li>Navegacao mais limpa, objetiva e compativel com uso corporativo.</li>
-            <li>Componentes reaproveitaveis para manter consistencia visual nas proximas entregas.</li>
-            <li>Paleta black and gold para reforcar premium, seguranca e maturidade operacional.</li>
-            <li>Estrutura mobile e desktop preparada para demos, vendas e operacao real.</li>
+            <li>Host identity, heartbeat, telemetry, and local retry behavior.</li>
+            <li>API-key based ingestion and tenant-aware event processing.</li>
+            <li>Detection, correlation, risk scoring, and incident lifecycle foundations.</li>
           </ul>
         </article>
 
-        <article class="story-panel">
-          <span class="section-kicker">STACK VISUAL</span>
-          <div class="metric-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));">
-            <div class="metric-card">
-              <span class="metric-label">Onboarding</span>
-              <strong class="metric-value accent">Premium</strong>
-              <span class="metric-note">Token, trial e acesso com sensacao de produto de alto valor.</span>
-            </div>
-            <div class="metric-card">
-              <span class="metric-label">Pricing</span>
-              <strong class="metric-value">Enterprise</strong>
-              <span class="metric-note">Planos e CTA com leitura comercial madura e mais confiavel.</span>
-            </div>
-            <div class="metric-card">
-              <span class="metric-label">Admin</span>
-              <strong class="metric-value">Control</strong>
-              <span class="metric-note">Console de administracao com peso visual de torre de comando.</span>
-            </div>
-            <div class="metric-card">
-              <span class="metric-label">Dashboard</span>
-              <strong class="metric-value">Gold shell</strong>
-              <span class="metric-note">Overlays premium para transformar o cockpit principal sem quebrar o fluxo.</span>
-            </div>
-          </div>
+        <article class="story-panel" id="soc-dashboard">
+          <span class="section-kicker">SOC Dashboard</span>
+          <h2 class="section-title" style="font-size:2rem;">Designed for <span class="gradient">analyst decisions</span>.</h2>
+          <p class="section-copy">
+            The SOC workspace separates overview, inbox, incidents, host triage, agents, tenants, rules, and settings
+            so demonstrations feel closer to a real product than a single crowded dashboard.
+          </p>
+          <ul class="check-list">
+            <li>Overview with tenants, active hosts, open incidents, severity, and 24h timeline.</li>
+            <li>Operator Inbox ordered by risk with a clear triage call to action.</li>
+            <li>Host Triage view centered on posture, next action, evidence, MITRE context, and agent status.</li>
+          </ul>
         </article>
       </div>
     </section>
 
-    <section class="section" id="governanca">
+    <section class="section" id="use-cases">
       <div class="page-frame">
         <div class="section-head">
-          <span class="section-kicker">GOVERNANCA</span>
-          <h2 class="section-title">Design que ajuda vendas, onboarding e operacao ao mesmo tempo.</h2>
+          <span class="section-kicker">Use cases</span>
+          <h2 class="section-title">Good fit for <span class="gradient">demos, learning</span>, and early product validation.</h2>
+          <p class="section-copy">
+            NetGuard IDS is positioned as a serious lab platform for SOC workflows and endpoint telemetry &mdash; not a
+            claim to replace commercial EDR products.
+          </p>
         </div>
-        <div class="steps-grid">
-          <article class="step-card">
-            <span class="step-index">ETAPA 01</span>
-            <h3 class="step-title">Convencer</h3>
-            <p class="step-copy">Landing e pricing com leitura corporativa, confianca visual e argumentos de alto nivel.</p>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <span class="feature-meta">01 | Portfolio</span>
+            <h3 class="feature-title">Show security engineering depth</h3>
+            <p class="feature-copy">Demonstrate endpoint collection, secure ingestion, rule coverage, and incident workflow in a coherent product story.</p>
           </article>
-          <article class="step-card">
-            <span class="step-index">ETAPA 02</span>
-            <h3 class="step-title">Converter</h3>
-            <p class="step-copy">Login, onboarding e preview com menos atrito e mais percepcao de plataforma consolidada.</p>
+          <article class="feature-card">
+            <span class="feature-meta">02 | SOC training</span>
+            <h3 class="feature-title">Practice risk-based triage</h3>
+            <p class="feature-copy">Use realistic host and event flows to teach prioritization, evidence review, and incident handling.</p>
           </article>
-          <article class="step-card">
-            <span class="step-index">ETAPA 03</span>
-            <h3 class="step-title">Operar</h3>
-            <p class="step-copy">Admin e dashboard com leitura premium para times tecnicos e stakeholders executivos.</p>
+          <article class="feature-card">
+            <span class="feature-meta">03 | SaaS validation</span>
+            <h3 class="feature-title">Test MSSP-style workflows</h3>
+            <p class="feature-copy">Validate tenants, agents, dashboards, RBAC, auditability, and operator experience before deeper platform investment.</p>
           </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-tight">
+      <div class="page-frame">
+        <div class="section-kicker-row">
+          <span class="section-kicker">By the numbers</span>
+        </div>
+        <div class="big-stat-grid">
+          <div class="big-stat">
+            <span class="big-stat-num">184</span>
+            <span class="big-stat-label">Sigma-like detection rules shipped in the lab ruleset.</span>
+          </div>
+          <div class="big-stat">
+            <span class="big-stat-num">7</span>
+            <span class="big-stat-label">Distinct SOC views — overview, inbox, incidents, hosts, rules, agents, settings.</span>
+          </div>
+          <div class="big-stat">
+            <span class="big-stat-num">&lt;2s</span>
+            <span class="big-stat-label">Median agent → server → dashboard ingest latency in the demo profile.</span>
+          </div>
+          <div class="big-stat">
+            <span class="big-stat-num">100%</span>
+            <span class="big-stat-label">Local-first by default. No telemetry leaves the host without a tenant key.</span>
+          </div>
         </div>
       </div>
     </section>
@@ -210,14 +208,14 @@
     <section class="section">
       <div class="page-frame panel" style="padding:1.6rem;">
         <div class="section-head" style="margin-bottom:1rem;">
-          <span class="section-kicker">PRONTO PARA AVALIAR</span>
-          <h2 class="section-title" style="font-size:2rem;">Eleve a presenca visual do produto ao nivel da proposta tecnica.</h2>
-          <p class="section-copy">Se quiser seguir, o proximo passo natural e atacar performance do dashboard com a mesma lente enterprise aplicada no visual.</p>
+          <span class="section-kicker">Next step</span>
+          <h2 class="section-title" style="font-size:2rem;">Open the workspace and test the <span class="gradient">local agent flow</span>.</h2>
+          <p class="section-copy">Run the server, start the agent, and review live telemetry, incidents, rules and host risk from the dashboard.</p>
         </div>
         <div class="button-row">
-          <a class="button-primary" href="/pricing">Ver planos</a>
-          <a class="button-secondary" href="/login">Entrar no painel</a>
-          <a class="button-tertiary" href="mailto:{{ contact_email }}">Falar com a equipe</a>
+          <a class="button-primary" href="/soc">Open Dashboard</a>
+          <a class="button-secondary" href="/pricing">Request Demo</a>
+          <a class="button-tertiary" href="mailto:{{ contact_email }}">Contact</a>
         </div>
       </div>
     </section>
@@ -225,21 +223,20 @@
 
   <footer class="footer">
     <div class="page-frame footer-inner">
-      <div>
-        <a class="brand" href="/">
-          <span class="brand-mark">NG</span>
-          <span class="brand-stack">
-            <strong>NetGuard IDS</strong>
-            <small>security that looks enterprise</small>
-          </span>
-        </a>
-      </div>
+      <a class="brand" href="/">
+        <span class="brand-mark">NG</span>
+        <span class="brand-stack">
+          <strong>NetGuard IDS</strong>
+          <small>SOC/SIEM/EDR-like lab platform</small>
+        </span>
+      </a>
       <div class="footer-links">
-        <a class="ghost-link" href="/pricing">Planos</a>
-        <a class="ghost-link" href="/login">Entrar</a>
+        <a class="ghost-link" href="/soc">SOC</a>
+        <a class="ghost-link" href="/pricing">Plans</a>
         <a class="ghost-link" href="mailto:{{ contact_email }}">{{ contact_email }}</a>
       </div>
     </div>
   </footer>
+  <script src="/static/js/netguard-ui.js" defer></script>
 </body>
 </html>

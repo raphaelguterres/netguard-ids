@@ -159,6 +159,23 @@ class TestSocPreviewRoutes(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("Security Overview", resp.get_data(as_text=True))
 
+    def test_recommended_route_endpoint_returns_safe_read_route(self):
+        resp = self.client.get("/api/recommended-route")
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.get_json()
+        recommendation = payload["recommendation"]
+        self.assertTrue(recommendation["route"].startswith(("/soc", "/soc-preview", "/admin/inbox")))
+        self.assertNotIn("/api/", recommendation["route"])
+        self.assertIn(recommendation["priority"], {"critical", "high", "medium", "low", "info"})
+
+    def test_local_session_endpoint_creates_loopback_dashboard_session(self):
+        resp = self.client.post("/api/auth/local-session", json={"next": "/dashboard"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.get_json()
+        self.assertTrue(payload["valid"])
+        self.assertEqual(payload["mode"], "local")
+        self.assertTrue(any("netguard_token=" in cookie for cookie in resp.headers.getlist("Set-Cookie")))
+
     def test_hosts_preview_renders(self):
         resp = self.client.get("/soc-preview/hosts")
         self.assertEqual(resp.status_code, 200)

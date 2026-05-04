@@ -3,65 +3,330 @@
 <head>
 <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NetGuard IDS | Enterprise Command Center</title>
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/dashboard-enterprise.css?v=20260409b">
+<title>NetGuard IDS | Command Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/dashboard-enterprise.css?v=20260502apple">
+<link rel="stylesheet" href="/static/css/netguard.css">
+<script src="/static/js/theme-toggle.js"></script>
 <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
 
 <style>
 :root{
-  /* Glass dark base — slightly lighter so text breathes */
-  --bg:#060e1a;
-  --s1:rgba(10,20,38,.85);
-  --s2:rgba(14,26,50,.8);
-  --s3:rgba(18,34,62,.75);
-  --s4:rgba(22,42,74,.7);
+  /* Apple Pro DARK — true near-black, OLED-friendly */
+  --bg:#0e0e10;
+  --s1:#161618;
+  --s2:#1c1c1e;
+  --s3:#222224;
+  --s4:#2c2c2e;
 
-  /* Borders — more visible */
-  --b1:rgba(0,200,255,.12);
-  --b2:rgba(0,200,255,.18);
-  --b3:rgba(0,200,255,.26);
+  /* Hairlines — Apple style (very subtle) */
+  --b1:rgba(255,255,255,0.06);
+  --b2:rgba(255,255,255,0.10);
+  --b3:rgba(255,255,255,0.16);
 
-  /* Accent */
-  --acc:#00e5ff;--acc2:#00b8d4;--acc3:#007a8f;
+  /* Accent — champagne (brand identity) */
+  --acc:#c8a85a;--acc2:#e8d091;--acc3:#806320;
 
-  /* Status */
-  --grn:#00ffaa;--grn2:#00cc88;
-  --red:#ff3366;--red2:#cc1038;
-  --ora:#ff8800;--yel:#ffdd00;--pur:#cc66ff;--pur2:#9933cc;
-  --blu:#4499ff;--cyn:#00ddff;--mag:#ff44aa;
+  /* Apple system colors — restrained */
+  --grn:#30d158;--grn2:#28a046;
+  --red:#ff453a;--red2:#d93b32;
+  --ora:#ff9f0a;--yel:#ffd60a;--pur:#bf5af2;--pur2:#9a47c0;
+  --blu:#0a84ff;--cyn:#64d2ff;--mag:#ff375f;
 
-  /* Text — much more readable */
-  --txt:#d4eeff;      /* primary — bright white-blue */
-  --txt2:#7ab0d0;     /* secondary — readable mid */
-  --txt3:#3a6888;     /* tertiary — dim labels */
+  /* Text hierarchy — Apple semantic */
+  --txt:#ffffff;                            /* primary — pure white */
+  --txt2:rgba(235,235,245,0.62);            /* secondary */
+  --txt3:rgba(235,235,245,0.30);            /* tertiary / labels */
 
-  --mono:'Share Tech Mono',monospace;
-  --head:'Orbitron',sans-serif;
-  --body:'Exo 2',sans-serif;
-  --sans:'Exo 2',system-ui,sans-serif;
-  --r1:4px;
+  --mono:'JetBrains Mono','SF Mono',Consolas,monospace;
+  --head:'Inter','SF Pro Display',-apple-system,sans-serif;
+  --body:'Inter','SF Pro Text',-apple-system,sans-serif;
+  --sans:'Inter','SF Pro Text',-apple-system,sans-serif;
+  --r1:8px;
 
-  /* Aliases para compatibilidade */
-  --txt1:#d4eeff;            /* igual a --txt, texto principal */
-  --bg2:rgba(14,26,50,.6);   /* painel levemente mais claro que --bg */
+  --txt1:#ffffff;
+  --bg2:#1c1c1e;
 
-  /* Glass effect vars */
-  --glass:rgba(10,25,50,.7);
-  --glass-border:rgba(0,220,255,.15);
-  --glass-shine:rgba(255,255,255,.04);
-  --blur:blur(12px);
+  /* No more glass — Apple Pro is solid surfaces */
+  --glass:#1c1c1e;
+  --glass-border:rgba(255,255,255,0.08);
+  --glass-shine:transparent;
+  --blur:none;
 }
+
+/* ── LIGHT THEME (Apple Pro day) ──────────────────────────── */
+[data-theme="light"] {
+  --bg:#f5f5f7;
+  --s1:#ffffff;
+  --s2:#f7f7f9;
+  --s3:#ebebef;
+  --s4:#dcdce0;
+
+  --b1:rgba(0,0,0,0.06);
+  --b2:rgba(0,0,0,0.10);
+  --b3:rgba(0,0,0,0.16);
+
+  --acc:#b8983f; --acc2:#c8a85a; --acc3:#5a4810;
+
+  --grn:#248a3d; --grn2:#1a6b30;
+  --red:#d70015; --red2:#a30010;
+  --ora:#c93400; --yel:#9d8000;
+  --pur:#9d44d8; --pur2:#7c2da3;
+  --blu:#0040dd; --cyn:#007aff; --mag:#c5005c;
+
+  --txt:#1d1d1f;
+  --txt2:rgba(60,60,67,0.62);
+  --txt3:rgba(60,60,67,0.40);
+  --txt1:#1d1d1f;
+  --bg2:#f7f7f9;
+
+  --glass:#ffffff;
+  --glass-border:rgba(0,0,0,0.08);
+  --glass-shine:transparent;
+  --blur:none;
+}
+[data-theme="light"] html,
+[data-theme="light"] body { background:#f5f5f7; color:#1d1d1f; }
+[data-theme="light"] #hdr,
+[data-theme="light"] #krow,
+[data-theme="light"] .pnl,
+[data-theme="light"] .ph,
+[data-theme="light"] #ticker,
+[data-theme="light"] #fctrl,
+[data-theme="light"] thead {
+  background:#ffffff !important;
+  border-color:rgba(0,0,0,0.08) !important;
+}
+[data-theme="light"] tbody tr { border-bottom:1px solid rgba(0,0,0,0.06) !important; }
+[data-theme="light"] tbody tr:hover { background:rgba(0,0,0,0.025) !important; }
+[data-theme="light"] td { color:#1d1d1f !important; }
+[data-theme="light"] .kpi-n { color:#1d1d1f !important; }
+[data-theme="light"] .kpi-l { color:rgba(60,60,67,0.62) !important; }
+[data-theme="light"] .kpi-s { color:rgba(60,60,67,0.40) !important; }
+[data-theme="light"] .kpi:hover { background:rgba(0,0,0,0.02) !important; }
+[data-theme="light"] .tab { color:rgba(60,60,67,0.62) !important; }
+[data-theme="light"] .tab:hover { color:#1d1d1f !important; background:rgba(0,0,0,0.04) !important; }
+[data-theme="light"] .tab.on { color:#1d1d1f !important; }
+[data-theme="light"] .logo-name { color:#1d1d1f !important; }
+[data-theme="light"] .logo-ver { color:rgba(60,60,67,0.40) !important; }
+[data-theme="light"] .ph-t { color:rgba(60,60,67,0.62) !important; }
+[data-theme="light"] #detail { background:#f7f7f9 !important; border-top-color:rgba(0,0,0,0.08) !important; }
+[data-theme="light"] * { scrollbar-color: rgba(0,0,0,0.16) transparent !important; }
+[data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.16) !important; }
+
+/* theme toggle button */
+.theme-toggle {
+  width:32px; height:32px; border-radius:6px;
+  border:1px solid var(--b2); background:transparent;
+  color:var(--txt2); cursor:pointer; display:inline-flex;
+  align-items:center; justify-content:center;
+  transition:background .2s, border-color .2s, color .2s;
+  padding:0; flex-shrink:0; margin-right:8px;
+}
+.theme-toggle:hover {
+  border-color:var(--acc2); color:var(--acc2);
+  background:rgba(200,168,90,.06);
+}
+[data-theme="light"] .theme-toggle:hover { background:rgba(0,0,0,0.04); }
+.theme-toggle svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+.theme-toggle .icon-sun  { display:none; }
+.theme-toggle .icon-moon { display:block; }
+[data-theme="light"] .theme-toggle .icon-sun  { display:block; }
+[data-theme="light"] .theme-toggle .icon-moon { display:none; }
+
+/* ── LIGHT THEME — Apple Pro Light ───────────────────────────────── */
+body.theme-light{
+  --bg:#f5f5f7;
+  --s1:#ffffff;
+  --s2:#fafafa;
+  --s3:#f0f0f2;
+  --s4:#e5e5e7;
+
+  --b1:rgba(0,0,0,0.06);
+  --b2:rgba(0,0,0,0.10);
+  --b3:rgba(0,0,0,0.16);
+
+  --acc:#806320;--acc2:#a98a3a;--acc3:#c8a85a;
+
+  --grn:#28a046;--red:#d93b32;--ora:#cc7400;
+  --yel:#b8970a;--blu:#0066cc;--cyn:#0099b8;
+
+  --txt:#1d1d1f;
+  --txt2:rgba(60,60,67,0.62);
+  --txt3:rgba(60,60,67,0.30);
+
+  --txt1:#1d1d1f;
+  --bg2:#ffffff;
+
+  --glass:#ffffff;
+  --glass-border:rgba(0,0,0,0.08);
+}
+body.theme-light{ background:#f5f5f7 !important; }
+body.theme-light #hdr,
+body.theme-light #krow,
+body.theme-light .pnl,
+body.theme-light .ph,
+body.theme-light #fctrl,
+body.theme-light thead{ background:#ffffff !important; }
+body.theme-light tbody tr:hover{ background:rgba(0,0,0,0.025) !important; }
+body.theme-light .kpi:hover{ background:rgba(0,0,0,0.018) !important; }
+body.theme-light input, body.theme-light select, body.theme-light textarea{
+  background:#ffffff !important; color:#1d1d1f !important;
+  border-color:rgba(0,0,0,0.10) !important;
+}
+body.theme-light #ticker{ background:#ffffff !important; }
+
+/* ── light theme — comprehensive coverage for hardcoded surfaces ── */
+body.theme-light html,
+body.theme-light{
+  background:#f5f5f7 !important;
+  color:#1d1d1f !important;
+}
+
+/* every panel / pane bg that was hardcoded dark navy */
+body.theme-light .pnl,
+body.theme-light #ov-left,
+body.theme-light #ov-center,
+body.theme-light #ov-right,
+body.theme-light #conn-pane,
+body.theme-light #live-pane,
+body.theme-light #geo-pane,
+body.theme-light #sys-pane,
+body.theme-light #stats-pane,
+body.theme-light #soc-pane,
+body.theme-light #kc-pane,
+body.theme-light #f2b-pane,
+body.theme-light #risk-pane,
+body.theme-light #hunt-pane,
+body.theme-light #lateral-pane,
+body.theme-light #yara-pane,
+body.theme-light #dns-pane,
+body.theme-light #host-pane,
+body.theme-light #ml-pane,
+body.theme-light #block-pane,
+body.theme-light #ow-pane,
+body.theme-light #analise-pane,
+body.theme-light #corr-pane,
+body.theme-light #netmap-area,
+body.theme-light #dev-card-list,
+body.theme-light #mini-graph,
+body.theme-light #mini-log,
+body.theme-light #mini-log-scroll,
+body.theme-light #log-scroll,
+body.theme-light #conn-scroll,
+body.theme-light #ftbl,
+body.theme-light .pscroll,
+body.theme-light .device-card,
+body.theme-light .stat-pill,
+body.theme-light .f2b-stat,
+body.theme-light .soc-stat,
+body.theme-light .kc-inc-card,
+body.theme-light .le-row,
+body.theme-light .le-det,
+body.theme-light .modal,
+body.theme-light .modal-content,
+body.theme-light #detail{
+  background:#ffffff !important;
+  color:#1d1d1f !important;
+  border-color:rgba(0,0,0,0.08) !important;
+}
+
+/* borders that were hardcoded #102840 / cyan rgba */
+body.theme-light *[style*="border"],
+body.theme-light .pnl,
+body.theme-light .device-card,
+body.theme-light .stat-pill,
+body.theme-light .ph,
+body.theme-light thead,
+body.theme-light tbody tr,
+body.theme-light #fctrl,
+body.theme-light #krow,
+body.theme-light .kpi,
+body.theme-light #ticker,
+body.theme-light #ow-left,
+body.theme-light #ov-right{
+  border-color:rgba(0,0,0,0.08) !important;
+}
+
+/* text colors */
+body.theme-light .logo-name,
+body.theme-light .kpi-n,
+body.theme-light td,
+body.theme-light th,
+body.theme-light h1, body.theme-light h2, body.theme-light h3,
+body.theme-light .device-card *,
+body.theme-light .f2b-stat-value,
+body.theme-light .soc-stat-value,
+body.theme-light .stat-pill,
+body.theme-light .kc-inc-card{
+  color:#1d1d1f !important;
+}
+body.theme-light .kpi-l,
+body.theme-light .kpi-s,
+body.theme-light .ph-t,
+body.theme-light .logo-ver,
+body.theme-light .tk-lbl,
+body.theme-light .f2b-stat-label,
+body.theme-light .soc-stat-label,
+body.theme-light .empty,
+body.theme-light .loading,
+body.theme-light .t3,
+body.theme-light .le-meta{
+  color:rgba(60,60,67,0.62) !important;
+}
+
+/* keep severity color but darker so it reads on white */
+body.theme-light .chip.critical{ color:#a30010 !important; }
+body.theme-light .chip.high{ color:#b3500a !important; }
+body.theme-light .chip.medium{ color:#9d8000 !important; }
+body.theme-light .chip.low{ color:#1a6b30 !important; }
+
+/* terminal stays dark in both themes (code blocks always dark) */
+body.theme-light .terminal,
+body.theme-light pre,
+body.theme-light code{
+  background:#1d1d1f !important;
+  color:#f5f5f7 !important;
+  border-color:rgba(0,0,0,0.10) !important;
+}
+
+/* recommended action banner */
+body.theme-light .ng-recommendation,
+body.theme-light .soc-guided-action{
+  background:#ffffff !important;
+  border:1px solid rgba(0,0,0,0.08) !important;
+  color:#1d1d1f !important;
+}
+body.theme-light .ng-recommendation h2{ color:#1d1d1f !important; }
+body.theme-light .ng-recommendation p,
+body.theme-light .ng-recommendation .soc-stat-label{ color:rgba(60,60,67,0.62) !important; }
+
+/* scrollbar */
+body.theme-light *{ scrollbar-color: rgba(0,0,0,0.16) transparent !important; }
+body.theme-light ::-webkit-scrollbar-thumb{ background:rgba(0,0,0,0.16) !important; }
+body.theme-light ::-webkit-scrollbar-thumb:hover{ background:rgba(0,0,0,0.28) !important; }
+
+/* cyan accent → champagne deep */
+body.theme-light .tab.on{ border-bottom-color:#806320 !important; color:#1d1d1f !important; }
+
+/* network map / geo svg backgrounds */
+body.theme-light svg circle[fill="#06101e"],
+body.theme-light svg rect[fill="#06101e"]{ fill:#f5f5f7 !important; }
+body.theme-light #detail{ background:#ffffff !important; }
+
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 *::before,*::after{pointer-events:none}
 a,button,input,select,textarea,[onclick]{cursor:pointer}
 html,body{
   height:100%;overflow:hidden;
-  background:
-    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(0,80,160,.25) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 80% at 80% 90%, rgba(80,0,160,.2) 0%, transparent 60%),
-    radial-gradient(ellipse 100% 100% at 50% 50%, #060e1a 0%, #03080f 100%);
+  background:#0e0e10;
   color:var(--txt);font-size:13px;
+  font-family:var(--body);
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  transition:background .25s ease, color .25s ease;
 }
 
 
@@ -70,32 +335,40 @@ html,body{
 
 /* ── HEADER ─────────────────────────────────────────────────────── */
 #hdr{
-  background:#060e20;
-  border-bottom:1px solid #102840;
+  background:var(--bg);
+  border-bottom:1px solid var(--b1);
   display:flex;align-items:center;padding:0 20px;gap:0;
   position:relative;
+  height:48px;
 }
 
 
 .logo{display:flex;align-items:center;gap:10px;margin-right:32px;position:relative}
-.logo-icon{width:30px;height:30px;position:relative}
+.logo-icon{width:24px;height:24px;position:relative}
 .logo-icon svg{width:100%;height:100%}
-.logo-text{display:flex;flex-direction:column;gap:1px}
-.logo-name{font-family:var(--head);font-size:17px;font-weight:900;letter-spacing:.15em;
-  background:linear-gradient(135deg,var(--acc) 0%,var(--pur) 100%);
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.logo-ver{font-family:var(--mono);font-size:7px;color:var(--txt3);letter-spacing:.2em}
+.logo-text{display:flex;flex-direction:column;gap:0}
+.logo-name{font-family:var(--head);font-size:13px;font-weight:600;letter-spacing:0.01em;color:var(--txt)}
+.logo-ver{font-family:var(--mono);font-size:9px;color:var(--txt3);letter-spacing:.05em}
 
 /* TABS */
 .tabs:hover{width:auto}
 .tabs.sidebar-expanded{width:auto}
 
 .tab:hover{color:var(--txt);background:rgba(255,255,255,.04)}
-.tab.on{color:var(--acc);border-bottom-color:var(--acc)}
+.tab.on{color:var(--txt);border-bottom-color:var(--acc)}
 
 
 /* STATUS BAR */
-.hdr-r{margin-left:auto;display:flex;align-items:center;gap:16px}
+.hdr-r{margin-left:auto;display:flex;align-items:center;gap:14px}
+.theme-toggle{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:28px;border-radius:6px;
+  background:transparent;border:1px solid var(--b1);
+  color:var(--txt2);cursor:pointer;
+  transition:background .2s,border-color .2s,color .2s;
+}
+.theme-toggle:hover{background:rgba(255,255,255,0.05);border-color:var(--b2);color:var(--txt)}
+body.theme-light .theme-toggle:hover{background:rgba(0,0,0,0.04)}
 .stat-pill{display:flex;align-items:center;gap:5px;padding:3px 9px;
   border:1px solid var(--b2);border-radius:20px;background:var(--s2)}
 .stat-pill-dot{width:5px;height:5px;border-radius:50%}
@@ -107,38 +380,33 @@ html,body{
 #utc{font-family:var(--mono);font-size:10px;color:var(--txt3);letter-spacing:.05em;
   border-left:1px solid var(--b1);padding-left:14px;margin-left:2px}
 
-/* ── KPI ROW ─────────────────────────────────────────────────────── */
+/* ── KPI ROW — Apple Pro clean ────────────────────────────────── */
 #krow{
   display:grid;grid-template-columns:repeat(7,1fr);
-  background:var(--s1);border-bottom:1px solid var(--b2);
+  background:var(--bg);border-bottom:1px solid var(--b1);
   overflow:hidden;position:relative;flex-shrink:0;
 }
-#krow::after{
-  content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,transparent,rgba(0,229,255,.15),transparent);
-  pointer-events:none!important;
-  z-index:0;
-}
+#krow::after{ content:none; }
 .kpi{
   display:flex;flex-direction:column;justify-content:center;
-  padding:0 18px;border-right:1px solid rgba(0,200,255,.08);
+  padding:14px 20px;border-right:1px solid var(--b1);
   position:relative;overflow:hidden;cursor:default;
-  transition:background .25s;
+  transition:background .2s;
 }
 .kpi:last-child{border-right:none}
-.kpi:hover{background:#071320}
-.kpi::before{
-  content:'';position:absolute;top:0;left:0;right:0;height:2px;
-  background:var(--kc,transparent);
-  opacity:.4;
-  pointer-events:none!important;
-  z-index:0;
-}
-.kpi-l{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--txt3);text-transform:uppercase;margin-bottom:2px}
-.kpi-n{font-family:var(--head);font-size:20px;font-weight:900;line-height:1;color:var(--txt)}
-.kpi-s{font-family:var(--mono);font-size:7px;color:var(--txt3);margin-top:2px;letter-spacing:.06em}
-.kpi.cr{--kc:var(--red)}.kpi.hi{--kc:var(--ora)}.kpi.me{--kc:var(--yel)}
-.kpi.lo{--kc:var(--grn)}.kpi.to{--kc:var(--acc)}.kpi.co{--kc:var(--pur)}.kpi.sy{--kc:var(--blu)}
+.kpi:hover{background:rgba(255,255,255,0.02)}
+.kpi::before{ content:none; }
+.kpi-l{font-family:var(--body);font-size:11px;letter-spacing:0;color:var(--txt2);text-transform:none;margin-bottom:4px;font-weight:500}
+.kpi-n{font-family:var(--head);font-size:22px;font-weight:600;line-height:1;color:var(--txt);letter-spacing:-0.02em}
+.kpi-s{font-family:var(--body);font-size:11px;color:var(--txt3);margin-top:3px;letter-spacing:0;font-weight:400}
+/* small accent dot left of label for severity tier */
+.kpi.cr .kpi-l::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);margin-right:6px;vertical-align:middle}
+.kpi.hi .kpi-l::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ora);margin-right:6px;vertical-align:middle}
+.kpi.me .kpi-l::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--yel);margin-right:6px;vertical-align:middle}
+.kpi.lo .kpi-l::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--grn);margin-right:6px;vertical-align:middle}
+.kpi.to .kpi-l::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--acc);margin-right:6px;vertical-align:middle}
+.kpi.co .kpi-l::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--blu);margin-right:6px;vertical-align:middle}
+.kpi.sy .kpi-l::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--txt3);margin-right:6px;vertical-align:middle}
 
 50%{opacity:.6;transform:scale(1.02)}}
 
@@ -149,7 +417,7 @@ html,body{
 
 
 /* ── PANEL PRIMITIVES ───────────────────────────────────────────── */
-.pnl{display:flex;flex-direction:column;overflow:hidden;background:#060e1c;border-right:1px solid #102840}
+.pnl{display:flex;flex-direction:column;overflow:hidden;background:var(--bg);border-right:1px solid var(--b1)}
 .pnl:last-child{border-right:none}
 .ph{
   height:34px;display:flex;align-items:center;justify-content:space-between;
@@ -204,15 +472,16 @@ html,body{
 .fbtn:hover{background:#082030;border-color:var(--acc);color:var(--acc)}
 .fml{margin-left:auto}
 table{width:100%;border-collapse:collapse}
-thead{position:sticky;top:0;z-index:2;background:#0c1a36;text-align:left;font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--txt3);border-bottom:1px solid var(--b1);font-weight:400;white-space:nowrap}
-tbody tr{border-bottom:1px solid rgba(0,180,255,.06);cursor:pointer;transition:background .1s}
-tbody tr:hover{background:#071320}
-td{padding:8px 10px;vertical-align:middle;font-family:var(--mono);font-size:11px}
-.chip{display:inline-block;padding:3px 8px;border-radius:var(--r1);font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;border:1px solid}
-.chip.critical{color:var(--red);border-color:rgba(255,26,75,.35);background:rgba(255,26,75,.08)}
-.chip.high{color:var(--ora);border-color:rgba(255,102,0,.35);background:rgba(255,102,0,.08)}
-.chip.medium{color:var(--yel);border-color:rgba(255,214,0,.35);background:rgba(255,214,0,.08)}
-.chip.low{color:var(--grn);border-color:rgba(0,255,157,.25);background:rgba(0,255,157,.05)}
+thead{position:sticky;top:0;z-index:2;background:var(--bg);text-align:left;font-family:var(--body);font-size:11px;letter-spacing:0;text-transform:none;color:var(--txt3);border-bottom:1px solid var(--b1);font-weight:500;white-space:nowrap}
+tbody tr{border-bottom:1px solid var(--b1);cursor:pointer;transition:background .15s}
+tbody tr:hover{background:rgba(255,255,255,0.03)}
+td{padding:11px 14px;vertical-align:middle;font-family:var(--body);font-size:12px;color:var(--txt)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 0;border-radius:0;font-family:var(--body);font-size:11px;font-weight:500;letter-spacing:0;text-transform:none;border:none;background:transparent}
+.chip::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.95;flex-shrink:0}
+.chip.critical{color:var(--red);background:transparent}
+.chip.high{color:var(--ora);background:transparent}
+.chip.medium{color:var(--yel);background:transparent}
+.chip.low{color:var(--grn);background:transparent}
 .t3{color:var(--txt3)}
 
 /* Detail drawer */
@@ -1231,19 +1500,17 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 }
 /* ── TARGETED FIXES from screenshot review ─────────────────── */
 
-/* KPI row: proper height, no colored squares artifact */
+/* KPI row: Apple Pro — uniform white numbers, dot-only severity */
 #krow {
-  min-height: 52px;
-  max-height: 64px;
+  min-height: 64px;
+  max-height: 76px;
 }
-.kpi { padding: 0 16px; min-height: 52px; }
+.kpi { padding: 12px 20px; min-height: 64px; }
 .kpi-n { font-size: 22px !important; color: var(--txt) !important; }
-.kpi.cr .kpi-n { color: var(--red) !important; }
-.kpi.hi .kpi-n { color: var(--ora) !important; }
+.kpi.cr .kpi-n,
+.kpi.hi .kpi-n { color: var(--txt) !important; }
 
-/* Remove colored background from kpi numbers - just text color */
-.kpi::before { height: 2px; opacity: .35; background: var(--kc, transparent); }
-/* No glow, no box-shadow, no background on kpi */
+.kpi::before { content: none; }
 .kpi-n.flash { animation: none !important; }
 
 /* Left panel: no visible scrollbar in middle */
@@ -1265,8 +1532,8 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 #detail {
   flex-shrink: 0;
   max-height: 130px;
-  background: #040c18;
-  border-top: 1px solid rgba(0,200,255,.1);
+  background: #232325;
+  border-top: 1px solid var(--b1);
 }
 
 /* Right panel: better use of space */
@@ -1279,31 +1546,32 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 #mini-log { flex: 1; min-height: 0; overflow: hidden; }
 #mini-log-scroll { flex: 1; overflow-y: auto; }
 
-/* Ticker: subtle */
-#ticker { 
-  height: 22px; 
-  background: #030810;
-  border-top: 1px solid rgba(0,200,255,.06);
+/* Ticker: subtle Apple style */
+#ticker {
+  height: 24px;
+  background: var(--bg);
+  border-top: 1px solid var(--b1);
 }
-.tk-lbl { font-size: 5px; letter-spacing: .15em; }
-#tk-inner { font-size: 8px; }
+.tk-lbl { font-size: 9px; letter-spacing: 0; color: var(--txt3); font-weight: 500; }
+#tk-inner { font-size: 11px; color: var(--txt2); font-weight: 400; }
 
-/* Tab icons: ensure emoji render correctly */
-.tab { font-size: 9px; gap: 4px; }
+/* Tabs: Apple-style — sentence case, comfortable size */
+.tab { font-size: 11px; gap: 6px; font-weight: 500; letter-spacing: 0; text-transform: none; padding: 0 10px; color: var(--txt2); }
 
-/* Panel header consistency */
-.ph { height: 30px; background: rgba(3,8,16,.9); }
-.ph-t { font-size: 8px; letter-spacing: .08em; color: var(--txt2); }
+/* Panel header */
+.ph { height: 36px; background: var(--bg); border-bottom: 1px solid var(--b1); padding: 0 16px; }
+.ph-t { font-size: 11px; letter-spacing: 0; color: var(--txt2); font-weight: 500; text-transform: none; }
 
-/* Scrollbar: only in content areas */
+/* Scrollbar: thin, white-translucent (Apple style) */
 .pscroll::-webkit-scrollbar,
 #conn-scroll::-webkit-scrollbar,
 #log-scroll::-webkit-scrollbar,
-#mini-log-scroll::-webkit-scrollbar { width: 2px; }
+#mini-log-scroll::-webkit-scrollbar { width: 4px; }
 .pscroll::-webkit-scrollbar-thumb,
 #conn-scroll::-webkit-scrollbar-thumb,
 #log-scroll::-webkit-scrollbar-thumb,
-#mini-log-scroll::-webkit-scrollbar-thumb { background: rgba(0,200,255,.12); }
+#mini-log-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 2px; }
+.pscroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.20); }
 
 /* Remove the vertical scrollbar appearing in left panel */
 #ov-left::-webkit-scrollbar { width: 0; }
@@ -1317,7 +1585,7 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 #ftbl { flex: 1; overflow-y: auto; }
 
 /* Fctrl bar */
-#fctrl { background: rgba(4,9,15,.9); height: 34px; flex-shrink: 0; }
+#fctrl { background: var(--bg); height: 40px; flex-shrink: 0; border-bottom: 1px solid var(--b1); }
 
 /* Fix: empty state center alignment */
 .empty { 
@@ -1784,17 +2052,19 @@ input:checked + .toggle-slider::before{transform:translateX(18px);background:var
 .finput:focus { border-color: rgba(0,200,255,.4); }
 .finput::placeholder { color: var(--txt3); }
 
-/* ── Chips: consistent ───────────────────────────────────────── */
-.chip { font-size: 8px; padding: 2px 7px; border-radius: 3px; font-weight: 600; letter-spacing: .06em; }
-.chip.critical { color: var(--red); border-color: rgba(255,50,80,.3); background: rgba(255,50,80,.06); }
-.chip.high { color: var(--ora); border-color: rgba(255,136,0,.3); background: rgba(255,136,0,.06); }
-.chip.medium { color: var(--yel); border-color: rgba(255,214,0,.3); background: rgba(255,214,0,.06); }
-.chip.low { color: var(--grn); border-color: rgba(0,255,157,.2); background: rgba(0,255,157,.04); }
+/* ── Chips: Apple style — dot + label ─────────────────────────── */
+.chip { font-size: 11px; padding: 2px 0; border-radius: 0; font-weight: 500; letter-spacing: 0; }
+.chip.critical { color: var(--red); border-color: transparent; background: transparent; }
+.chip.high { color: var(--ora); border-color: transparent; background: transparent; }
+.chip.medium { color: var(--yel); border-color: transparent; background: transparent; }
+.chip.low { color: var(--grn); border-color: transparent; background: transparent; }
 
-/* ── Scrollbar: uniform 3px ──────────────────────────────────── */
-* { scrollbar-width: thin; scrollbar-color: rgba(0,200,255,.12) transparent; }
-::-webkit-scrollbar { width: 3px; height: 3px; }
+/* ── Scrollbar: Apple-thin white ─────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.12) transparent; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.20); }
 ::-webkit-scrollbar-thumb { background: rgba(0,200,255,.14); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(0,200,255,.28); }
 
@@ -1924,9 +2194,12 @@ th.sortable:hover{color:var(--cyn)}
 .cmdpal-trigger kbd{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
   border-radius:3px;padding:1px 5px;font-size:9px;font-family:var(--mono)}
 </style>
+<link rel="stylesheet" href="/static/css/netguard.css">
 </head>
 <body class="enterprise-command">
+<script src="/static/js/netguard-ui.js" defer></script>
 <div id="app">
+<div data-guided-entry></div>
 
 <!-- TRIAL / DEMO BANNER -->
 <div id="banner-stack">
@@ -1980,9 +2253,36 @@ th.sortable:hover{color:var(--cyn)}
        style="display:none"
        title="Painel de Administração">⚡ Admin</a>
     <button class="cmdpal-trigger" onclick="openPalette()" title="Busca global (Ctrl+K)"><span>🔍</span> <kbd>Ctrl+K</kbd></button>
+    <button id="theme-toggle" type="button" class="theme-toggle" onclick="toggleTheme()" title="Alternar dia/noite" aria-label="Alternar tema">
+      <svg id="theme-icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg id="theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    </button>
     <div id="utc">—</div>
   </div>
 </div>
+<script>
+(function(){
+  var KEY='netguard.theme';
+  function apply(t){
+    document.body.classList.toggle('theme-light', t==='light');
+    var moon=document.getElementById('theme-icon-moon');
+    var sun=document.getElementById('theme-icon-sun');
+    if(moon&&sun){
+      moon.style.display = (t==='light') ? 'none' : '';
+      sun.style.display  = (t==='light') ? '' : 'none';
+    }
+  }
+  window.toggleTheme=function(){
+    var current = document.body.classList.contains('theme-light') ? 'light' : 'dark';
+    var next = current==='light' ? 'dark' : 'light';
+    try{ localStorage.setItem(KEY, next); }catch(e){}
+    apply(next);
+  };
+  var saved = null;
+  try{ saved = localStorage.getItem(KEY); }catch(e){}
+  if(saved==='light'||saved==='dark'){ apply(saved); }
+})();
+</script>
 
 <div class="tabs-wrapper">
   <div class="tabs-groups" id="tabs-groups">
@@ -3595,6 +3895,7 @@ th.sortable:hover{color:var(--cyn)}
 .meta-text.soft { color: rgba(139,148,158,.7); }
 .flex-1 { flex: 1; min-width: 0; }
 </style>
+<link rel="stylesheet" href="/static/css/netguard.css">
 
 <script>
 // ── State ─────────────────────────────────────────────────────────
@@ -9882,6 +10183,7 @@ async function addIncNote(id){
 /* ── Misc helpers ────────────────────────────────────────────── */
 .left { text-align: left !important; }
 </style>
+<link rel="stylesheet" href="/static/css/netguard.css">
 
 <!-- ── Command Palette (Ctrl+K / Cmd+K) ───────────────── -->
 <div id="cmd-palette" class="cmdpal-overlay" style="display:none" onclick="if(event.target===this)closePalette()">
@@ -9911,36 +10213,33 @@ const _CP_TABS = [
   {icon:'⇄',label:'Conexões',key:'connections',hint:'connections'},
   {icon:'⬡',label:'Ao Vivo',key:'live',hint:'live'},
   {icon:'🌐',label:'Geo Map',key:'geomap',hint:'geo'},
-  {icon:'⊞',label:'Sistema',key:'system',hint:'system'},
-  {icon:'⚔',label:'OWASP',key:'owasp',hint:'owasp'},
-  {icon:'⊕',label:'Analisar',key:'analyze',hint:'analyze'},
-  {icon:'≋',label:'Estatísticas',key:'stats',hint:'stats'},
-  {icon:'⛓',label:'Kill Chain',key:'killchain',hint:'killchain'},
-  {icon:'🚫',label:'Fail2Ban',key:'fail2ban',hint:'fail2ban'},
-  {icon:'🔎',label:'SOC Events',key:'soc',hint:'soc'},
-  {icon:'🔗',label:'Correlation',key:'corr',hint:'corr'},
-  {icon:'🎯',label:'Risk Score',key:'risk',hint:'risk'},
-  {icon:'🧠',label:'ML Baseline',key:'ml',hint:'ml'},
-  {icon:'🛡',label:'Auto Block',key:'block',hint:'block'},
-  {icon:'🔍',label:'Threat Hunt',key:'hunt',hint:'hunt'},
-  {icon:'🌐',label:'Lateral Move',key:'lateral',hint:'lateral'},
-  {icon:'🦠',label:'YARA',key:'yara',hint:'yara'},
-  {icon:'🌐',label:'DNS Monitor',key:'dns',hint:'dns'},
-  {icon:'🍯',label:'Honeypot',key:'honeypot',hint:'honeypot'},
-  {icon:'☣',label:'IOC Manager',key:'ioc',hint:'ioc'},
-  {icon:'🤖',label:'ML Anomaly',key:'ml-anomaly',hint:'ml-anomaly'},
-  {icon:'📋',label:'Compliance',key:'compliance',hint:'compliance'},
-  {icon:'⚙',label:'Custom Rules',key:'custom-rules',hint:'custom-rules'},
-  {icon:'🔔',label:'Webhooks',key:'webhooks',hint:'webhooks'},
-  {icon:'🔗',label:'Trials',key:'trials',hint:'trials'},
-  {icon:'🗺',label:'MITRE ATT&CK',key:'mitre',hint:'mitre'},
-  {icon:'🌐',label:'Threat Intel',key:'threat-intel',hint:'threat-intel'},
-  {icon:'📋',label:'Playbooks',key:'playbooks',hint:'playbooks'},
-  {icon:'🔬',label:'Forensics',key:'forensics',hint:'forensics'},
-];
-const _CP_ACTIONS = [
-  {icon:'⚡',label:'Treinar ML Anomaly',hint:'action',action:()=>{closePalette();goPage('ml-anomaly',null);setTimeout(trainMLAnomaly,400);}},
-  {icon:'↻',label:'Atualizar dashboard',hint:'action',action:()=>{closePalette();location.reload();}},
-  {icon:'⬇',label:'Exportar IOCs (CSV)',hint:'action',action:()=>{closePalette();window.open('/api/ioc/export','_blank');}},
-  {icon:'📑',label:'Gerar Relatório',hint:'action',action:()=>{closePalette();goPage('analyze',null);}},
-  {id:'new-trial',icon:'🔗',label:'Novo Tria
+  {icon:'⊞',label:'Sistema',key:'systevar(--mono); font-size: 9px; letter-spacing: .08em; color: var(--txt2); }
+.compliance-value { font-family: var(--head); font-size: 18px; font-weight: 700; color: var(--txt); }
+.compliance-progress { height: 4px; background: rgba(255,255,255,.06); border-radius: 2px; overflow: hidden; margin-top: 6px; }
+.compliance-progress-bar { height: 100%; background: var(--acc); transition: width .3s; }
+
+/* ── ensure body uses var(--bg) so dark/light toggle propagates ─ */
+html, body { background: var(--bg) !important; color: var(--txt) !important; }
+</style>
+</body>
+</html>
+
+  border: 1px solid rgba(0,100,200,.18);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 11px;
+  color: var(--txt2);
+  margin-bottom: 12px;
+}
+
+/* ── ensure dark/light toggle propagates to body bg ──────────── */
+html, body { background: var(--bg) !important; color: var(--txt) !important; }
+</style>
+</body>
+</html>
+ex; }
+.module-conditions .cond-row { display: flex; gap: 6px; align-items: center; }
+html, body { background: var(--bg) !important; color: var(--txt) !important; }
+</style>
+</body>
+</html>

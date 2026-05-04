@@ -541,6 +541,9 @@ def print_startup_info(host: str = "127.0.0.1"):
         print(f"     Para ativar: $env:IDS_AUTH='true'")
         if is_loopback_bind(host):
             print(f"     Bind atual: {host} (somente loopback local)")
+            if DASHBOARD_AUTH:
+                print(f"     Login local: abra /login e clique em 'Entrar em modo local'")
+                print(f"     Token real não é exibido no modo local")
         else:
             print(f"     Bind atual: {host} (NÃO recomendado sem auth)")
     print("─" * 50 + "\n")

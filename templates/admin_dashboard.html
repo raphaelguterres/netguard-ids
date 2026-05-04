@@ -3,16 +3,28 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NetGuard — Admin Dashboard</title>
+  <title>NetGuard &mdash; Admin Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <script src="/static/js/theme-toggle.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg:     #0d1117; --s1: #161b22; --s2: #21262d; --s3: #2d333b;
-      --border: #30363d; --txt: #e6edf3; --txt2: #8b949e; --txt3: #6e7681;
-      --blue:   #58a6ff; --blue2: #1f6feb; --green: #3fb950; --green2: #238636;
-      --orange: #f0883e; --red: #f85149; --purple: #bc8cff; --yellow: #e3b341;
+      --bg:     #050810; --s1: #0a0f1c; --s2: #121a2c; --s3: #1a2440;
+      --border: #1f2c47; --txt: #eaf0fb; --txt2: #9aa6bd; --txt3: #5d6982;
+      --blue:   #7eb8ff; --blue2: #1f6feb; --green: #5fd3a6; --green2: #238636;
+      --orange: #f0b44b; --red: #ff6a7a; --purple: #c8a85a; --yellow: #f4e3b0;
+      --accent: #c8a85a; --accent2: #e8d091;
     }
-    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--txt); min-height: 100vh; }
+    body {
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg); color: var(--txt); min-height: 100vh;
+      background-image:
+        linear-gradient(rgba(120,150,200,0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(120,150,200,0.035) 1px, transparent 1px);
+      background-size: 56px 56px;
+    }
     a { color: inherit; text-decoration: none; }
 
     /* ── Header ── */
@@ -147,8 +159,81 @@
 
     /* Scrollbar */
     ::-webkit-scrollbar { width:6px; } ::-webkit-scrollbar-track { background:transparent; } ::-webkit-scrollbar-thumb { background:var(--s3); border-radius:3px; }
+
+    /* ── LIGHT THEME (Apple Pro day) ─────────────────────────── */
+    body.theme-light {
+      --bg:#f5f5f7; --s1:#ffffff; --s2:#fafafa; --s3:#f0f0f2;
+      --border:rgba(0,0,0,0.08);
+      --txt:#1d1d1f; --txt2:rgba(60,60,67,0.62); --txt3:rgba(60,60,67,0.40);
+      --blue:#0066cc; --green:#248a3d; --red:#d70015;
+      --orange:#c93400; --yellow:#9d8000; --purple:#9d44d8;
+      --accent:#b8983f; --accent2:#c8a85a;
+      background-image: linear-gradient(rgba(0,0,0,0.025) 1px, transparent 1px),
+                         linear-gradient(90deg, rgba(0,0,0,0.025) 1px, transparent 1px) !important;
+      background-size: 56px 56px !important;
+    }
+    body.theme-light header { background: rgba(255,255,255,0.94) !important; border-bottom-color: rgba(0,0,0,0.08) !important; }
+    body.theme-light .logo, body.theme-light h1, body.theme-light h2, body.theme-light h3,
+    body.theme-light .stat-value, body.theme-light .kpi-value { color:#1d1d1f !important; }
+    body.theme-light .badge-admin { background:rgba(184,152,63,.10) !important; border-color:rgba(184,152,63,.32) !important; color:#806320 !important; }
+    body.theme-light .container, body.theme-light main { color:#1d1d1f !important; }
+    body.theme-light table, body.theme-light .panel,
+    body.theme-light .stat-card, body.theme-light .audit-log,
+    body.theme-light .table-wrap, body.theme-light .modal {
+      background:#ffffff !important; border-color:rgba(0,0,0,0.08) !important; color:#1d1d1f !important;
+    }
+    body.theme-light thead, body.theme-light .audit-toolbar {
+      background:#fafafa !important; color:rgba(60,60,67,0.62) !important;
+    }
+    body.theme-light tbody tr { border-bottom:1px solid rgba(0,0,0,0.06) !important; }
+    body.theme-light tbody tr:hover, body.theme-light .audit-row:hover { background:rgba(0,0,0,0.025) !important; }
+    body.theme-light input, body.theme-light select, body.theme-light textarea,
+    body.theme-light .form-input, body.theme-light .audit-search {
+      background:#ffffff !important; border-color:rgba(0,0,0,0.12) !important; color:#1d1d1f !important;
+    }
+    body.theme-light .btn-primary {
+      background:#b8983f !important; color:#ffffff !important; border-color:#b8983f !important;
+    }
+    body.theme-light .btn-ghost, body.theme-light .audit-filter-btn,
+    body.theme-light .toolbar button {
+      background:#ffffff !important; border-color:rgba(0,0,0,0.16) !important; color:#1d1d1f !important;
+    }
+    body.theme-light .subtitle, body.theme-light .muted, body.theme-light .form-label,
+    body.theme-light .stat-label, body.theme-light th, body.theme-light .ph-t {
+      color:rgba(60,60,67,0.62) !important;
+    }
+    body.theme-light .badge-blue { background:rgba(0,102,204,.08) !important; border-color:rgba(0,102,204,.20) !important; color:#0040dd !important; }
+    body.theme-light .badge-green { background:rgba(36,138,61,.08) !important; border-color:rgba(36,138,61,.20) !important; color:#1a6b30 !important; }
+    body.theme-light .badge-red, body.theme-light .btn-danger { background:rgba(214,0,21,.06) !important; border-color:rgba(214,0,21,.18) !important; color:#a30010 !important; }
+    body.theme-light .badge-orange { background:rgba(201,52,0,.08) !important; border-color:rgba(201,52,0,.20) !important; color:#c93400 !important; }
+    body.theme-light .badge-purple { background:rgba(157,68,216,.08) !important; border-color:rgba(157,68,216,.20) !important; color:#7c2da3 !important; }
+    body.theme-light .badge-gray { background:rgba(0,0,0,.05) !important; border-color:rgba(0,0,0,.10) !important; color:#1d1d1f !important; }
+    body.theme-light a { color:#0066cc; }
+    body.theme-light * { scrollbar-color: rgba(0,0,0,0.16) transparent !important; }
+    body.theme-light ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.16) !important; }
+
+    /* theme-toggle button */
+    .theme-toggle {
+      width:32px; height:32px; border-radius:8px;
+      border:1px solid var(--border, rgba(255,255,255,0.10));
+      background:transparent; color:var(--txt2, #9aa6bd);
+      cursor:pointer; display:inline-flex; align-items:center; justify-content:center;
+      padding:0; margin-right:8px;
+      transition:background .2s, border-color .2s, color .2s;
+    }
+    .theme-toggle:hover {
+      border-color:var(--accent, #c8a85a); color:var(--accent, #c8a85a);
+    }
+    body.theme-light .theme-toggle:hover { background:rgba(0,0,0,0.04); }
+    .theme-toggle svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+    .theme-toggle .icon-sun { display:none; }
+    .theme-toggle .icon-moon { display:block; }
+    body.theme-light .theme-toggle .icon-sun { display:block; }
+    body.theme-light .theme-toggle .icon-moon { display:none; }
+
   </style>
   <link rel="stylesheet" href="/static/admin-enterprise.css">
+  <link rel="stylesheet" href="/static/css/netguard.css">
 </head>
 <body class="admin-enterprise">
 
@@ -716,5 +801,6 @@ setInterval(() => {
 setInterval(refresh, 60000);
 refresh();
 </script>
+<script src="/static/js/netguard-ui.js" defer></script>
 </body>
 </html>

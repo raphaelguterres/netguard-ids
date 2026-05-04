@@ -2,14 +2,16 @@
   <div class="soc-topbar-left">
     <div class="soc-pill">
       <span class="soc-pill-dot" aria-hidden="true"></span>
-      <span>Ingestion healthy</span>
+      <span>{{ system_status|default("System healthy") }}</span>
     </div>
-    <div class="soc-topbar-caption">Primary NetGuard SOC/XDR workspace built on live host telemetry and incident triage.</div>
+    <div class="soc-topbar-caption">Overview -> Inbox -> Host Triage -> Incident -> Resolution</div>
   </div>
-  <div class="soc-topbar-meta">
+  <div class="soc-topbar-meta" data-theme-slot>
+    <div class="soc-pill">Env {{ environment_name|default("local") }}</div>
+    <div class="soc-pill">Tenant {{ tenant_name|default("Demo Tenant") }}</div>
+    <div class="soc-pill">Role {{ current_role|default("analyst") }}</div>
     <a class="soc-topbar-link" href="/dashboard">Legacy Console</a>
     <a class="soc-topbar-link soc-topbar-link-primary" href="/soc">SOC Home</a>
-    <div class="soc-pill">{{ tenant_name|default("Demo Tenant") }}</div>
     <div class="soc-pill">UTC {{ current_time|default("2026-04-13 19:00") }}</div>
     <div class="soc-pill">Hosts {{ monitored_hosts|default(128) }}</div>
   </div>

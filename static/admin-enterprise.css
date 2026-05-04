@@ -1,10 +1,12 @@
 body.admin-enterprise {
   background:
-    radial-gradient(circle at top left, rgba(212, 175, 55, 0.16), transparent 28%),
-    radial-gradient(circle at 85% 10%, rgba(255, 255, 255, 0.05), transparent 18%),
-    linear-gradient(180deg, #0c0a07 0%, #070604 100%);
-  color: #f8f1df;
-  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    linear-gradient(rgba(120, 150, 200, 0.04) 1px, transparent 1px) 0 0/48px 48px,
+    linear-gradient(90deg, rgba(120, 150, 200, 0.04) 1px, transparent 1px) 0 0/48px 48px,
+    radial-gradient(circle at top left, rgba(212, 175, 55, 0.13), transparent 32%),
+    radial-gradient(circle at 88% 8%, rgba(95, 208, 255, 0.08), transparent 28%),
+    linear-gradient(180deg, #060a14 0%, #03060d 100%);
+  color: #eaf0fb;
+  font-family: "Inter", "Segoe UI", "Trebuchet MS", sans-serif;
   position: relative;
 }
 
@@ -17,19 +19,21 @@ body.admin-enterprise::after {
 }
 
 body.admin-enterprise::before {
-  width: 30rem;
-  height: 30rem;
-  top: -12rem;
-  right: -10rem;
-  background: radial-gradient(circle, rgba(245, 215, 124, 0.14), transparent 70%);
+  width: 32rem;
+  height: 32rem;
+  top: -14rem;
+  right: -12rem;
+  background: radial-gradient(circle, rgba(95, 208, 255, 0.10), transparent 70%);
+  filter: blur(8px);
 }
 
 body.admin-enterprise::after {
-  width: 24rem;
-  height: 24rem;
-  bottom: -8rem;
-  left: -6rem;
-  background: radial-gradient(circle, rgba(143, 106, 24, 0.2), transparent 68%);
+  width: 26rem;
+  height: 26rem;
+  bottom: -10rem;
+  left: -8rem;
+  background: radial-gradient(circle, rgba(212, 175, 55, 0.12), transparent 68%);
+  filter: blur(8px);
 }
 
 body.admin-enterprise header,
@@ -39,10 +43,10 @@ body.admin-enterprise .container {
 }
 
 body.admin-enterprise header {
-  background: rgba(12, 10, 7, 0.78);
-  border-bottom: 1px solid rgba(212, 175, 55, 0.2);
-  backdrop-filter: blur(16px);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  background: rgba(6, 10, 22, 0.82);
+  border-bottom: 1px solid rgba(212, 175, 55, 0.18);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.36);
 }
 
 body.admin-enterprise .logo {
@@ -98,12 +102,12 @@ body.admin-enterprise .subtitle {
   gap: 1rem;
   margin-bottom: 1.5rem;
   padding: 1.45rem;
-  border-radius: 24px;
+  border-radius: 22px;
   border: 1px solid rgba(212, 175, 55, 0.18);
   background:
-    linear-gradient(135deg, rgba(245, 215, 124, 0.08), rgba(255, 255, 255, 0.02)),
-    rgba(19, 15, 11, 0.84);
-  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.28);
+    linear-gradient(135deg, rgba(245, 215, 124, 0.07), rgba(255, 255, 255, 0.015)),
+    rgba(15, 22, 38, 0.86);
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.42), 0 0 38px rgba(212, 175, 55, 0.08);
 }
 
 .admin-tag {
@@ -189,10 +193,10 @@ body.admin-enterprise .table-wrap,
 body.admin-enterprise .audit-log,
 body.admin-enterprise .modal {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
-    rgba(22, 18, 13, 0.9);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
+    rgba(15, 22, 38, 0.92);
   border-color: rgba(212, 175, 55, 0.16);
-  box-shadow: 0 20px 42px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 20px 42px rgba(0, 0, 0, 0.36);
 }
 
 body.admin-enterprise .stats-grid {
@@ -221,7 +225,7 @@ body.admin-enterprise .stat-red .stat-value {
 body.admin-enterprise thead tr,
 body.admin-enterprise .audit-toolbar,
 body.admin-enterprise .modal {
-  background-color: rgba(29, 22, 14, 0.94);
+  background-color: rgba(20, 28, 48, 0.94);
 }
 
 body.admin-enterprise tbody tr:hover,
@@ -295,7 +299,7 @@ body.admin-enterprise .progress-crit {
 }
 
 body.admin-enterprise #toast {
-  background: rgba(22, 18, 13, 0.96);
+  background: rgba(15, 22, 38, 0.96);
   border-color: rgba(245, 215, 124, 0.16);
   color: #f5d77c;
 }

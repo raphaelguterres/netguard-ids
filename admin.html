@@ -104,6 +104,7 @@ a{color:var(--blue);text-decoration:none}
 .countdown{font-family:var(--mono);font-weight:700}
 hr{border:none;border-top:1px solid var(--border);margin:20px 0}
 </style>
+<link rel="stylesheet" href="/static/css/netguard.css">
 </head>
 <body>
 <div id="shell">
@@ -138,6 +139,7 @@ hr{border:none;border-top:1px solid var(--border);margin:20px 0}
 
 <!-- ── Main ── -->
 <div id="main">
+  <div data-guided-entry></div>
 
   <!-- ═══════════════ DEV MODE BANNER ═══════════════ -->
   <div id="dev-banner" style="display:none;background:linear-gradient(90deg,rgba(240,136,62,.15),rgba(240,136,62,.05));border:1px solid rgba(240,136,62,.4);border-left:4px solid var(--orange);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:.82rem;display:flex;align-items:center;gap:10px">
@@ -1913,5 +1915,6 @@ document.getElementById('gv-modal').addEventListener('click', (e)=>{
   if(e.target.id === 'gv-modal') gvCloseModal();
 });
 </script>
+<script src="/static/js/netguard-ui.js" defer></script>
 </body>
 </html>

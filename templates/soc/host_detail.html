@@ -25,8 +25,8 @@
       <span>/</span>
       <span>{{ host.host_name|default("Unknown host") }}</span>
     </div>
-    <h1 class="soc-page-title">Host Detail</h1>
-    <p class="soc-page-copy">Endpoint-centric investigation view with posture, active anomalies, and chronological evidence.</p>
+    <h1 class="soc-page-title">Host Triage</h1>
+    <p class="soc-page-copy">Endpoint-centric investigation view with risk explanation, related signals, recommended action, and recent evidence.</p>
   </div>
 </header>
 
@@ -35,9 +35,11 @@
     <div class="soc-stat-label">Host</div>
     <h2 style="margin: 8px 0 0; font-family: var(--soc-font-head); font-size: 1.8rem;">{{ host.host_name|default("Unknown host") }}</h2>
     <div class="soc-meta-inline" style="margin-top: 14px;">
+      <span>Tenant {{ tenant_name|default("default") }}</span>
       <span>{{ host.operating_system|default("Unknown OS") }}</span>
       <span>Last seen {{ host.last_seen|default("unknown") }}</span>
       <span class="soc-status-{{ host.status|default('offline') }}">{{ host.status|default("offline")|title }}</span>
+      <span>Agent {{ host.agent_version|default("pending") }}</span>
     </div>
   </div>
   <div class="soc-risk-gauge">
@@ -46,6 +48,31 @@
       <div class="soc-stat-label">Risk Level</div>
       <div style="margin-top: 8px;"><span class="soc-severity-chip {{ host.risk_level|default('low') }}">{{ host.risk_level|default("low")|capitalize }}</span></div>
     </div>
+  </div>
+</section>
+
+<section class="soc-panel soc-next-action-panel">
+  <div class="soc-panel-header">
+    <div>
+      <h2 class="soc-panel-title">Recommended Next Action</h2>
+      <div class="soc-list-copy">Focused guidance for the analyst before containment or escalation.</div>
+    </div>
+    <span class="soc-severity-chip {{ host.risk_level|default('low') }}">{{ host.risk_score|default(0) }}/100</span>
+  </div>
+  <p class="soc-next-action-copy">
+    {% if selected_chain_focus and selected_chain_focus.recommended_actions %}
+      {{ selected_chain_focus.recommended_actions[0]|replace("_", " ")|title }}.
+    {% elif host.active_alerts|default(0) %}
+      Investigate the active alerts, confirm process lineage, and create an incident if business impact is likely.
+    {% else %}
+      Keep monitoring heartbeat, recent telemetry, and risk changes before opening an incident.
+    {% endif %}
+  </p>
+  <div class="soc-action-row">
+    <button class="soc-action-button" type="button" disabled title="Placeholder until a host-level investigation endpoint is available.">Mark as Investigating</button>
+    <button class="soc-action-button" type="button" disabled title="Use the Incidents queue or API until direct host incident creation is wired here.">Create Incident</button>
+    <button class="soc-action-button" type="button" disabled title="Suppression needs an audited endpoint before it can be enabled.">Suppress Host</button>
+    <button class="soc-action-button" type="button" disabled title="Report export will be enabled after a safe host report route is finalized.">Export Report</button>
   </div>
 </section>
 

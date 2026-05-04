@@ -140,6 +140,16 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
       border: 1px solid var(--crit);
       background: rgba(255, 26, 75, 0.12);
     }
+    .host-network {
+      color: var(--text-dim);
+      display: inline-block;
+      font-size: 11px;
+      margin-top: 3px;
+      max-width: 360px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .risk-bar {
       width: 110px; height: 8px; background: var(--bg-2); border-radius: 4px;
       overflow: hidden; display: inline-block; vertical-align: middle;
@@ -319,6 +329,7 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
       th, td { padding: 8px; }
     }
   </style>
+  <link rel="stylesheet" href="/static/css/netguard.css">
 </head>
 <body>
   <header>
@@ -390,6 +401,7 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
   <script>
   const TOKEN = "__VIEW_TOKEN__";
   const tokenQS = TOKEN ? ("?token=" + encodeURIComponent(TOKEN)) : "";
+  const API_BASE = window.location.pathname.replace(/\/$/, "");
 
   function escapeHtml(s) {
     if (s === undefined || s === null) return "";
@@ -403,16 +415,41 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
     return s.replace("T", " ").replace("Z", " UTC").substring(0, 19);
   }
 
+  function hostNetworkSummary(h) {
+    const meta = (h && h.metadata) || {};
+    const bits = [];
+    if (meta.local_ip) bits.push("ip " + meta.local_ip);
+    if (meta.default_gateway) bits.push("gw " + meta.default_gateway);
+    if (meta.mac_address) bits.push("mac " + meta.mac_address);
+    return bits.join(" | ");
+  }
+
+  async function fetchJson(endpoint) {
+    const resp = await fetch(API_BASE + endpoint + tokenQS, {
+      credentials: "same-origin",
+      headers: { "Accept": "application/json" }
+    });
+    if (resp.redirected || resp.url.includes("/login")) {
+      document.getElementById("last-refresh").textContent = "login required";
+      window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname);
+      throw new Error("authentication required");
+    }
+    if (!resp.ok) {
+      throw new Error(endpoint + " HTTP " + resp.status);
+    }
+    const contentType = resp.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      throw new Error(endpoint + " returned non-JSON response");
+    }
+    return resp.json();
+  }
+
   async function refresh() {
     try {
-      const [overviewResp, rulesResp] = await Promise.all([
-        fetch("api/overview" + tokenQS),
-        fetch("api/rules" + tokenQS)
+      const [data, ruleCatalog] = await Promise.all([
+        fetchJson("/api/overview"),
+        fetchJson("/api/rules")
       ]);
-      if (!overviewResp.ok) throw new Error("overview HTTP " + overviewResp.status);
-      if (!rulesResp.ok) throw new Error("rules HTTP " + rulesResp.status);
-      const data = await overviewResp.json();
-      const ruleCatalog = await rulesResp.json();
       render(data, ruleCatalog);
       document.getElementById("last-refresh").textContent =
         "updated " + fmtDate(data.as_of);
@@ -445,14 +482,16 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
     if (!d.hosts.length) {
       tbody.innerHTML = '<tr><td colspan="6" class="empty">No hosts enrolled yet.</td></tr>';
     } else {
-      tbody.innerHTML = d.hosts.map(h => `
+      tbody.innerHTML = d.hosts.map(h => {
+        const network = hostNetworkSummary(h);
+        return `
         <tr>
           <td><b>${escapeHtml(h.hostname || h.host_id)}</b><br><code>${escapeHtml(h.host_id.substring(0,8))}…</code></td>
           <td>
             <span class="agent-status ${escapeHtml(h.agent_status || 'offline')}">${escapeHtml(h.agent_status || 'offline')}</span>
             <br><code>${escapeHtml(h.last_seen_age_label || '')}</code>
           </td>
-          <td>${escapeHtml(h.platform || '—')}</td>
+          <td>${escapeHtml(h.platform || '—')}${network ? `<br><span class="host-network">${escapeHtml(network)}</span>` : ""}</td>
           <td><code>${escapeHtml(h.agent_version || '—')}</code></td>
           <td>
             <span class="risk-bar ${escapeHtml(h.risk_level)}">
@@ -463,7 +502,7 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
           </td>
           <td>${fmtDate(h.last_seen)}</td>
         </tr>
-      `).join("");
+      `}).join("");
     }
 
     const mitre = document.getElementById("mitre");
@@ -576,6 +615,7 @@ SOC_DASHBOARD_HTML = r"""<!doctype html>
   refresh();
   setInterval(refresh, 30000);
   </script>
+  <script src="/static/js/netguard-ui.js" defer></script>
 </body>
 </html>
 """

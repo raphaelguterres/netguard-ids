@@ -3,56 +3,132 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NetGuard — Operator Inbox</title>
+  <title>NetGuard &mdash; Operator Inbox</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <script src="/static/js/theme-toggle.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg:#0d1117; --s1:#161b22; --s2:#21262d; --border:#30363d;
-      --txt:#e6edf3; --txt2:#8b949e; --txt3:#6e7681;
-      --blue:#58a6ff; --green:#3fb950; --orange:#f0883e; --red:#f85149; --yellow:#e3b341;
+    body {
+      background: var(--bg, #050810); color: var(--text, #eaf0fb);
+      font-family: var(--font-ui, "Inter", "Segoe UI", system-ui, sans-serif); min-height: 100vh;
+      background-image:
+        linear-gradient(rgba(120,150,200,0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(120,150,200,0.035) 1px, transparent 1px);
+      background-size: 56px 56px;
     }
-    body { font-family:'Segoe UI', system-ui, sans-serif; background:var(--bg); color:var(--txt); min-height:100vh; }
-    a { color:var(--blue); text-decoration:none; }
-    a:hover { text-decoration:underline; }
+    a { color: #e8d091; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header { align-items: center; background: rgba(6,10,22,.94); border-bottom: 1px solid var(--border, #1f2c47); display: flex; justify-content: space-between; padding: 1rem 2rem; position: sticky; top: 0; z-index: 100; backdrop-filter: blur(18px); }
+    .logo { align-items: center; color: var(--accent, #c8a85a); display: flex; font-weight: 600; gap: .6rem; letter-spacing: -0.005em; }
+    .badge-admin { background: rgba(200,168,90,.10); border: 1px solid rgba(232,208,145,.32); color: #e8d091; padding: .2rem .65rem; border-radius: 999px; font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .18em; }
+    .container { margin: 0 auto; max-width: 1440px; padding: 2rem; }
+    h1 { font-size: 1.55rem; letter-spacing: -.02em; margin-bottom: .35rem; }
+    .subtitle { color: var(--muted, #95a3b3); font-size: .92rem; margin-bottom: 1.5rem; }
+    .toolbar { align-items: center; display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem; }
+    .toolbar input, .toolbar select { background: var(--panel-soft, #161f2a); border: 1px solid var(--border, #263241); color: var(--text, #eef3f8); border-radius: 8px; font-size: .85rem; padding: .55rem .75rem; }
+    .toolbar button { background: var(--panel-soft, #161f2a); border: 1px solid var(--border, #263241); border-radius: 8px; color: var(--text, #eef3f8); cursor: pointer; font-size: .85rem; padding: .55rem .95rem; }
+    .toolbar button:hover { border-color: var(--accent, #2f8cff); color: #8fc2ff; }
+    .panel { background: var(--panel, #111821); border: 1px solid var(--border, #263241); border-radius: 14px; overflow: hidden; }
+    .loading, .empty { color: var(--muted, #95a3b3); padding: 3rem 2rem; text-align: center; }
+    table { border-collapse: collapse; font-size: .88rem; width: 100%; }
+    thead th { background: var(--panel-soft, #161f2a); border-bottom: 1px solid var(--border, #263241); color: var(--muted, #95a3b3); font-size: .72rem; font-weight: 700; letter-spacing: .06em; padding: .8rem 1rem; text-align: left; text-transform: uppercase; }
+    tbody td { border-bottom: 1px solid rgba(149,163,179,.14); padding: .9rem 1rem; vertical-align: middle; }
+    tbody tr:hover td { background: rgba(47,140,255,.045); cursor: pointer; }
+    tbody tr:last-child td { border-bottom: none; }
+    .score-cell { font-size: 1.35rem; font-variant-numeric: tabular-nums; font-weight: 800; }
+    .muted { color: var(--muted, #95a3b3); font-size: .78rem; }
+    .action-cell { color: var(--text, #eef3f8); font-weight: 650; max-width: 260px; }
+    .band-critical { color: var(--critical, #e5484d); }
+    .band-high { color: var(--high, #e58a2a); }
+    .band-medium { color: var(--medium, #d7b84f); }
+    .band-low { color: var(--low, #6f9fd8); }
+    .urgency-pill, .status-pill { border-radius: 999px; display: inline-block; font-size: .7rem; font-weight: 800; letter-spacing: .04em; padding: .2rem .58rem; text-transform: uppercase; }
+    .urgency-pill.band-critical { background: rgba(229,72,77,.14); border: 1px solid rgba(229,72,77,.36); color: var(--critical, #e5484d); }
+    .urgency-pill.band-high { background: rgba(229,138,42,.14); border: 1px solid rgba(229,138,42,.36); color: var(--high, #e58a2a); }
+    .urgency-pill.band-medium { background: rgba(215,184,79,.14); border: 1px solid rgba(215,184,79,.36); color: var(--medium, #d7b84f); }
+    .urgency-pill.band-low { background: rgba(111,159,216,.12); border: 1px solid rgba(111,159,216,.34); color: var(--low, #6f9fd8); }
+    .status-pill { background: rgba(149,163,179,.1); border: 1px solid rgba(149,163,179,.22); color: var(--muted, #95a3b3); }
+    .status-online { color: var(--success, #36b37e); }
+    .btn { align-items: center; border-radius: 8px; display: inline-flex; font-weight: 700; justify-content: center; min-height: 34px; padding: .38rem .75rem; }
+    .btn-primary { background: var(--accent, #2f8cff); color: #fff; }
+    .btn-primary:hover { text-decoration: none; }
+    @media (max-width: 980px) { .container { padding: 1rem; } .panel { overflow-x: auto; } table { min-width: 980px; } header { align-items: flex-start; flex-direction: column; gap: .75rem; } }
 
-    header { display:flex; align-items:center; justify-content:space-between; padding:1rem 2rem; border-bottom:1px solid var(--border); background:rgba(13,17,23,.97); position:sticky; top:0; z-index:100; }
-    .logo { display:flex; align-items:center; gap:.6rem; font-weight:700; color:var(--blue); }
-    .badge-admin { background:rgba(248,81,73,.15); color:var(--red); border:1px solid rgba(248,81,73,.3); padding:.2rem .6rem; border-radius:999px; font-size:.7rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+    /* ── LIGHT THEME (Apple Pro day) ─────────────────────────── */
+    body.theme-light {
+      --bg:#f5f5f7; --s1:#ffffff; --s2:#fafafa; --s3:#f0f0f2;
+      --border:rgba(0,0,0,0.08);
+      --txt:#1d1d1f; --txt2:rgba(60,60,67,0.62); --txt3:rgba(60,60,67,0.40);
+      --blue:#0066cc; --green:#248a3d; --red:#d70015;
+      --orange:#c93400; --yellow:#9d8000; --purple:#9d44d8;
+      --accent:#b8983f; --accent2:#c8a85a;
+      background-image: linear-gradient(rgba(0,0,0,0.025) 1px, transparent 1px),
+                         linear-gradient(90deg, rgba(0,0,0,0.025) 1px, transparent 1px) !important;
+      background-size: 56px 56px !important;
+    }
+    body.theme-light header { background: rgba(255,255,255,0.94) !important; border-bottom-color: rgba(0,0,0,0.08) !important; }
+    body.theme-light .logo, body.theme-light h1, body.theme-light h2, body.theme-light h3,
+    body.theme-light .stat-value, body.theme-light .kpi-value { color:#1d1d1f !important; }
+    body.theme-light .badge-admin { background:rgba(184,152,63,.10) !important; border-color:rgba(184,152,63,.32) !important; color:#806320 !important; }
+    body.theme-light .container, body.theme-light main { color:#1d1d1f !important; }
+    body.theme-light table, body.theme-light .panel,
+    body.theme-light .stat-card, body.theme-light .audit-log,
+    body.theme-light .table-wrap, body.theme-light .modal {
+      background:#ffffff !important; border-color:rgba(0,0,0,0.08) !important; color:#1d1d1f !important;
+    }
+    body.theme-light thead, body.theme-light .audit-toolbar {
+      background:#fafafa !important; color:rgba(60,60,67,0.62) !important;
+    }
+    body.theme-light tbody tr { border-bottom:1px solid rgba(0,0,0,0.06) !important; }
+    body.theme-light tbody tr:hover, body.theme-light .audit-row:hover { background:rgba(0,0,0,0.025) !important; }
+    body.theme-light input, body.theme-light select, body.theme-light textarea,
+    body.theme-light .form-input, body.theme-light .audit-search {
+      background:#ffffff !important; border-color:rgba(0,0,0,0.12) !important; color:#1d1d1f !important;
+    }
+    body.theme-light .btn-primary {
+      background:#b8983f !important; color:#ffffff !important; border-color:#b8983f !important;
+    }
+    body.theme-light .btn-ghost, body.theme-light .audit-filter-btn,
+    body.theme-light .toolbar button {
+      background:#ffffff !important; border-color:rgba(0,0,0,0.16) !important; color:#1d1d1f !important;
+    }
+    body.theme-light .subtitle, body.theme-light .muted, body.theme-light .form-label,
+    body.theme-light .stat-label, body.theme-light th, body.theme-light .ph-t {
+      color:rgba(60,60,67,0.62) !important;
+    }
+    body.theme-light .badge-blue { background:rgba(0,102,204,.08) !important; border-color:rgba(0,102,204,.20) !important; color:#0040dd !important; }
+    body.theme-light .badge-green { background:rgba(36,138,61,.08) !important; border-color:rgba(36,138,61,.20) !important; color:#1a6b30 !important; }
+    body.theme-light .badge-red, body.theme-light .btn-danger { background:rgba(214,0,21,.06) !important; border-color:rgba(214,0,21,.18) !important; color:#a30010 !important; }
+    body.theme-light .badge-orange { background:rgba(201,52,0,.08) !important; border-color:rgba(201,52,0,.20) !important; color:#c93400 !important; }
+    body.theme-light .badge-purple { background:rgba(157,68,216,.08) !important; border-color:rgba(157,68,216,.20) !important; color:#7c2da3 !important; }
+    body.theme-light .badge-gray { background:rgba(0,0,0,.05) !important; border-color:rgba(0,0,0,.10) !important; color:#1d1d1f !important; }
+    body.theme-light a { color:#0066cc; }
+    body.theme-light * { scrollbar-color: rgba(0,0,0,0.16) transparent !important; }
+    body.theme-light ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.16) !important; }
 
-    .container { max-width:1400px; margin:0 auto; padding:2rem; }
-    h1 { font-size:1.4rem; font-weight:700; margin-bottom:.3rem; }
-    .subtitle { color:var(--txt2); font-size:.9rem; margin-bottom:1.5rem; }
+    /* theme-toggle button */
+    .theme-toggle {
+      width:32px; height:32px; border-radius:8px;
+      border:1px solid var(--border, rgba(255,255,255,0.10));
+      background:transparent; color:var(--txt2, #9aa6bd);
+      cursor:pointer; display:inline-flex; align-items:center; justify-content:center;
+      padding:0; margin-right:8px;
+      transition:background .2s, border-color .2s, color .2s;
+    }
+    .theme-toggle:hover {
+      border-color:var(--accent, #c8a85a); color:var(--accent, #c8a85a);
+    }
+    body.theme-light .theme-toggle:hover { background:rgba(0,0,0,0.04); }
+    .theme-toggle svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+    .theme-toggle .icon-sun { display:none; }
+    .theme-toggle .icon-moon { display:block; }
+    body.theme-light .theme-toggle .icon-sun { display:block; }
+    body.theme-light .theme-toggle .icon-moon { display:none; }
 
-    .toolbar { display:flex; gap:1rem; align-items:center; margin-bottom:1.5rem; }
-    .toolbar input, .toolbar select { background:var(--s2); border:1px solid var(--border); color:var(--txt); padding:.4rem .7rem; border-radius:6px; font-size:.85rem; }
-    .toolbar button { background:var(--s2); border:1px solid var(--border); color:var(--txt); padding:.45rem .9rem; border-radius:6px; cursor:pointer; font-size:.85rem; }
-    .toolbar button:hover { border-color:var(--blue); color:var(--blue); }
-
-    .panel { background:var(--s1); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
-    .loading { padding:3rem 2rem; text-align:center; color:var(--txt2); }
-    .empty { padding:3rem 2rem; text-align:center; color:var(--txt3); font-style:italic; }
-
-    table { width:100%; border-collapse:collapse; font-size:.88rem; }
-    thead th { background:var(--s2); color:var(--txt2); font-weight:600; text-align:left; padding:.7rem 1rem; font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--border); }
-    tbody td { padding:.85rem 1rem; border-bottom:1px solid var(--border); vertical-align:middle; }
-    tbody tr:hover { background:rgba(88,166,255,.04); cursor:pointer; }
-    tbody tr:last-child td { border-bottom:none; }
-
-    .score-cell { font-size:1.3rem; font-weight:700; font-variant-numeric:tabular-nums; }
-    .band-critical { color:var(--red); }
-    .band-high     { color:var(--orange); }
-    .band-medium   { color:var(--yellow); }
-    .band-low      { color:var(--blue); }
-
-    .urgency-pill { display:inline-block; padding:.18rem .55rem; border-radius:999px; font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
-    .urgency-pill.band-critical { background:rgba(248,81,73,.15);  border:1px solid rgba(248,81,73,.4); }
-    .urgency-pill.band-high     { background:rgba(240,136,62,.15); border:1px solid rgba(240,136,62,.4); }
-    .urgency-pill.band-medium   { background:rgba(227,179,65,.15); border:1px solid rgba(227,179,65,.4); }
-    .urgency-pill.band-low      { background:rgba(88,166,255,.12); border:1px solid rgba(88,166,255,.4); }
-
-    .muted { color:var(--txt2); font-size:.78rem; }
-    .action-cell { color:var(--txt); font-weight:500; }
   </style>
+  <link rel="stylesheet" href="/static/css/netguard.css">
 </head>
 <body>
   <header>
@@ -61,27 +137,33 @@
       NetGuard
       <span class="badge-admin">Inbox</span>
     </div>
-    <div><a href="/admin">&laquo; God View</a></div>
+    <div><a href="/admin">&laquo; Admin Console</a></div>
   </header>
 
   <main class="container">
     <h1>Operator Inbox</h1>
-    <p class="subtitle">Hosts ranqueados por urgência — aja na ordem listada.</p>
+    <p class="subtitle">Risk-first queue for SOC analysts. Review hosts from highest risk to lowest and move straight into triage.</p>
 
     <div class="toolbar">
-      <input type="text" id="tenant-filter" placeholder="Filtrar por tenant_id (opcional)…" style="min-width:280px;" />
-      <select id="limit-filter">
-        <option value="10">Top 10</option>
-        <option value="20" selected>Top 20</option>
-        <option value="50">Top 50</option>
-        <option value="100">Top 100</option>
-      </select>
-      <button onclick="reload()">Atualizar</button>
+      <label>
+        <span class="muted">Tenant</span>
+        <input type="text" id="tenant-filter" placeholder="Filter by tenant_id" style="min-width:280px;" />
+      </label>
+      <label>
+        <span class="muted">Limit</span>
+        <select id="limit-filter">
+          <option value="10">Top 10</option>
+          <option value="20" selected>Top 20</option>
+          <option value="50">Top 50</option>
+          <option value="100">Top 100</option>
+        </select>
+      </label>
+      <button type="button" onclick="reload()">Refresh</button>
       <span id="meta" class="muted"></span>
     </div>
 
     <div class="panel">
-      <div id="loading" class="loading">Carregando…</div>
+      <div id="loading" class="loading"><div class="ng-skeleton" style="max-width:320px;margin:0 auto 12px;"></div>Loading operator inbox...</div>
       <div id="content" style="display:none;"></div>
     </div>
   </main>
@@ -90,40 +172,47 @@
     function esc(s) {
       if (s === null || s === undefined) return "";
       return String(s).replace(/[&<>"']/g, c => ({
-        "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
       })[c]);
     }
     function fmtTime(iso) {
-      if (!iso) return "—";
+      if (!iso) return "-";
       try {
         const d = new Date(iso);
         if (isNaN(d)) return iso;
-        return d.toLocaleString("pt-BR", { dateStyle:"short", timeStyle:"short" });
+        return d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
       } catch { return iso; }
     }
     function bandFor(score) {
       if (score >= 80) return "critical";
       if (score >= 60) return "high";
       if (score >= 30) return "medium";
-      if (score > 0)   return "low";
+      if (score > 0) return "low";
       return "low";
+    }
+    function mainSignal(it) {
+      return it.last_ip || it.platform || "endpoint telemetry";
     }
 
     function reload() {
-      const tf = document.getElementById("tenant-filter").value.trim();
-      const lim = document.getElementById("limit-filter").value;
-      let url = "/api/admin/inbox?limit=" + encodeURIComponent(lim);
-      if (tf) url += "&tenant=" + encodeURIComponent(tf);
+      const tenant = document.getElementById("tenant-filter").value.trim();
+      const limit = document.getElementById("limit-filter").value;
+      let url = "/api/admin/inbox?limit=" + encodeURIComponent(limit);
+      if (tenant) url += "&tenant=" + encodeURIComponent(tenant);
 
       document.getElementById("loading").style.display = "block";
+      document.getElementById("loading").innerHTML = '<div class="ng-skeleton" style="max-width:320px;margin:0 auto 12px;"></div>Loading operator inbox...';
       document.getElementById("content").style.display = "none";
       document.getElementById("meta").textContent = "";
 
       fetch(url, { credentials: "same-origin" })
-        .then(r => r.json())
+        .then(r => {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        })
         .then(render)
         .catch(err => {
-          document.getElementById("loading").textContent = "Erro: " + err;
+          document.getElementById("loading").textContent = "Load failed: " + err;
         });
     }
 
@@ -132,28 +221,44 @@
       const c = document.getElementById("content");
       c.style.display = "block";
 
-      const items = data.items || [];
-      document.getElementById("meta").textContent =
-        items.length + " hosts • atualizado " + fmtTime(data.generated_at);
+      const severityRank = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+      const items = (data.items || []).sort((a, b) => {
+        const riskDelta = Number(b.risk_score || 0) - Number(a.risk_score || 0);
+        if (riskDelta) return riskDelta;
+        const severityDelta = (severityRank[String(b.urgency || b.risk_band || "info").toLowerCase()] || 0) -
+          (severityRank[String(a.urgency || a.risk_band || "info").toLowerCase()] || 0);
+        if (severityDelta) return severityDelta;
+        return new Date(b.last_seen || 0) - new Date(a.last_seen || 0);
+      });
+      document.getElementById("meta").textContent = items.length + " hosts | updated " + fmtTime(data.generated_at);
 
       if (!items.length) {
-        c.innerHTML = '<div class="empty">Inbox vazia — nenhum host com risco aberto. ✅</div>';
+        c.innerHTML =
+          '<div class="empty soc-empty-state-premium">' +
+            '<h3>No incidents require action</h3>' +
+            '<p>No hosts currently require analyst triage. Connect an agent or refresh health to keep monitoring fresh.</p>' +
+            '<a class="btn btn-primary" href="/soc/hosts">View agents</a> ' +
+            '<a class="btn" href="/soc/grid">Open rules</a>' +
+          '</div>';
         return;
       }
 
       const rows = items.map(it => {
-        const band = it.risk_band || bandFor(it.risk_score);
+        const band = it.risk_band || bandFor(Number(it.risk_score || 0));
+        const severity = it.urgency || band;
+        const status = it.status || "enrolled";
         const url = "/admin/host/" + encodeURIComponent(it.tenant_id) + "/" + encodeURIComponent(it.host_id);
         return (
           '<tr onclick="window.location=\'' + url + '\'">' +
             '<td class="score-cell band-' + esc(band) + '">' + esc(it.risk_score) + "</td>" +
-            '<td><span class="urgency-pill band-' + esc(it.urgency || band) + '">' + esc(it.urgency || band) + "</span></td>" +
-            '<td><strong>' + esc(it.display_name) + "</strong>" +
-              '<div class="muted">' + esc(it.host_id) + " · " + esc(it.platform || "—") + "</div></td>" +
-            '<td>' + esc(it.tenant_name) + '<div class="muted">' + esc(it.tenant_id) + "</div></td>" +
-            '<td class="action-cell">' + esc(it.next_action) + "</td>" +
-            '<td class="muted">' + esc(it.last_ip || "—") +
-              '<div>' + esc(fmtTime(it.last_seen)) + "</div></td>" +
+            '<td>' + esc(it.tenant_name || it.tenant_id) + '<div class="muted">' + esc(it.tenant_id) + "</div></td>" +
+            '<td><strong>' + esc(it.display_name || it.host_id) + "</strong><div class=\"muted\">" + esc(it.host_id) + " | " + esc(it.platform || "endpoint") + "</div></td>" +
+            '<td><span class="urgency-pill band-' + esc(severity) + '">' + esc(severity) + "</span></td>" +
+            '<td class="muted">' + esc(fmtTime(it.last_seen)) + "</td>" +
+            '<td>' + esc(mainSignal(it)) + "</td>" +
+            '<td class="action-cell">' + esc(it.next_action || "Investigate host context") + "</td>" +
+            '<td><span class="status-pill status-' + esc(status) + '">' + esc(status) + "</span></td>" +
+            '<td><a class="btn btn-primary" href="' + url + '" onclick="event.stopPropagation()">Investigate</a></td>' +
           "</tr>"
         );
       }).join("");
@@ -161,8 +266,8 @@
       c.innerHTML =
         '<table>' +
           '<thead><tr>' +
-            '<th>Score</th><th>Urgência</th><th>Host</th><th>Tenant</th>' +
-            '<th>Próxima Ação</th><th>IP / Last Seen</th>' +
+            '<th>Risk</th><th>Tenant</th><th>Host</th><th>Severity</th><th>Last Seen</th>' +
+            '<th>Main Signal</th><th>Next Action</th><th>Status</th><th></th>' +
           '</tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
         '</table>';
@@ -172,8 +277,8 @@
       if (e.key === "Enter") reload();
     });
     document.getElementById("limit-filter").addEventListener("change", reload);
-
     reload();
   </script>
+  <script src="/static/js/netguard-ui.js" defer></script>
 </body>
 </html>

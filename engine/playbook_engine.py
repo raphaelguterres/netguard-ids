@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import threading
 import time  # noqa: F401
@@ -383,6 +384,20 @@ _pb_lock = threading.Lock()
 def get_playbook_engine(db_path: str) -> PlaybookEngine:
     global _pb_instance
     with _pb_lock:
-        if _pb_instance is None:
+        # Reinicializa o singleton se ainda nao existir, se o db_path mudou,
+        # ou se o arquivo de DB cacheado nao existe mais (tmpdir deletado entre testes).
+        needs_new = (
+            _pb_instance is None
+            or getattr(_pb_instance, "db_path", None) != db_path
+            or not os.path.exists(db_path)
+        )
+        if needs_new:
             _pb_instance = PlaybookEngine(db_path)
     return _pb_instance
+
+
+def reset_playbook_engine_singleton() -> None:
+    """Util para testes: forca proxima chamada a recriar o singleton."""
+    global _pb_instance
+    with _pb_lock:
+        _pb_instance = None

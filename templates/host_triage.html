@@ -3,16 +3,28 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NetGuard — Host Triage</title>
+  <title>NetGuard &mdash; Host Triage</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <script src="/static/js/theme-toggle.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg:     #0d1117; --s1: #161b22; --s2: #21262d; --s3: #2d333b;
-      --border: #30363d; --txt: #e6edf3; --txt2: #8b949e; --txt3: #6e7681;
-      --blue:   #58a6ff; --blue2: #1f6feb; --green: #3fb950; --green2: #238636;
-      --orange: #f0883e; --red: #f85149; --purple: #bc8cff; --yellow: #e3b341;
+      --bg:     #050810; --s1: #0a0f1c; --s2: #121a2c; --s3: #1a2440;
+      --border: #1f2c47; --txt: #eaf0fb; --txt2: #9aa6bd; --txt3: #5d6982;
+      --blue:   #7eb8ff; --blue2: #1f6feb; --green: #5fd3a6; --green2: #238636;
+      --orange: #f0b44b; --red: #ff6a7a; --purple: #c8a85a; --yellow: #f4e3b0;
+      --accent: #c8a85a; --accent2: #e8d091;
     }
-    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--txt); min-height: 100vh; }
+    body {
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg); color: var(--txt); min-height: 100vh;
+      background-image:
+        linear-gradient(rgba(120,150,200,0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(120,150,200,0.035) 1px, transparent 1px);
+      background-size: 56px 56px;
+    }
     a { color: var(--blue); text-decoration: none; }
     a:hover { text-decoration: underline; }
 
@@ -83,7 +95,87 @@
     .sev-MEDIUM   { background: rgba(227,179,65,.15); color: var(--yellow); border: 1px solid rgba(227,179,65,.4); }
     .sev-LOW      { background: rgba(88,166,255,.12); color: var(--blue);   border: 1px solid rgba(88,166,255,.4); }
     .event-source { color: var(--txt3); font-family: 'Monaco', monospace; font-size: .78rem; }
+    .triage-actions { display:flex; flex-wrap:wrap; gap:.6rem; margin:-.4rem 0 1.5rem; }
+    .triage-actions button { background:var(--s2); border:1px solid var(--border); color:var(--txt); padding:.48rem .85rem; border-radius:8px; cursor:not-allowed; opacity:.62; }
+    .side-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1rem; margin-top:1.5rem; }
+    .side-list { display:flex; flex-wrap:wrap; gap:.45rem; }
+    .side-token { background:var(--s2); border:1px solid var(--border); border-radius:999px; color:var(--txt2); font-size:.75rem; padding:.22rem .55rem; }
+    @media (max-width: 1050px) { .side-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media (max-width: 650px) { .side-grid { grid-template-columns:1fr; } }
+
+    /* ── LIGHT THEME (Apple Pro day) ─────────────────────────── */
+    body.theme-light {
+      --bg:#f5f5f7; --s1:#ffffff; --s2:#fafafa; --s3:#f0f0f2;
+      --border:rgba(0,0,0,0.08);
+      --txt:#1d1d1f; --txt2:rgba(60,60,67,0.62); --txt3:rgba(60,60,67,0.40);
+      --blue:#0066cc; --green:#248a3d; --red:#d70015;
+      --orange:#c93400; --yellow:#9d8000; --purple:#9d44d8;
+      --accent:#b8983f; --accent2:#c8a85a;
+      background-image: linear-gradient(rgba(0,0,0,0.025) 1px, transparent 1px),
+                         linear-gradient(90deg, rgba(0,0,0,0.025) 1px, transparent 1px) !important;
+      background-size: 56px 56px !important;
+    }
+    body.theme-light header { background: rgba(255,255,255,0.94) !important; border-bottom-color: rgba(0,0,0,0.08) !important; }
+    body.theme-light .logo, body.theme-light h1, body.theme-light h2, body.theme-light h3,
+    body.theme-light .stat-value, body.theme-light .kpi-value { color:#1d1d1f !important; }
+    body.theme-light .badge-admin { background:rgba(184,152,63,.10) !important; border-color:rgba(184,152,63,.32) !important; color:#806320 !important; }
+    body.theme-light .container, body.theme-light main { color:#1d1d1f !important; }
+    body.theme-light table, body.theme-light .panel,
+    body.theme-light .stat-card, body.theme-light .audit-log,
+    body.theme-light .table-wrap, body.theme-light .modal {
+      background:#ffffff !important; border-color:rgba(0,0,0,0.08) !important; color:#1d1d1f !important;
+    }
+    body.theme-light thead, body.theme-light .audit-toolbar {
+      background:#fafafa !important; color:rgba(60,60,67,0.62) !important;
+    }
+    body.theme-light tbody tr { border-bottom:1px solid rgba(0,0,0,0.06) !important; }
+    body.theme-light tbody tr:hover, body.theme-light .audit-row:hover { background:rgba(0,0,0,0.025) !important; }
+    body.theme-light input, body.theme-light select, body.theme-light textarea,
+    body.theme-light .form-input, body.theme-light .audit-search {
+      background:#ffffff !important; border-color:rgba(0,0,0,0.12) !important; color:#1d1d1f !important;
+    }
+    body.theme-light .btn-primary {
+      background:#b8983f !important; color:#ffffff !important; border-color:#b8983f !important;
+    }
+    body.theme-light .btn-ghost, body.theme-light .audit-filter-btn,
+    body.theme-light .toolbar button {
+      background:#ffffff !important; border-color:rgba(0,0,0,0.16) !important; color:#1d1d1f !important;
+    }
+    body.theme-light .subtitle, body.theme-light .muted, body.theme-light .form-label,
+    body.theme-light .stat-label, body.theme-light th, body.theme-light .ph-t {
+      color:rgba(60,60,67,0.62) !important;
+    }
+    body.theme-light .badge-blue { background:rgba(0,102,204,.08) !important; border-color:rgba(0,102,204,.20) !important; color:#0040dd !important; }
+    body.theme-light .badge-green { background:rgba(36,138,61,.08) !important; border-color:rgba(36,138,61,.20) !important; color:#1a6b30 !important; }
+    body.theme-light .badge-red, body.theme-light .btn-danger { background:rgba(214,0,21,.06) !important; border-color:rgba(214,0,21,.18) !important; color:#a30010 !important; }
+    body.theme-light .badge-orange { background:rgba(201,52,0,.08) !important; border-color:rgba(201,52,0,.20) !important; color:#c93400 !important; }
+    body.theme-light .badge-purple { background:rgba(157,68,216,.08) !important; border-color:rgba(157,68,216,.20) !important; color:#7c2da3 !important; }
+    body.theme-light .badge-gray { background:rgba(0,0,0,.05) !important; border-color:rgba(0,0,0,.10) !important; color:#1d1d1f !important; }
+    body.theme-light a { color:#0066cc; }
+    body.theme-light * { scrollbar-color: rgba(0,0,0,0.16) transparent !important; }
+    body.theme-light ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.16) !important; }
+
+    /* theme-toggle button */
+    .theme-toggle {
+      width:32px; height:32px; border-radius:8px;
+      border:1px solid var(--border, rgba(255,255,255,0.10));
+      background:transparent; color:var(--txt2, #9aa6bd);
+      cursor:pointer; display:inline-flex; align-items:center; justify-content:center;
+      padding:0; margin-right:8px;
+      transition:background .2s, border-color .2s, color .2s;
+    }
+    .theme-toggle:hover {
+      border-color:var(--accent, #c8a85a); color:var(--accent, #c8a85a);
+    }
+    body.theme-light .theme-toggle:hover { background:rgba(0,0,0,0.04); }
+    .theme-toggle svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+    .theme-toggle .icon-sun { display:none; }
+    .theme-toggle .icon-moon { display:block; }
+    body.theme-light .theme-toggle .icon-sun { display:block; }
+    body.theme-light .theme-toggle .icon-moon { display:none; }
+
   </style>
+  <link rel="stylesheet" href="/static/css/netguard.css">
 </head>
 <body>
   <header>
@@ -123,6 +215,13 @@
         </div>
       </section>
 
+      <div class="triage-actions" aria-label="Host triage actions">
+        <button type="button" disabled title="Requires an audited host investigation endpoint.">Mark as Investigating</button>
+        <button type="button" disabled title="Use the incident API or SOC incidents queue until host-level creation is wired.">Create Incident</button>
+        <button type="button" disabled title="Suppression requires RBAC, CSRF, and audit trail before enablement.">Suppress Host</button>
+        <button type="button" disabled title="Report export placeholder for the host triage workflow.">Export Report</button>
+      </div>
+
       <!-- Risk + Next Action -->
       <div class="triage-grid">
         <section class="panel">
@@ -150,6 +249,25 @@
       <section class="panel">
         <h2>Timeline (últimas 24h, top 50 eventos)</h2>
         <div id="timeline"></div>
+      </section>
+
+      <section class="side-grid" aria-label="Host triage context">
+        <article class="panel">
+          <h2>MITRE tactics</h2>
+          <div id="side-mitre" class="side-list"></div>
+        </article>
+        <article class="panel">
+          <h2>Related IPs</h2>
+          <div id="side-ips" class="side-list"></div>
+        </article>
+        <article class="panel">
+          <h2>Suspicious processes</h2>
+          <div id="side-processes" class="side-list"></div>
+        </article>
+        <article class="panel">
+          <h2>Agent status</h2>
+          <div id="side-agent" class="side-list"></div>
+        </article>
       </section>
 
     </div>
@@ -275,8 +393,22 @@
             "</div>"
           )).join("");
         }
+
+        function renderTokens(id, values, emptyText) {
+          const target = document.getElementById(id);
+          const unique = Array.from(new Set(values.filter(Boolean).map(String))).slice(0, 10);
+          target.innerHTML = unique.length
+            ? unique.map(v => '<span class="side-token">' + esc(v) + '</span>').join("")
+            : '<span class="muted">' + esc(emptyText) + '</span>';
+        }
+
+        renderTokens("side-mitre", tl.map(e => e.mitre_tactic || e.tactic || e.rule_name), "No MITRE mapping yet");
+        renderTokens("side-ips", [host.last_ip].concat(tl.map(e => e.source_ip)).concat(tl.map(e => e.network_dst_ip)), "No related IPs");
+        renderTokens("side-processes", tl.map(e => e.process_name), "No process signal");
+        renderTokens("side-agent", [host.status || "enrolled", host.platform || "", host.agent_version || ""], "No agent details");
       }
     })();
   </script>
+  <script src="/static/js/netguard-ui.js" defer></script>
 </body>
 </html>

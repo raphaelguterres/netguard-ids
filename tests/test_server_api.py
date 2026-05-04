@@ -411,6 +411,12 @@ def test_ingestion_empty_batch_still_updates_host_last_seen(tmp_path):
         "host_id": "idle-host",
         "hostname": "WIN-IDLE",
         "agent_version": "1.0.0",
+        "metadata": {
+            "local_ip": "192.168.15.20",
+            "mac_address": "aa:bb:cc:dd:ee:ff",
+            "default_gateway": "192.168.15.1",
+        },
+        "tags": ["lab", "windows"],
         "events": [],
     })
     host = repo.get_host("idle-host")
@@ -418,6 +424,9 @@ def test_ingestion_empty_batch_still_updates_host_last_seen(tmp_path):
     assert host is not None
     assert host.hostname == "WIN-IDLE"
     assert host.last_seen
+    assert host.tags == ["lab", "windows"]
+    assert host.metadata["local_ip"] == "192.168.15.20"
+    assert host.metadata["default_gateway"] == "192.168.15.1"
 
 
 # ── Flask end-to-end ─────────────────────────────────────────────────

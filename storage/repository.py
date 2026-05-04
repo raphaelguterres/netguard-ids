@@ -38,6 +38,7 @@ class Host:
     risk_score: int = 0
     risk_level: str = "LOW"
     tags: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -50,6 +51,7 @@ class Host:
             "risk_score": self.risk_score,
             "risk_level": self.risk_level,
             "tags": list(self.tags),
+            "metadata": dict(self.metadata),
         }
 
 

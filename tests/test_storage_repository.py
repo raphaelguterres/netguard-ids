@@ -174,6 +174,7 @@ def test_upsert_and_get_host(repo):
         risk_score=42,
         risk_level="MEDIUM",
         tags=["finance"],
+        metadata={"local_ip": "192.168.1.50", "mac_address": "aa:bb:cc:dd:ee:ff"},
     )
     repo.upsert_host(h)
     fetched = repo.get_host("hX")
@@ -181,6 +182,8 @@ def test_upsert_and_get_host(repo):
     assert fetched.hostname == "WIN-A"
     assert fetched.risk_score == 42
     assert fetched.tags == ["finance"]
+    assert fetched.metadata["local_ip"] == "192.168.1.50"
+    assert fetched.metadata["mac_address"] == "aa:bb:cc:dd:ee:ff"
 
     # Idempotent + updates
     h.hostname = "WIN-A-RENAMED"

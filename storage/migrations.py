@@ -15,6 +15,11 @@ MIGRATIONS = [
         "name": "migration_metadata_checksums",
         "description": "add migration descriptions and deterministic checksums for safer upgrades",
     },
+    {
+        "version": 3,
+        "name": "host_network_metadata",
+        "description": "persist endpoint network identity metadata for SOC host inventory",
+    },
 ]
 
 SCHEMA_VERSION = max(item["version"] for item in MIGRATIONS)

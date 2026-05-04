@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS hosts (
     first_seen     TEXT NOT NULL DEFAULT '',
     risk_score     INTEGER NOT NULL DEFAULT 0,
     risk_level     TEXT NOT NULL DEFAULT 'LOW',
-    tags_json      TEXT NOT NULL DEFAULT '[]'
+    tags_json      TEXT NOT NULL DEFAULT '[]',
+    metadata_json  TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -158,8 +159,20 @@ class SqliteRepository(Repository):
     def init_schema(self) -> None:
         with self._lock, self._conn() as conn:
             conn.executescript(_SCHEMA)
+            self._ensure_host_metadata_column(conn)
             self._record_schema_migrations(conn)
         self._initialized = True
+
+    def _ensure_host_metadata_column(self, conn) -> None:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(hosts)").fetchall()
+        }
+        if "metadata_json" not in columns:
+            conn.execute(
+                "ALTER TABLE hosts "
+                "ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'"
+            )
 
     def _record_schema_migrations(self, conn) -> None:
         self._ensure_schema_migration_columns(conn)
@@ -287,14 +300,15 @@ class SqliteRepository(Repository):
                 """
                 INSERT INTO hosts (host_id, hostname, platform, agent_version,
                                    last_seen, first_seen, risk_score, risk_level,
-                                   tags_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   tags_json, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(host_id) DO UPDATE SET
                     hostname      = excluded.hostname,
                     platform      = excluded.platform,
                     agent_version = excluded.agent_version,
                     last_seen     = excluded.last_seen,
-                    tags_json     = excluded.tags_json
+                    tags_json     = excluded.tags_json,
+                    metadata_json = excluded.metadata_json
                 """,
                 (
                     host.host_id, host.hostname, host.platform,
@@ -302,6 +316,7 @@ class SqliteRepository(Repository):
                     host.first_seen or host.last_seen,
                     int(host.risk_score), host.risk_level,
                     json.dumps(list(host.tags)),
+                    json.dumps(dict(host.metadata or {}), default=str),
                 ),
             )
 
@@ -518,6 +533,7 @@ def _row_to_host(row: sqlite3.Row) -> Host:
         risk_score=int(row["risk_score"] or 0),
         risk_level=row["risk_level"] or "LOW",
         tags=_safe_load_list(row["tags_json"]),
+        metadata=_safe_load_dict(row["metadata_json"]),
     )
 
 

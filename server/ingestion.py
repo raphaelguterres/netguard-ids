@@ -115,7 +115,7 @@ class IngestionPipeline:
         self.correlate_lookback_s = int(correlate_lookback_s)
 
     def process(self, payload: dict) -> IngestionResult:
-        host_id, hostname, platform_, agent_version, raw_events = self._unpack(payload)
+        host_id, hostname, platform_, agent_version, metadata, tags, raw_events = self._unpack(payload)
 
         # 1. normalise
         events = [self._normalize_event(host_id, e) for e in raw_events]
@@ -158,6 +158,8 @@ class IngestionPipeline:
             first_seen=self._now_iso(),
             risk_score=score,
             risk_level=level,
+            tags=tags,
+            metadata=metadata,
         ))
         self.repo.update_host_risk(host_id, score, level)
 
@@ -173,7 +175,7 @@ class IngestionPipeline:
 
     # ── helpers ──
 
-    def _unpack(self, payload: Any) -> tuple[str, str, str, str, list[dict]]:
+    def _unpack(self, payload: Any) -> tuple[str, str, str, str, dict, list[str], list[dict]]:
         if not isinstance(payload, dict):
             raise ValidationError("payload must be a JSON object")
 
@@ -198,9 +200,16 @@ class IngestionPipeline:
             or (payload.get("metadata") or {}).get("hostname")
             or ""
         )
-        platform_ = payload.get("platform") or (payload.get("metadata") or {}).get("platform_version") or ""
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        platform_ = payload.get("platform") or metadata.get("platform_version") or ""
         agent_version = payload.get("agent_version") or ""
-        return host_id, str(hostname), str(platform_), str(agent_version), events
+        raw_tags = payload.get("tags") or metadata.get("tags") or []
+        tags = [
+            str(tag).strip()[:64]
+            for tag in raw_tags
+            if str(tag).strip()
+        ] if isinstance(raw_tags, list) else []
+        return host_id, str(hostname), str(platform_), str(agent_version), dict(metadata), tags, events
 
     def _normalize_event(self, host_id: str, raw: Any) -> Event:
         if not isinstance(raw, dict):

@@ -7,30 +7,48 @@
       </svg>
     </span>
     <div class="soc-brand-title">NetGuard SOC</div>
-    <div class="soc-brand-subtitle">Endpoint Visibility Console</div>
+    <div class="soc-brand-subtitle">Risk-based operations</div>
   </div>
 
   <nav class="soc-nav" aria-label="Primary">
-    <div class="soc-nav-label">Command</div>
+    <div class="soc-nav-label">Monitoring</div>
     <a class="soc-nav-link {% if active_page == 'overview' %}is-active{% endif %}" href="/soc" {% if active_page == 'overview' %}aria-current="page"{% endif %}>
-      <svg class="soc-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 13h7V4H4v9Zm9 7h7V4h-7v16ZM4 20h7v-5H4v5Z"></path></svg>
       <span>Overview</span>
     </a>
-    <a class="soc-nav-link {% if active_page == 'hosts' %}is-active{% endif %}" href="/soc/hosts" {% if active_page == 'hosts' %}aria-current="page"{% endif %}>
-      <svg class="soc-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>
-      <span>Hosts</span>
+    <a class="soc-nav-link {% if active_page == 'agents' %}is-active{% endif %}" href="/soc/hosts" {% if active_page == 'agents' %}aria-current="page"{% endif %}>
+      <span>Agents</span>
     </a>
-    <a class="soc-nav-link {% if active_page == 'alerts' %}is-active{% endif %}" href="/soc/alerts" {% if active_page == 'alerts' %}aria-current="page"{% endif %}>
-      <svg class="soc-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10.3 3.5 2.7 16.5a1 1 0 0 0 .86 1.5h16.88a1 1 0 0 0 .86-1.5L13.7 3.5a1 1 0 0 0-1.72 0Z"></path><path d="M12 9v4M12 17h.01"></path></svg>
-      <span>Alerts</span>
+
+    <div class="soc-nav-label">Investigation</div>
+    <a class="soc-nav-link" href="/admin/inbox">
+      <span>Operator Inbox</span>
+    </a>
+    <a class="soc-nav-link {% if active_page == 'hosts' %}is-active{% endif %}" href="/soc/hosts" {% if active_page == 'hosts' %}aria-current="page"{% endif %}>
+      <span>Host Triage</span>
     </a>
     <a class="soc-nav-link {% if active_page == 'incidents' %}is-active{% endif %}" href="/soc/incidents" {% if active_page == 'incidents' %}aria-current="page"{% endif %}>
-      <svg class="soc-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 4h12a2 2 0 0 1 2 2v12l-4-2-4 2-4-2-4 2V6a2 2 0 0 1 2-2Z"></path><path d="M8 9h8M8 13h6"></path></svg>
       <span>Incidents</span>
     </a>
-    <span class="soc-nav-link is-disabled" aria-disabled="true" title="Host timeline is available inside each host detail view.">
-      <svg class="soc-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l3 2"></path></svg>
-      <span>Timeline (per host)</span>
-    </span>
+
+    <div class="soc-nav-label">Management</div>
+    <a class="soc-nav-link" href="/admin">
+      <span>Tenants</span>
+    </a>
+    <a class="soc-nav-link {% if active_page == 'rules' %}is-active{% endif %}" href="/soc/grid" {% if active_page == 'rules' %}aria-current="page"{% endif %}>
+      <span>Rules</span>
+    </a>
+
+    <div class="soc-nav-label">System</div>
+    <a class="soc-nav-link" href="/admin">
+      <span>Settings</span>
+    </a>
   </nav>
+
+  <div class="soc-sidebar-status">
+    <span class="soc-pill-dot" aria-hidden="true"></span>
+    <div>
+      <strong>{{ system_status|default("System healthy") }}</strong>
+      <span>{{ environment_name|default("local") }} · {{ tenant_name|default("default") }}</span>
+    </div>
+  </div>
 </aside>

@@ -3,153 +3,131 @@
 {% set data = overview if overview is defined else {} %}
 {% set recent_detections = data.recent_detections if data.recent_detections is defined else [] %}
 {% set host_risks = data.host_risks if data.host_risks is defined else [] %}
+{% set recommendation = recommendation if recommendation is defined else data.recommendation|default({}) %}
 
 {% block title %}NetGuard SOC | Overview{% endblock %}
 
 {% block page %}
-<header class="soc-page-header">
+<header class="soc-page-header soc-page-header-airy">
   <div>
+    <div class="soc-breadcrumbs">
+      <span>Overview</span>
+      <span>/</span>
+      <span>Guided SOC Flow</span>
+    </div>
     <h1 class="soc-page-title">Security Overview</h1>
-    <p class="soc-page-copy">High-signal posture view for rapid triage, host risk prioritization, and operational confidence.</p>
+    <p class="soc-page-copy">A calm, risk-first command surface that answers what matters, why it matters, and where the analyst should go next.</p>
   </div>
 </header>
 
-<section class="soc-kpi-grid">
-  <article class="soc-card soc-stat-card">
-    <div class="soc-stat-label">Monitored Hosts</div>
-    <div class="soc-stat-value">{{ data.monitored_hosts|default(128) }}</div>
-    <div class="soc-stat-foot">Online endpoints under active visibility.</div>
-  </article>
-  <article class="soc-card soc-stat-card">
-    <div class="soc-stat-label">Active Alerts</div>
-    <div class="soc-stat-value">{{ data.active_alerts|default(17) }}</div>
-    <div class="soc-stat-foot">Open detections requiring review.</div>
-  </article>
-  <article class="soc-card soc-stat-card">
-    <div class="soc-stat-label">Critical</div>
-    <div class="soc-stat-value">{{ data.critical_alerts|default(3) }}</div>
-    <div class="soc-stat-foot">Immediate analyst attention.</div>
-  </article>
-  <article class="soc-card soc-stat-card">
-    <div class="soc-stat-label">Average Risk</div>
-    <div class="soc-stat-value">{{ data.average_risk|default(42) }}</div>
-    <div class="soc-stat-foot">Cross-host risk trend.</div>
-  </article>
-  <article class="soc-card soc-stat-card">
-    <div class="soc-stat-label">Active Agents</div>
-    <div class="soc-stat-value">{{ data.online_agents|default(0) }}</div>
-    <div class="soc-stat-foot">{{ data.offline_agents|default(0) }} offline, {{ data.registered_agents|default(0) }} registered in inventory.</div>
-  </article>
+<section class="soc-kpi-grid soc-kpi-grid-compact" aria-label="SOC posture summary">
   <article class="soc-card soc-stat-card">
     <div class="soc-stat-label">Open Incidents</div>
     <div class="soc-stat-value">{{ data.open_incidents|default(0) }}</div>
-    <div class="soc-stat-foot">{{ data.in_progress_incidents|default(0) }} currently in progress for analyst handling.</div>
+    <div class="soc-stat-foot">{{ data.in_progress_incidents|default(0) }} in progress.</div>
+  </article>
+  <article class="soc-card soc-stat-card">
+    <div class="soc-stat-label">Critical Hosts</div>
+    <div class="soc-stat-value">{{ data.critical_hosts|default(data.critical_alerts|default(0)) }}</div>
+    <div class="soc-stat-foot">Hosts above the investigation threshold.</div>
+  </article>
+  <article class="soc-card soc-stat-card">
+    <div class="soc-stat-label">Events 24h</div>
+    <div class="soc-stat-value">{{ data.events_24h|default(data.active_alerts|default(0)) }}</div>
+    <div class="soc-stat-foot">Endpoint and XDR telemetry received.</div>
+  </article>
+  <article class="soc-card soc-stat-card">
+    <div class="soc-stat-label">Agent Health</div>
+    <div class="soc-stat-value soc-stat-value-sm">{{ data.online_agents|default(0) }}/{{ data.registered_agents|default(0) }}</div>
+    <div class="soc-stat-foot">Last heartbeat {{ data.last_agent_heartbeat|default("unknown") }}.</div>
   </article>
 </section>
 
-<section class="soc-grid-2">
+<section class="soc-guided-action priority-{{ recommendation.priority|default('info') }}" aria-label="Recommended next action">
+  <div>
+    <div class="soc-stat-label">Recommended Next Action</div>
+    <h2>{{ recommendation.label|default("Review overview") }}</h2>
+    <p>{{ recommendation.reason|default("No critical activity detected. Continue monitoring posture and recent telemetry.") }}</p>
+    <div class="soc-flow-steps" aria-label="SOC workflow">
+      <span class="is-active">Overview</span>
+      <span>Operator Inbox</span>
+      <span>Host Triage</span>
+      <span>Incident</span>
+      <span>Resolution</span>
+    </div>
+  </div>
+  <a class="soc-action-button soc-action-button-primary" href="{{ recommendation.route|default('/soc') }}">
+    {{ recommendation.label|default("Continue") }}
+  </a>
+</section>
+
+<section class="soc-grid-2 soc-grid-balanced">
   <article class="soc-panel">
     <div class="soc-panel-header">
-      <h2 class="soc-panel-title">Severity Distribution</h2>
+      <div>
+        <h2 class="soc-panel-title">Top Risk Hosts</h2>
+        <div class="soc-list-copy">Highest-impact hosts first, ready for triage.</div>
+      </div>
+      <a class="soc-inline-link" href="/soc/hosts">View agents</a>
     </div>
-    <div class="soc-list">
-      <div class="soc-list-item">
-        <div class="soc-list-top"><span class="soc-list-title">Critical</span><span class="soc-severity-chip critical">Critical</span></div>
-        <div class="soc-list-copy">{{ data.severity_critical|default(3) }} alerts across priority hosts.</div>
-      </div>
-      <div class="soc-list-item">
-        <div class="soc-list-top"><span class="soc-list-title">High</span><span class="soc-severity-chip high">High</span></div>
-        <div class="soc-list-copy">{{ data.severity_high|default(8) }} detections requiring active investigation.</div>
-      </div>
-      <div class="soc-list-item">
-        <div class="soc-list-top"><span class="soc-list-title">Medium</span><span class="soc-severity-chip medium">Medium</span></div>
-        <div class="soc-list-copy">{{ data.severity_medium|default(19) }} behavioral anomalies under review.</div>
-      </div>
-      <div class="soc-list-item">
-        <div class="soc-list-top"><span class="soc-list-title">Low</span><span class="soc-severity-chip low">Low</span></div>
-        <div class="soc-list-copy">{{ data.severity_low|default(31) }} low-priority telemetry for trend monitoring.</div>
-      </div>
+    <div class="soc-list soc-compact-list">
+      {% if host_risks %}
+        {% for host in host_risks[:5] %}
+        <a class="soc-list-item soc-list-link" href="/soc/hosts/{{ host.host_name }}">
+          <div>
+            <div class="soc-list-top">
+              <span class="soc-list-title">{{ host.host_name }}</span>
+              <span class="soc-severity-chip {{ host.risk_level }}">{{ host.risk_score }}</span>
+            </div>
+            <div class="soc-meta-inline">
+              <span>{{ host.status|title }}</span>
+              <span>Last seen {{ host.last_seen }}</span>
+              <span>{{ host.active_alerts }} active signals</span>
+            </div>
+          </div>
+          <span class="soc-inline-link">Investigate</span>
+        </a>
+        {% endfor %}
+      {% else %}
+        <div class="soc-empty-state soc-empty-state-premium">
+          <h3>No critical activity detected</h3>
+          <p>Risk-ranked hosts will appear here as endpoint telemetry arrives.</p>
+          <a class="soc-action-button" href="/soc/hosts">Connect an agent</a>
+        </div>
+      {% endif %}
     </div>
   </article>
 
   <article class="soc-panel">
     <div class="soc-panel-header">
-      <h2 class="soc-panel-title">Recent Detections</h2>
+      <div>
+        <h2 class="soc-panel-title">Recent Activity</h2>
+        <div class="soc-list-copy">A short timeline of analyst-relevant signals.</div>
+      </div>
+      <a class="soc-inline-link" href="/admin/inbox">Open inbox</a>
     </div>
-    <div class="soc-list">
+    <div class="soc-list soc-compact-list">
       {% if recent_detections %}
-        {% for alert in recent_detections %}
+        {% for alert in recent_detections[:5] %}
         <div class="soc-list-item">
           <div class="soc-list-top">
             <span class="soc-list-title">{{ alert.title }}</span>
             <span class="soc-severity-chip {{ alert.severity }}">{{ alert.severity|capitalize }}</span>
           </div>
           <div class="soc-meta-inline">
-            <span>Host: <a class="soc-inline-link" href="/soc/hosts/{{ alert.host }}">{{ alert.host }}</a></span>
+            <span>Host <a class="soc-inline-link" href="/soc/hosts/{{ alert.host }}">{{ alert.host }}</a></span>
             <span>{{ alert.timestamp }}</span>
           </div>
           <div class="soc-list-copy">{{ alert.description }}</div>
         </div>
         {% endfor %}
       {% else %}
-        <div class="soc-empty-state">Ainda nao ha deteccoes XDR recentes para este tenant.</div>
+        <div class="soc-empty-state soc-empty-state-premium">
+          <h3>Waiting for endpoint telemetry</h3>
+          <p>Connect an agent or send XDR events to build the recent activity timeline.</p>
+          <a class="soc-action-button" href="/soc/hosts">Refresh health</a>
+        </div>
       {% endif %}
-    </div>
-  </article>
-</section>
-
-<section class="soc-grid-2">
-  <article class="soc-panel">
-    <div class="soc-panel-header">
-      <h2 class="soc-panel-title">Host Risk Summary</h2>
-    </div>
-    <div class="soc-table-wrap">
-      <table class="soc-table">
-        <thead>
-          <tr>
-            <th>Host</th>
-            <th>Risk</th>
-            <th>Last Seen</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% if host_risks %}
-            {% for host in host_risks %}
-            <tr>
-              <td><a class="soc-inline-link" href="/soc/hosts/{{ host.host_name }}">{{ host.host_name }}</a></td>
-              <td><span class="soc-severity-chip {{ host.risk_level }}">{{ host.risk_score }}</span></td>
-              <td>{{ host.last_seen }}</td>
-              <td class="soc-status-{{ host.status }}">{{ host.status|title }}</td>
-            </tr>
-            {% endfor %}
-          {% else %}
-            <tr>
-              <td colspan="4"><div class="soc-empty-state">Nenhum host com risco XDR calculado ainda.</div></td>
-            </tr>
-          {% endif %}
-        </tbody>
-      </table>
-    </div>
-  </article>
-
-  <article class="soc-panel">
-    <div class="soc-panel-header">
-      <h2 class="soc-panel-title">System Health</h2>
-    </div>
-    <div class="soc-list">
-      <div class="soc-list-item">
-        <div class="soc-list-top"><span class="soc-list-title">API Ingestion</span><span class="soc-pill"><span class="soc-pill-dot"></span>Healthy</span></div>
-        <div class="soc-list-copy">Structured event ingestion latency remains inside acceptable bounds.</div>
-      </div>
-      <div class="soc-list-item">
-        <div class="soc-list-top"><span class="soc-list-title">Detection Engine</span><span class="soc-pill"><span class="soc-pill-dot"></span>Running</span></div>
-        <div class="soc-list-copy">Behavior rules, correlation, and response planning active.</div>
-      </div>
-      <div class="soc-list-item">
-        <div class="soc-list-top"><span class="soc-list-title">Agent Coverage</span><span class="soc-pill"><span class="soc-pill-dot"></span>{{ data.registered_agents|default(0) }} enrolled</span></div>
-        <div class="soc-list-copy">{{ data.online_agents|default(0) }} sensors are online and sending telemetry for this tenant.</div>
-      </div>
     </div>
   </article>
 </section>

@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS hosts (
     first_seen     TIMESTAMPTZ,
     risk_score     INTEGER NOT NULL DEFAULT 0,
     risk_level     TEXT NOT NULL DEFAULT 'LOW',
-    tags           JSONB NOT NULL DEFAULT '[]'::jsonb
+    tags           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    metadata       JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -131,6 +132,10 @@ class PostgresRepository(Repository):
         with self._conn_ctx() as conn:
             with conn.cursor() as cur:
                 cur.execute(_SCHEMA_PG)
+                cur.execute(
+                    "ALTER TABLE hosts "
+                    "ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb"
+                )
                 self._record_schema_migrations(cur)
 
     def _record_schema_migrations(self, cur) -> None:
@@ -247,19 +252,21 @@ class PostgresRepository(Repository):
     def upsert_host(self, host: Host) -> None:
         sql = """
             INSERT INTO hosts (host_id, hostname, platform, agent_version,
-                               last_seen, first_seen, risk_score, risk_level, tags)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                               last_seen, first_seen, risk_score, risk_level, tags, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)
             ON CONFLICT (host_id) DO UPDATE SET
                 hostname      = EXCLUDED.hostname,
                 platform      = EXCLUDED.platform,
                 agent_version = EXCLUDED.agent_version,
                 last_seen     = EXCLUDED.last_seen,
-                tags          = EXCLUDED.tags
+                tags          = EXCLUDED.tags,
+                metadata      = EXCLUDED.metadata
         """
         params = (
             host.host_id, host.hostname, host.platform, host.agent_version,
             host.last_seen or None, host.first_seen or host.last_seen or None,
             int(host.risk_score), host.risk_level, json.dumps(host.tags),
+            json.dumps(dict(host.metadata or {}), default=str),
         )
         with self._conn_ctx() as conn, conn.cursor() as cur:
             cur.execute(sql, params)
@@ -462,6 +469,12 @@ def _row_to_host(row: dict) -> Host:
             tags = json.loads(tags)
         except json.JSONDecodeError:
             tags = []
+    metadata = row.get("metadata") or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
     return Host(
         host_id=row["host_id"],
         hostname=row.get("hostname") or "",
@@ -472,6 +485,7 @@ def _row_to_host(row: dict) -> Host:
         risk_score=int(row.get("risk_score") or 0),
         risk_level=row.get("risk_level") or "LOW",
         tags=list(tags) if isinstance(tags, list) else [],
+        metadata=dict(metadata) if isinstance(metadata, dict) else {},
     )
 
 

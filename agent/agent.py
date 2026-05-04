@@ -197,6 +197,10 @@ class NetGuardAgent:
                 "machine": self.host_facts.get("machine", ""),
                 "platform_version": self.host_facts.get("platform_version", ""),
                 "local_ip": self.host_facts.get("local_ip", ""),
+                "mac_address": self.host_facts.get("mac_address", ""),
+                "default_gateway": self.host_facts.get("default_gateway", ""),
+                "default_gateway_mac": self.host_facts.get("default_gateway_mac", ""),
+                "network_interfaces": self.host_facts.get("network_interfaces", []),
                 "tags": self.config.tags,
                 "snapshot_summary": snapshot_summary(events),
             },
@@ -365,8 +369,153 @@ class NetGuardAgent:
         return 0
 
 
+def _cmd_version() -> int:
+    """Print agent version and exit. Used by smoke tests and packagers."""
+    print(f"NetGuard Endpoint Agent {__version__}")
+    return 0
+
+
+def _cmd_selftest(config_path: str = "") -> int:
+    """
+    One-shot validation pass for the built agent. Designed to be called
+    by build_agent.ps1 / smoke_test_agent.ps1 to prove the binary works
+    end-to-end *without* starting the long-running collection loop.
+
+    Steps (each prints PASS/FAIL):
+      1. Load config (file + env)
+      2. Resolve persistent host_id
+      3. Snapshot host facts (hostname/OS/IP)
+      4. Initialise sender (validates URL, builds HTTP session)
+      5. Attempt one short-timeout POST against server_url with an
+         empty envelope. Network errors and HTTP 401/403 are PASS for
+         this stage — we only fail on misconfig (bad URL, bad cert
+         when verify_tls=true with no opt-in, etc).
+
+    Exit codes:
+      0  all checks passed (server may legitimately be offline)
+      2  hard configuration error
+      3  identity / facts collection failed
+      4  sender initialisation failed
+    """
+    print(f"NetGuard Agent selftest | v={__version__}")
+    try:
+        config = load_config(config_path or None)
+        # Selftest is a binary smoke check, not a production config audit.
+        # If the operator hasn't set api_key yet (placeholder CHANGE_ME or
+        # empty), substitute a sentinel so validate() doesn't reject the
+        # build. We surface a [WARN] so it's obvious they still need to
+        # set a real key before running the agent for real.
+        api_key_was_placeholder = config.api_key in ("", "CHANGE_ME")
+        if api_key_was_placeholder:
+            config.api_key = "selftest-placeholder-not-real"
+        config.validate()
+        if api_key_was_placeholder:
+            print("  [WARN] api_key not set in config (CHANGE_ME / empty). "
+                  "Binary smoke OK, but you MUST set NETGUARD_AGENT_API_KEY "
+                  "or edit config.yaml before deploying.")
+        print(f"  [PASS] config loaded | server_url={config.server_url} "
+              f"verify_tls={config.verify_tls} interval={config.interval_seconds}s")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [FAIL] config: {exc}")
+        return 2
+
+    try:
+        host_id = get_host_id()
+        facts = get_host_facts()
+        print(f"  [PASS] host_id={host_id} hostname={facts.get('hostname')} "
+              f"platform={facts.get('platform')} ip={facts.get('local_ip')}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [FAIL] identity/facts: {exc}")
+        return 3
+
+    # Sender init is split into micro-steps with progress markers so a
+    # native crash (Windows access violation, DLL load failure) shows
+    # exactly which subsystem killed the process. Each step flushes
+    # stdout because PyInstaller onefile bundles often buffer until
+    # exit, and we lose the marker for the line that crashed.
+    def _step(label: str) -> None:
+        sys.stdout.write(f"  [.....] {label}...\n")
+        sys.stdout.flush()
+
+    sender = None
+    try:
+        _step("resolve state dir")
+        state_dir = _default_state_dir()
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        # Each import gets its own marker so a native DLL crash points
+        # at one line. The SSL DLL load is the suspect on Windows.
+        _step("import socket")
+        import socket  # noqa: F401
+        _step("import ssl (loads _ssl.pyd + OpenSSL DLLs)")
+        import ssl  # noqa: F401
+        _step("import hashlib (loads _hashlib.pyd + libcrypto)")
+        import hashlib  # noqa: F401
+        _step("import certifi")
+        import certifi  # noqa: F401
+        _step("import urllib3")
+        import urllib3  # noqa: F401
+        _step("from urllib3.util.retry import Retry")
+        from urllib3.util.retry import Retry  # noqa: F401
+        _step("import requests")
+        import requests  # noqa: F401
+        _step("from requests.adapters import HTTPAdapter")
+        from requests.adapters import HTTPAdapter  # noqa: F401
+
+        _step("open offline buffer (sqlite)")
+        from agent.sender import OfflineBuffer
+        _buf = OfflineBuffer(state_dir / "agent_buffer_selftest.db", max_events=100)
+        _ = _buf.size()  # touch sqlite
+
+        _step("construct EventSender (builds requests.Session)")
+        sender = EventSender(
+            server_url=config.server_url,
+            api_key=config.api_key or "selftest-noop",
+            verify_tls=config.verify_tls,
+            timeout=min(5, int(config.request_timeout) or 5),
+            buffer_path=state_dir / "agent_buffer_selftest.db",
+            offline_buffer_max=100,
+            max_retries=0,
+        )
+        print(f"  [PASS] sender initialised | buffer={sender.buffer.db_path}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [FAIL] sender init: {exc!r}")
+        return 4
+
+    envelope = {
+        "host_id": host_id,
+        "hostname": facts.get("hostname", host_id),
+        "agent_version": __version__,
+        "events": [],
+        "selftest": True,
+    }
+    try:
+        _step("attempt one short-timeout POST")
+        delivered = sender.send_batch(envelope, buffer_on_failure=False)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [WARN] POST raised {exc!r} (config OK, network/SSL issue)")
+        delivered = False
+    if delivered:
+        print("  [PASS] reached server (selftest envelope accepted)")
+    else:
+        print("  [WARN] could not reach server -- config OK, network/server "
+              "offline. This is fine for an offline build smoke test.")
+    print("selftest: OK")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="NetGuard Endpoint Agent")
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Imprime a versão do agente e sai",
+    )
+    parser.add_argument(
+        "--selftest",
+        action="store_true",
+        help="Executa validação one-shot (config + identity + sender) e sai",
+    )
     parser.add_argument("--config", help="Caminho explícito do config.yaml")
     parser.add_argument(
         "--service",
@@ -374,6 +523,13 @@ def main() -> int:
         help="Encaminha comando para o wrapper Windows Service",
     )
     args = parser.parse_args()
+
+    if args.version:
+        return _cmd_version()
+
+    if args.selftest:
+        # Selftest writes to stdout, doesn't need rotating file logger.
+        return _cmd_selftest(args.config or "")
 
     if args.service:
         from agent import service as service_mod

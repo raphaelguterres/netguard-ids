@@ -101,13 +101,16 @@
           <div class="soc-meta-inline">
             <span>ID {{ incident.incident_id }}</span>
             <span>Host <a class="soc-inline-link" href="/soc/hosts/{{ incident.host_id }}">{{ incident.host_id }}</a></span>
+            <span>Assigned {{ incident.assigned_to|default("unassigned") }}</span>
+            <span>Comments {{ incident.comments_count|default(0) }}</span>
             {% if incident.technique %}<span class="soc-mitre-badge">Technique {{ incident.technique }}</span>{% endif %}
             {% if incident.tactic %}<span class="soc-mitre-badge soc-mitre-badge-muted">{{ incident.tactic|replace("_", " ")|title }}</span>{% endif %}
           </div>
         </div>
         <div class="soc-incident-side">
           <span class="soc-severity-chip {{ incident.risk_level }}">{{ incident.risk_score }}/100</span>
-          <span class="soc-stat-foot">Updated {{ incident.updated_at or incident.opened_at }}</span>
+          <span class="soc-stat-foot">Created {{ incident.opened_at or "unknown" }}</span>
+          <span class="soc-stat-foot">Updated {{ incident.updated_at or incident.opened_at or "unknown" }}</span>
         </div>
       </div>
       <div class="soc-list-copy">{{ incident.description }}</div>
@@ -137,7 +140,12 @@
     {% endfor %}
   {% else %}
     <article class="soc-panel">
-      <div class="soc-empty-state">Nenhum incidente corresponde aos filtros atuais.</div>
+      <div class="soc-empty-state soc-empty-state-premium">
+        <h3>No incidents require action</h3>
+        <p>No incident matches the current filters. Keep monitoring the inbox or open the rules view to review detection coverage.</p>
+        <a class="soc-action-button" href="/admin/inbox">Open operator inbox</a>
+        <a class="soc-action-button" href="/soc/grid">Open rules</a>
+      </div>
     </article>
   {% endif %}
 </section>

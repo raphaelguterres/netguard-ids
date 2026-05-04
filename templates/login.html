@@ -4,7 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NetGuard IDS | Secure operator login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="/static/enterprise.css">
+  <link rel="stylesheet" href="/static/css/netguard.css">
+  <script src="/static/js/theme-toggle.js"></script>
 </head>
 <body class="auth-page">
   <header class="site-header">
@@ -17,6 +22,7 @@
         </span>
       </a>
       <div class="site-actions">
+        <span class="live-badge">Secure</span>
         <a class="ghost-link" href="/pricing">Planos</a>
         <a class="button-secondary" href="/">Voltar</a>
       </div>
@@ -26,11 +32,11 @@
   <main class="section">
     <div class="page-frame auth-shell">
       <section class="panel auth-aside">
-        <span class="eyebrow">AUTH GATE</span>
-        <h1 class="display">Acesso limpo para operacao blindada.</h1>
+        <span class="eyebrow">Auth gate</span>
+        <h1 class="display" style="font-size:clamp(2.2rem,4vw,3.4rem);">Acesso limpo para <span class="gradient">opera&ccedil;&atilde;o blindada</span>.</h1>
         <p class="lead">
-          O login foi redesenhado para transmitir confianca, clareza e postura enterprise.
-          O operador entra rapido, com contexto suficiente e sem ruido visual.
+          O login foi redesenhado para transmitir confian&ccedil;a, clareza e postura enterprise.
+          O operador entra r&aacute;pido, com contexto suficiente e sem ru&iacute;do visual.
         </p>
         <div class="security-list">
           <article class="security-item">
@@ -49,13 +55,43 @@
       </section>
 
       <section class="auth-card">
-        <span class="panel-kicker">OPERATOR LOGIN</span>
+        <span class="panel-kicker">Operator login</span>
         <h2 class="auth-title">Entrar no painel</h2>
-        <p class="auth-subtitle">Use seu token de API para acessar o command center de monitoramento.</p>
+        <p class="auth-subtitle">
+          {% if local_mode and dashboard_auth %}
+            Ambiente local detectado. Entre sem expor token real; o servidor cria uma sessao local restrita ao loopback.
+          {% else %}
+            Use seu token de API para acessar o command center de monitoramento.
+          {% endif %}
+        </p>
 
         <div class="error-msg" id="error-msg">
           Nao conseguimos validar seu acesso. Revise o token e tente novamente.
         </div>
+
+        {% if local_mode and dashboard_auth %}
+        <div class="local-session-card">
+          <div>
+            <span class="panel-kicker">LOCAL MODE</span>
+            <strong>Auth de API desativada</strong>
+            <p>O dashboard ainda exige cookie de sessao. Use o acesso local para testar sem mostrar token no navegador.</p>
+          </div>
+          <button type="button" class="auth-submit local-submit" id="local-login-btn" onclick="startLocalSession()">
+            Entrar em modo local
+          </button>
+        </div>
+        <div class="divider-line"></div>
+        {% elif local_mode %}
+        <div class="local-session-card">
+          <div>
+            <span class="panel-kicker">LOCAL MODE</span>
+            <strong>Dashboard auth desativado</strong>
+            <p>Voce pode abrir o dashboard diretamente neste ambiente local.</p>
+          </div>
+          <a class="auth-submit local-submit" href="/dashboard">Abrir dashboard</a>
+        </div>
+        <div class="divider-line"></div>
+        {% endif %}
 
         <form class="auth-form" id="login-form" onsubmit="doLogin(event)">
           <label>
@@ -96,6 +132,53 @@
       inp.type = inp.type === 'password' ? 'text' : 'password';
     }
 
+    function getCsrfToken() {
+      return document.cookie.split(';')
+        .map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
+    }
+
+    function nextTarget() {
+      return new URLSearchParams(location.search).get('next') || '/dashboard';
+    }
+
+    function startLocalSession() {
+      const btn = document.getElementById('local-login-btn');
+      if (btn) {
+        btn.textContent = 'Abrindo sessao local...';
+        btn.disabled = true;
+      }
+      fetch('/api/auth/local-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+        credentials: 'same-origin',
+        body: JSON.stringify({ next: nextTarget() })
+      })
+      .then(async r => {
+        const data = await r.json().catch(() => ({}));
+        return { ok: r.ok, status: r.status, data };
+      })
+      .then(({ ok, status, data }) => {
+        if (ok && data.valid) {
+          window.location.href = data.redirect_to || nextTarget();
+          return;
+        }
+        showError(status === 403
+          ? 'Sessao local recusada. O acesso automatico so funciona em loopback local.'
+          : 'Nao conseguimos abrir a sessao local. Recarregue a pagina e tente novamente.');
+        if (btn) {
+          btn.textContent = 'Entrar em modo local';
+          btn.disabled = false;
+        }
+      })
+      .catch(() => {
+        showError('Nao conseguimos falar com o servidor local. Confirme se o Flask continua rodando.');
+        if (btn) {
+          btn.textContent = 'Entrar em modo local';
+          btn.disabled = false;
+        }
+      });
+    }
+
     function doLogin(e) {
       e.preventDefault();
       const token = document.getElementById('token-input').value.trim();
@@ -109,15 +192,12 @@
       btn.textContent = 'Validando acesso...';
       btn.disabled = true;
 
-      const csrfToken = document.cookie.split(';')
-        .map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
-
       const body = { token };
       if (totp) body.totp = totp;
 
       fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
         credentials: 'same-origin',
         body: JSON.stringify(body)
       })
@@ -127,8 +207,7 @@
       })
       .then(({ ok, status, data }) => {
         if (ok && data.valid) {
-          const next = new URLSearchParams(location.search).get('next') || '/dashboard';
-          window.location.href = next;
+          window.location.href = nextTarget();
           return;
         }
         // Primeiro login admin sem 2FA — revela campo e explica o que fazer
@@ -214,5 +293,6 @@
       err.classList.add('show');
     }
   </script>
+<script src="/static/js/netguard-ui.js" defer></script>
 </body>
 </html>

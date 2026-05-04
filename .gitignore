@@ -9,6 +9,7 @@ __pycache__/
 
 venv/
 .venv/
+agent/.venv-build/
 
 # ========================
 # Database local
@@ -52,6 +53,7 @@ tenant-isolation-*/
 .tox/
 htmlcov/
 .tmp/
+.tmp_pytest_*/
 .tmp_test_workspace/
 ci_tmp/
 ci_pytest_*/
@@ -106,3 +108,14 @@ storage/__pycache__/
 .commit-csrf-totp.ps1
 .csrf-totp-commit-msg.txt
 pytest-totp-basetemp/
+
+# ========================
+# FUSE / preview / tmp pytest dirs (sandbox sync noise)
+# ========================
+.fuse_hidden*
+_preview_*.html
+.tmp_pytest_*/
+.tmp_pytest_cache_*/
+.tmp_test_workspace/
+ci_pytest_*/
+ci_tmp/
